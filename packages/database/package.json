@@ -1,0 +1,37 @@
+{
+  "name": "@agentpress/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/migrate.ts",
+    "dev": "tsc -p tsconfig.json --watch",
+    "lint": "eslint src test drizzle.config.ts",
+    "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
+    "test:integration": "vitest run test/postgres.integration.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentpress/domain": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@types/pg": "catalog:types",
+    "drizzle-kit": "catalog:"
+  }
+}
