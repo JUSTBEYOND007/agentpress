@@ -11,6 +11,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/editor-patch": "workspace:*",
+    "@tiptap/core": "catalog:",
+    "@tiptap/extension-unique-id": "catalog:",
+    "@tiptap/pm": "catalog:",
+    "@tiptap/react": "catalog:",
+    "@tiptap/starter-kit": "catalog:",
     "@agentpress/domain": "workspace:*",
     "lucide-react": "catalog:",
     "next": "catalog:",

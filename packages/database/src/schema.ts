@@ -103,6 +103,13 @@ export const memoryCandidateStatusEnum = pgEnum('memory_candidate_status', [
   'rejected',
   'superseded',
 ] as const);
+export const editProposalStatusEnum = pgEnum('edit_proposal_status', [
+  'pending',
+  'partially_accepted',
+  'accepted',
+  'rejected',
+  'expired',
+] as const);
 
 export const appUsers = pgTable('app_users', {
   id: uuid('id').primaryKey(),
@@ -656,6 +663,147 @@ export const runDirectives = pgTable(
     check(
       'run_directives_status_check',
       sql`${table.status} in ('pending', 'applied', 'consumed')`,
+    ),
+  ],
+);
+
+export const articles = pgTable(
+  'articles',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    currentRevisionId: uuid('current_revision_id').references(
+      (): AnyPgColumn => articleRevisions.id,
+      { onDelete: 'restrict' },
+    ),
+    version: integer('version').notNull().default(1),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [index('articles_workspace_updated_idx').on(table.workspaceId, table.updatedAt)],
+);
+
+export const articleRevisions = pgTable(
+  'article_revisions',
+  {
+    id: uuid('id').primaryKey(),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'cascade' }),
+    revisionNumber: integer('revision_number').notNull(),
+    schemaVersion: integer('schema_version').notNull(),
+    document: jsonb('document').$type<Readonly<Record<string, unknown>>>().notNull(),
+    documentHash: varchar('document_hash', { length: 80 }).notNull(),
+    source: varchar('source', { length: 32 }).notNull(),
+    createdByUserId: uuid('created_by_user_id').references(() => appUsers.id, {
+      onDelete: 'set null',
+    }),
+    createdAt,
+  },
+  (table) => [
+    unique('article_revisions_article_number_unique').on(table.articleId, table.revisionNumber),
+    unique('article_revisions_article_hash_unique').on(table.articleId, table.documentHash),
+    check('article_revisions_number_check', sql`${table.revisionNumber} > 0`),
+    check('article_revisions_schema_check', sql`${table.schemaVersion} > 0`),
+    check(
+      'article_revisions_source_check',
+      sql`${table.source} in ('manual', 'autosave', 'proposal', 'recovery')`,
+    ),
+  ],
+);
+
+export const articleDrafts = pgTable(
+  'article_drafts',
+  {
+    id: uuid('id').primaryKey(),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'cascade' }),
+    writerLeaseId: varchar('writer_lease_id', { length: 160 }).notNull(),
+    baseRevisionId: uuid('base_revision_id')
+      .notNull()
+      .references(() => articleRevisions.id, { onDelete: 'restrict' }),
+    schemaVersion: integer('schema_version').notNull(),
+    document: jsonb('document').$type<Readonly<Record<string, unknown>>>().notNull(),
+    documentHash: varchar('document_hash', { length: 80 }).notNull(),
+    serverSequence: bigint('server_sequence', { mode: 'number' }).notNull().default(0),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    unique('article_drafts_article_user_unique').on(table.articleId, table.userId),
+    check('article_drafts_schema_check', sql`${table.schemaVersion} > 0`),
+    check('article_drafts_sequence_check', sql`${table.serverSequence} >= 0`),
+  ],
+);
+
+export const autosaveBatches = pgTable(
+  'autosave_batches',
+  {
+    id: uuid('id').primaryKey(),
+    updateId: varchar('update_id', { length: 160 }).notNull().unique(),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'cascade' }),
+    writerLeaseId: varchar('writer_lease_id', { length: 160 }).notNull(),
+    baseRevisionId: uuid('base_revision_id')
+      .notNull()
+      .references(() => articleRevisions.id, { onDelete: 'restrict' }),
+    schemaVersion: integer('schema_version').notNull(),
+    steps: jsonb('steps').$type<readonly unknown[]>().notNull(),
+    resultingDraftSequence: bigint('resulting_draft_sequence', { mode: 'number' }).notNull(),
+    createdAt,
+  },
+  (table) => [index('autosave_batches_article_created_idx').on(table.articleId, table.createdAt)],
+);
+
+export const editProposals = pgTable(
+  'edit_proposals',
+  {
+    id: uuid('id').primaryKey(),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    baseRevisionId: uuid('base_revision_id')
+      .notNull()
+      .references(() => articleRevisions.id, { onDelete: 'restrict' }),
+    operations: jsonb('operations').$type<readonly unknown[]>().notNull(),
+    status: editProposalStatusEnum('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true, precision: 3 }).notNull(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [index('edit_proposals_article_status_idx').on(table.articleId, table.status)],
+);
+
+export const editProposalDecisions = pgTable(
+  'edit_proposal_decisions',
+  {
+    proposalId: uuid('proposal_id')
+      .notNull()
+      .references(() => editProposals.id, { onDelete: 'cascade' }),
+    operationId: varchar('operation_id', { length: 160 }).notNull(),
+    decision: varchar('decision', { length: 16 }).notNull(),
+    decidedByUserId: uuid('decided_by_user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'restrict' }),
+    decidedAt: timestamp('decided_at', { withTimezone: true, precision: 3 }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.proposalId, table.operationId] }),
+    check(
+      'edit_proposal_decisions_decision_check',
+      sql`${table.decision} in ('accepted', 'rejected')`,
     ),
   ],
 );

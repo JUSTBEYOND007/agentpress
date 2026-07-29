@@ -194,6 +194,90 @@ button {
   outline: none;
 }
 
+.article-editor-shell {
+  position: relative;
+}
+
+.article-canvas .tiptap {
+  min-height: inherit;
+  outline: none;
+}
+
+.save-state {
+  position: absolute;
+  top: 18px;
+  right: 24px;
+  color: #898a85;
+  font-size: 12px;
+}
+
+.save-offline {
+  color: #a56625;
+}
+
+.article-diff {
+  display: grid;
+  gap: 8px;
+}
+
+.diff-operation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid #e1e1de;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-before,
+.diff-after {
+  padding: 8px 10px;
+}
+
+.diff-before {
+  background: #fff0ef;
+  color: #8e3731;
+}
+
+.diff-after {
+  background: #edf8ef;
+  color: #27643c;
+}
+
+.diff-before span,
+.diff-after span {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.diff-before p,
+.diff-after p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.diff-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px;
+}
+
+.diff-actions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diff-actions button:hover,
+.diff-actions button.is-selected {
+  background: #e9e9e6;
+}
+
 .article-canvas h1 {
   margin: 0 0 28px;
   color: #202124;

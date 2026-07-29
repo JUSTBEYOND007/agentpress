@@ -39,6 +39,16 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - Changes: reduced lifecycle to three in-process built-in servers; removed stdio, arbitrary remote configuration, OAuth and UI state; adapted guards to TypeBox and AgentPress Tool Registry.
 - Verification: lazy coalesced startup, degraded recovery, deterministic close, schema mismatch, secret redaction and hostile output size.
 
+### Oh My Pi Hashline Anchoring
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`
+- Source: `packages/hashline/src/format.ts`, `packages/hashline/src/snapshots.ts`, `packages/hashline/src/diff-preview.ts`, and corresponding tests
+- Local: `packages/editor-patch/src/hash.ts`, `packages/editor-patch/src/proposal-engine.ts`, `packages/editor-patch/test/`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: replaced code-file line anchors and short xxHash tags with canonical Tiptap block JSON, stable block IDs, and SHA-256; retained snapshot preflight, stale-input rejection, atomic apply, and preview-first behavior.
+- Verification: revision drift, block drift, atomic preflight, partial acceptance, structural inserts, ProseMirror step replay, and red-delete/green-insert diff output.
+
 ## Visual Reference
 
 `docs/references/ui/notion-agent-editor-reference.png` is a user-supplied visual reference. It is

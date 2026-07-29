@@ -1,0 +1,29 @@
+{
+  "name": "@agentpress/editor-patch",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src test",
+    "test": "vitest run --exclude 'dist/**'",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tiptap/core": "catalog:",
+    "@tiptap/extension-unique-id": "catalog:",
+    "@tiptap/pm": "catalog:",
+    "@tiptap/starter-kit": "catalog:"
+  }
+}

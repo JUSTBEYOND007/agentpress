@@ -16,6 +16,7 @@
     "@agentpress/config": "workspace:*",
     "@agentpress/contracts": "workspace:*",
     "@agentpress/database": "workspace:*",
+    "@agentpress/editor-application": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",

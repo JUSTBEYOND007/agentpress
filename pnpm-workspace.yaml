@@ -13,6 +13,7 @@ catalog:
   '@nestjs/platform-fastify': 11.1.28
   '@sinclair/typebox': 0.34.41
   '@tiptap/core': 3.29.2
+  '@tiptap/extension-unique-id': 3.29.2
   '@tiptap/pm': 3.29.2
   '@tiptap/react': 3.29.2
   '@tiptap/starter-kit': 3.29.2
