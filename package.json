@@ -1,0 +1,37 @@
+{
+  "name": "agentpress",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pi Agent driven long-form authoring workspace",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.10.0",
+  "engines": {
+    "node": ">=22.19",
+    "pnpm": ">=10.10.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "dev": "turbo run dev --parallel",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:config": "docker compose config --quiet",
+    "infra:down": "docker compose down",
+    "infra:up": "docker compose up -d",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.10.1",
+    "eslint": "10.8.0",
+    "prettier": "3.8.2",
+    "turbo": "2.10.7",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  }
+}

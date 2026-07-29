@@ -1,0 +1,25 @@
+node_modules/
+.pnpm-store/
+.turbo/
+.playwright-cli/
+.next/
+dist/
+coverage/
+output/playwright/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+
+# Local interview-research corpus; never ship with the product.
+Agent.jsonl
+
+# Local infrastructure state.
+.data/
+infra/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*

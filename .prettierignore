@@ -1,0 +1,7 @@
+.next
+dist
+coverage
+node_modules
+pnpm-lock.yaml
+Agent.jsonl
+apps/web/next-env.d.ts

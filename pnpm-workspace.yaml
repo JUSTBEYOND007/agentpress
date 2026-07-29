@@ -1,0 +1,38 @@
+packages:
+  - apps/*
+  - packages/*
+
+catalog:
+  '@assistant-ui/react': 0.15.1
+  '@confluentinc/kafka-javascript': 1.10.0
+  '@earendil-works/pi-agent-core': 0.82.1
+  '@earendil-works/pi-ai': 0.82.1
+  '@modelcontextprotocol/sdk': 1.30.0
+  '@nestjs/common': 11.1.28
+  '@nestjs/core': 11.1.28
+  '@nestjs/platform-fastify': 11.1.28
+  '@sinclair/typebox': 0.34.41
+  '@tiptap/core': 3.29.2
+  '@tiptap/pm': 3.29.2
+  '@tiptap/react': 3.29.2
+  '@tiptap/starter-kit': 3.29.2
+  drizzle-kit: 0.31.10
+  drizzle-orm: 0.45.2
+  fastify: 5.10.0
+  ioredis: 5.8.2
+  minio: 8.0.6
+  nestjs-pino: 4.5.0
+  next: 16.2.12
+  pg: 8.16.3
+  pino: 10.1.0
+  lucide-react: 1.27.0
+  react: 19.2.8
+  react-dom: 19.2.8
+  reflect-metadata: 0.2.2
+  rxjs: 7.8.2
+
+catalogs:
+  types:
+    '@types/pg': 8.15.5
+    '@types/react': 19.2.14
+    '@types/react-dom': 19.2.3
