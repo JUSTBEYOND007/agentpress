@@ -2,6 +2,7 @@ import type {
   DirectRunService,
   DurableRunEvent,
   LiveRunEvent,
+  ToolCallService,
 } from '@agentpress/agent-application';
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
@@ -39,6 +40,26 @@ describe('AgentController SSE replay', () => {
   it('rejects an invalid Last-Event-ID', () => {
     const controller = new AgentController({} as DirectRunService, {} as RedisRunEventBus);
     expect(() => controller.streamEvents('run-1', 'not-a-sequence')).toThrow(BadRequestException);
+  });
+
+  it('delegates an exact Tool Call approval decision', async () => {
+    const decisions: unknown[] = [];
+    const toolCalls = {
+      decideApproval(input: unknown) {
+        decisions.push(input);
+        return Promise.resolve({ toolCallId: 'call-1', decision: 'approved', status: 'approved' });
+      },
+    } as unknown as ToolCallService;
+    const controller = new AgentController(
+      {} as DirectRunService,
+      {} as RedisRunEventBus,
+      toolCalls,
+    );
+
+    await expect(
+      controller.decideToolCall('call-1', { decision: 'approved', userId: 'user-1' }),
+    ).resolves.toMatchObject({ status: 'approved' });
+    expect(decisions).toEqual([{ toolCallId: 'call-1', decision: 'approved', userId: 'user-1' }]);
   });
 });
 

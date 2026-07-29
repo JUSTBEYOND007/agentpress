@@ -1,8 +1,9 @@
-import { DirectRunService } from '@agentpress/agent-application';
+import { DirectRunService, ToolCallService } from '@agentpress/agent-application';
 import { loadApiEnvironment } from '@agentpress/config';
 import { connectDatabase } from '@agentpress/database';
 import type { DatabaseConnection } from '@agentpress/database';
 import type { OnApplicationShutdown, Provider } from '@nestjs/common';
+import { ToolRegistry } from '@agentpress/tool-runtime';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
 
@@ -18,6 +19,10 @@ class AgentResources implements OnApplicationShutdown {
 }
 
 export const agentProviders: Provider[] = [
+  {
+    provide: ToolRegistry,
+    useValue: new ToolRegistry(),
+  },
   {
     provide: DATABASE_CONNECTION,
     useValue: databaseConnection,
@@ -40,6 +45,15 @@ export const agentProviders: Provider[] = [
         systemPrompt: 'You are AgentPress.',
       }),
     inject: [DATABASE_CONNECTION, RedisRunEventBus],
+  },
+  {
+    provide: ToolCallService,
+    useFactory: (
+      connection: DatabaseConnection,
+      publisher: RedisRunEventBus,
+      registry: ToolRegistry,
+    ) => new ToolCallService({ database: connection.db, publisher, registry }),
+    inject: [DATABASE_CONNECTION, RedisRunEventBus, ToolRegistry],
   },
   AgentResources,
 ];

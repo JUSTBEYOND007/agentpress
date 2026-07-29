@@ -1,6 +1,8 @@
 import {
   AgentApplicationError,
   DirectRunService,
+  ToolCallApplicationError,
+  ToolCallService,
   type DurableRunEvent,
   type LiveRunEvent,
 } from '@agentpress/agent-application';
@@ -11,6 +13,7 @@ import {
   Headers,
   HttpCode,
   NotFoundException,
+  Optional,
   Param,
   Post,
   Sse,
@@ -27,6 +30,11 @@ type CreateRunBody = {
 
 type RunDirectiveBody = {
   readonly content?: unknown;
+};
+
+type ToolApprovalBody = {
+  readonly decision?: unknown;
+  readonly userId?: unknown;
 };
 
 class StreamConnectionState {
@@ -46,6 +54,7 @@ export class AgentController {
   public constructor(
     private readonly runs: DirectRunService,
     private readonly eventBus: RedisRunEventBus,
+    @Optional() private readonly toolCalls?: ToolCallService,
   ) {}
 
   @Post('conversations/:conversationId/runs')
@@ -181,6 +190,32 @@ export class AgentController {
       throw mapApplicationError(error);
     }
   }
+
+  @Post('tool-calls/:toolCallId/approval')
+  @HttpCode(202)
+  public async decideToolCall(
+    @Param('toolCallId') toolCallId: string,
+    @Body() body: ToolApprovalBody,
+  ) {
+    if (!this.toolCalls) {
+      throw new BadRequestException('Tool Call service is unavailable');
+    }
+    if (
+      (body.decision !== 'approved' && body.decision !== 'denied') ||
+      typeof body.userId !== 'string'
+    ) {
+      throw new BadRequestException('decision and userId are required');
+    }
+    try {
+      return await this.toolCalls.decideApproval({
+        toolCallId,
+        decision: body.decision,
+        userId: body.userId,
+      });
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
 }
 
 function parseLastEventId(value: string | undefined): number {
@@ -211,6 +246,11 @@ function toSseEvent(event: DurableRunEvent): MessageEvent {
 
 function mapApplicationError(error: unknown): Error {
   if (!(error instanceof AgentApplicationError)) {
+    if (error instanceof ToolCallApplicationError) {
+      return error.code === 'run_not_found' || error.code === 'tool_call_not_found'
+        ? new NotFoundException(error.message)
+        : new BadRequestException(error.message);
+    }
     return error instanceof Error ? error : new Error('Unknown Agent application error');
   }
   if (

@@ -7,6 +7,7 @@ import type {
 } from '@agentpress/agent-runtime';
 import {
   agentRuns,
+  appendCheckpoint,
   agentTaskDependencies,
   agentTasks,
   appendRunEvent,
@@ -19,7 +20,7 @@ import {
   taskBriefs,
   taskResults,
 } from '@agentpress/database';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, max, sql } from 'drizzle-orm';
 
 import type { AgentRuntimeFactory, DurableRunEvent, RunEventPublisher } from './contracts.js';
 import { classifyRun } from './run-classifier.js';
@@ -111,6 +112,12 @@ export class PlannedRunExecutor {
         })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'planning')));
       await this.persistRevisionTasks(transaction, runId, revisionId, tasks, prompt);
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'plan_revised',
+        state: { planId, revisionId, revisionNumber: 1 },
+      });
 
       const planning = await appendRunEvent(transaction, {
         id: this.createId(),
@@ -146,9 +153,117 @@ export class PlannedRunExecutor {
     }
     await this.publishAll(planningEvents);
 
+    return this.executePlannedWork(runId, planId, revisionId, 1, tasks, prompt, signal);
+  }
+
+  public async recover(
+    runId: string,
+    prompt: string,
+    signal?: AbortSignal,
+  ): Promise<PlannedExecutionOutcome | undefined> {
+    const tasks = buildPlan(prompt, this.createId);
+    const revisionId = this.createId();
+    const recovered = await this.options.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .select({
+          planId: executionPlans.id,
+          previousRevisionId: agentRuns.activePlanRevisionId,
+        })
+        .from(agentRuns)
+        .innerJoin(executionPlans, eq(executionPlans.runId, agentRuns.id))
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            eq(agentRuns.mode, 'planned'),
+            eq(agentRuns.status, 'recovering'),
+          ),
+        )
+        .limit(1);
+      const existing = rows[0];
+      if (!existing?.previousRevisionId) {
+        return undefined;
+      }
+      const numbers = await transaction
+        .select({ revisionNumber: max(planRevisions.revisionNumber) })
+        .from(planRevisions)
+        .where(eq(planRevisions.planId, existing.planId));
+      const revisionNumber = (numbers[0]?.revisionNumber ?? 0) + 1;
+      await transaction.insert(planRevisions).values({
+        id: revisionId,
+        planId: existing.planId,
+        previousRevisionId: existing.previousRevisionId,
+        revisionNumber,
+        reason: 'worker_recovery',
+        summary: summarizePlan(tasks),
+      });
+      await this.persistRevisionTasks(transaction, runId, revisionId, tasks, prompt);
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'plan_revised',
+        state: { planId: existing.planId, revisionId, revisionNumber, recovery: true },
+      });
+      await transaction
+        .update(agentRuns)
+        .set({
+          activePlanRevisionId: revisionId,
+          status: 'running',
+          updatedAt: this.now(),
+          version: sql`${agentRuns.version} + 1`,
+        })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'recovering')));
+      const revised = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'plan.revised',
+        payload: {
+          planId: existing.planId,
+          revisionId,
+          previousRevisionId: existing.previousRevisionId,
+          revisionNumber,
+          reason: 'worker_recovery',
+          tasks: tasks.map(publicTask),
+        },
+      });
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'run.recovered',
+        payload: { mode: 'planned', revisionId },
+      });
+      return {
+        planId: existing.planId,
+        revisionNumber,
+        events: [revised, event].map(toDurableEvent),
+      };
+    });
+    if (!recovered) {
+      return undefined;
+    }
+    await this.publishAll(recovered.events);
+    return this.executePlannedWork(
+      runId,
+      recovered.planId,
+      revisionId,
+      recovered.revisionNumber,
+      tasks,
+      prompt,
+      signal,
+    );
+  }
+
+  private async executePlannedWork(
+    runId: string,
+    planId: string,
+    revisionId: string,
+    initialRevisionNumber: number,
+    tasks: readonly PlannedTaskSpec[],
+    prompt: string,
+    signal?: AbortSignal,
+  ): Promise<PlannedExecutionOutcome> {
     let activeRevisionId = revisionId;
     let activePrompt = prompt;
-    let revisionNumber = 1;
+    let revisionNumber = initialRevisionNumber;
     let settled = [...(await this.executeDag(runId, revisionId, tasks, prompt, signal))];
     let steering = await this.consumeSteering(runId);
     while (steering && revisionNumber < 4 && !signal?.aborted) {
@@ -173,6 +288,12 @@ export class PlannedRunExecutor {
           revisedTasks,
           activePrompt,
         );
+        await appendCheckpoint(transaction, {
+          id: this.createId(),
+          runId,
+          reason: 'plan_revised',
+          state: { planId, revisionId: nextRevisionId, revisionNumber },
+        });
         await transaction
           .update(agentRuns)
           .set({
@@ -497,6 +618,12 @@ export class PlannedRunExecutor {
           ...(failure ? { failure: { message: failure } } : {}),
         });
       }
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'task_settled',
+        state: { taskId: task.id, status, attempt: 1 },
+      });
       return appendRunEvent(transaction, {
         id: this.createId(),
         runId,
@@ -530,6 +657,12 @@ export class PlannedRunExecutor {
           version: sql`${agentTasks.version} + 1`,
         })
         .where(and(eq(agentTasks.id, task.id), inArray(agentTasks.status, ['pending', 'ready'])));
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'task_settled',
+        state: { taskId: task.id, status: 'skipped', reason: task.failure ?? 'dependency_failed' },
+      });
       return appendRunEvent(transaction, {
         id: this.createId(),
         runId,
@@ -556,6 +689,12 @@ export class PlannedRunExecutor {
           version: sql`${agentTasks.version} + 1`,
         })
         .where(and(eq(agentTasks.id, task.id), inArray(agentTasks.status, ['pending', 'ready'])));
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'task_settled',
+        state: { taskId: task.id, status: 'cancelled', reason: 'run_cancelled' },
+      });
       return appendRunEvent(transaction, {
         id: this.createId(),
         runId,

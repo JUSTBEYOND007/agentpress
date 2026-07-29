@@ -1,4 +1,5 @@
 export * from './agent-run-store.js';
+export * from './checkpoint-store.js';
 export * from './inbox.js';
 export * from './outbox.js';
 export * from './postgres.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@agentpress/agent-application",
+  "name": "@agentpress/tool-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,17 +18,10 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.json --watch",
     "lint": "eslint src test",
-    "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
-    "test:integration": "vitest run test/*.integration.test.ts",
+    "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agentpress/agent-runtime": "workspace:*",
-    "@agentpress/database": "workspace:*",
-    "@agentpress/tool-runtime": "workspace:*",
-    "drizzle-orm": "catalog:"
-  },
-  "devDependencies": {
     "@sinclair/typebox": "catalog:"
   }
 }

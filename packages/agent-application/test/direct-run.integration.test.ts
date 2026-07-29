@@ -346,6 +346,55 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(tasks.every(({ status }) => status === 'cancelled')).toBe(true);
   });
 
+  it('recovers a Planned Run through a new immutable Plan Revision', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const recoveryService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () =>
+          PiRuntimeAdapter.forTests({
+            responses: ['研究', '草稿', '编辑', '核查', '配图', '恢复后的最终文章'],
+          }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await recoveryService.create({
+      conversationId: ids.conversation,
+      branchId,
+      prompt: '联网搜索资料并写一篇图文文章',
+      idempotencyKey: randomUUID(),
+    });
+    const planId = randomUUID();
+    const revisionId = randomUUID();
+    await connection.db.insert(executionPlans).values({ id: planId, runId: run.runId });
+    await connection.db.insert(planRevisions).values({
+      id: revisionId,
+      planId,
+      revisionNumber: 1,
+      reason: 'initial_plan',
+      summary: 'Interrupted plan',
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'running', activePlanRevisionId: revisionId })
+      .where(eq(agentRuns.id, run.runId));
+
+    await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
+    await expect(recoveryService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    const revisions = await connection.db
+      .select({ reason: planRevisions.reason })
+      .from(planRevisions)
+      .where(eq(planRevisions.planId, planId));
+    expect(revisions.map(({ reason }) => reason)).toEqual(['initial_plan', 'worker_recovery']);
+  });
+
   it('finishes with degradation when only an Optional Specialist fails', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({

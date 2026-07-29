@@ -22,6 +22,8 @@ import { KafkaJS } from '@confluentinc/kafka-javascript';
 import { Injectable, type OnApplicationShutdown, type OnModuleInit } from '@nestjs/common';
 import { Redis } from 'ioredis';
 
+import { RedisRunLeaseManager } from './redis-run-lease.js';
+
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
 const CONSUMER_GROUP = 'agentpress-agent-worker-v1';
 const OUTBOX_INTERVAL_MS = 250;
@@ -58,6 +60,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     'enable.auto.commit': true,
   });
   private readonly activeRuns = new Map<string, AbortController>();
+  private readonly runLeases = new RedisRunLeaseManager(this.redisPublisher);
   private readonly runService = new DirectRunService({
     database: this.database.db,
     publisher: this.createEventPublisher(),
@@ -161,8 +164,16 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       return;
     }
     const controller = new AbortController();
+    const lease = await this.runLeases.acquire(command.runId, () => {
+      controller.abort();
+    });
+    if (!lease) {
+      this.logger.info({ runId: command.runId }, 'Skipped duplicate Agent Run command');
+      return;
+    }
     this.activeRuns.set(command.runId, controller);
     try {
+      await this.runService.prepareRecovery(command.runId);
       const result = await this.runService.execute(command.runId, controller.signal);
       await processInboxMessage(
         this.database.db,
@@ -184,6 +195,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       throw error;
     } finally {
       this.activeRuns.delete(command.runId);
+      await lease.release();
     }
   }
 

@@ -8,6 +8,8 @@ import type {
 } from '@agentpress/agent-runtime';
 import {
   agentRuns,
+  agentTasks,
+  appendCheckpoint,
   appendRunEvent,
   type AgentPressDatabase,
   conversationBranches,
@@ -17,6 +19,7 @@ import {
   rootRequests,
   runDirectives,
   runEvents,
+  toolCalls,
 } from '@agentpress/database';
 import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
@@ -220,22 +223,28 @@ export class DirectRunService {
         messages: context.history,
       });
     }
-    if (context.status !== 'queued') {
+    if (context.status !== 'queued' && context.status !== 'recovering') {
       return { runId, status: 'ignored' };
     }
     if (context.mode === 'planned') {
-      const outcome = await this.plannedRuns.execute(runId, context.prompt, signal);
+      const outcome =
+        context.status === 'recovering'
+          ? await this.plannedRuns.recover(runId, context.prompt, signal)
+          : await this.plannedRuns.execute(runId, context.prompt, signal);
       if (!outcome) {
         return { runId, status: 'ignored' };
       }
       return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
     }
 
+    const recovering = context.status === 'recovering';
     const started = await this.options.database.transaction(async (transaction) => {
       const updated = await transaction
         .update(agentRuns)
         .set({ status: 'running', updatedAt: this.now(), version: sql`${agentRuns.version} + 1` })
-        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'queued')))
+        .where(
+          and(eq(agentRuns.id, runId), eq(agentRuns.status, recovering ? 'recovering' : 'queued')),
+        )
         .returning({ id: agentRuns.id });
       if (updated.length === 0) {
         return undefined;
@@ -243,8 +252,8 @@ export class DirectRunService {
       return appendRunEvent(transaction, {
         id: this.createId(),
         runId,
-        eventType: 'run.started',
-        payload: { mode: 'direct' },
+        eventType: recovering ? 'run.recovered' : 'run.started',
+        payload: { mode: 'direct', ...(recovering ? { fromCheckpoint: true } : {}) },
       });
     });
     if (!started) {
@@ -341,6 +350,84 @@ export class DirectRunService {
       await this.options.publisher.publish({ durable: true, event: settled.event });
     }
     return settled;
+  }
+
+  public async prepareRecovery(runId: string): Promise<boolean> {
+    const result = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
+      const rows = await transaction
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, runId))
+        .limit(1);
+      const run = rows[0];
+      if (!run || run.status === 'queued' || run.status === 'recovering') {
+        return { recovered: run?.status === 'recovering', events: [] as DurableRunEvent[] };
+      }
+      if (!isRecoverableRunStatus(run.status)) {
+        return { recovered: false, events: [] as DurableRunEvent[] };
+      }
+      const now = this.now();
+      const executing = await transaction
+        .select({ id: toolCalls.id, risk: toolCalls.risk })
+        .from(toolCalls)
+        .where(and(eq(toolCalls.runId, runId), eq(toolCalls.status, 'executing')));
+      const events: DurableRunEvent[] = [];
+      for (const call of executing) {
+        const status =
+          call.risk === 'external_write' || call.risk === 'destructive'
+            ? ('outcome_unknown' as const)
+            : ('failed' as const);
+        await transaction
+          .update(toolCalls)
+          .set({
+            status,
+            failure: { message: 'Worker lease was lost during tool execution' },
+            settledAt: now,
+            updatedAt: now,
+            version: sql`${toolCalls.version} + 1`,
+          })
+          .where(and(eq(toolCalls.id, call.id), eq(toolCalls.status, 'executing')));
+        const toolEvent = await appendRunEvent(transaction, {
+          id: this.createId(),
+          runId,
+          eventType: `tool.${status}`,
+          payload: { toolCallId: call.id, reason: 'worker_lease_lost' },
+        });
+        events.push(toDurableEvent(toolEvent));
+      }
+      await transaction
+        .update(agentTasks)
+        .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
+        .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, 'running')));
+      await transaction
+        .update(agentRuns)
+        .set({ status: 'recovering', updatedAt: now, version: sql`${agentRuns.version} + 1` })
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            inArray(agentRuns.status, ['planning', 'running', 'interrupted']),
+          ),
+        );
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'worker_recovery',
+        state: { previousStatus: run.status, interruptedToolCalls: executing.map(({ id }) => id) },
+      });
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'run.recovering',
+        payload: { previousStatus: run.status },
+      });
+      events.push(toDurableEvent(event));
+      return { recovered: true, events };
+    });
+    for (const event of result.events) {
+      await this.options.publisher.publish({ durable: true, event });
+    }
+    return result.recovered;
   }
 
   public enqueueSteering(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
@@ -535,6 +622,15 @@ export class DirectRunService {
             version: sql`${agentRuns.version} + 1`,
           })
           .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
+        await appendCheckpoint(transaction, {
+          id: this.createId(),
+          runId,
+          reason: 'run_settled',
+          state: {
+            status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
+            stableAssistantMessage: assistant,
+          },
+        });
         const messageEvent = await appendRunEvent(transaction, {
           id: this.createId(),
           runId,
@@ -564,6 +660,12 @@ export class DirectRunService {
           .where(
             and(eq(agentRuns.id, runId), inArray(agentRuns.status, ['running', 'cancelling'])),
           );
+        await appendCheckpoint(transaction, {
+          id: this.createId(),
+          runId,
+          reason: 'run_settled',
+          state: { status: 'cancelled' },
+        });
         const event = await appendRunEvent(transaction, {
           id: this.createId(),
           runId,
@@ -588,6 +690,12 @@ export class DirectRunService {
           version: sql`${agentRuns.version} + 1`,
         })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'run_settled',
+        state: { status: 'failed', error: result.error },
+      });
       const event = await appendRunEvent(transaction, {
         id: this.createId(),
         runId,
@@ -676,6 +784,10 @@ export class DirectRunService {
 
 function encodeRuntimeMessage(message: RuntimeMessage): readonly unknown[] {
   return [{ type: 'agentpress.runtime-message', version: 1, message }];
+}
+
+function isRecoverableRunStatus(status: string): status is 'planning' | 'running' | 'interrupted' {
+  return status === 'planning' || status === 'running' || status === 'interrupted';
 }
 
 function decodeRuntimeMessage(content: readonly unknown[]): RuntimeMessage | undefined {
