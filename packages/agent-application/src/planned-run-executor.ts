@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+import { createPromptRevision } from '@agentpress/agent-context';
 import type {
   RuntimeAssistantMessage,
   RuntimeResult,
@@ -848,6 +849,10 @@ function specialistSystemPrompt(role: SpecialistRole): string {
   return `You are the AgentPress ${role} specialist. Use only the supplied immutable Context Pack. Return the result, not chain-of-thought. Never apply writes or delegate.`;
 }
 
+function specialistPromptRevision(role: SpecialistRole) {
+  return createPromptRevision(`specialist.${role}`, '1.0.0', specialistSystemPrompt(role));
+}
+
 function buildContextPack(
   runId: string,
   revisionId: string,
@@ -858,6 +863,7 @@ function buildContextPack(
   readonly prompt: string;
   readonly contentHash: string;
 } {
+  const promptRevision = specialistPromptRevision(task.owner);
   const manifest = {
     runId,
     planRevisionId: revisionId,
@@ -866,6 +872,12 @@ function buildContextPack(
     rootRequestIncluded: true,
     conversationHistoryIncluded: false,
     toolAllowlist: capabilitiesFor(task.owner),
+    promptRevision: {
+      promptId: promptRevision.promptId,
+      version: promptRevision.version,
+      contentHash: promptRevision.contentHash,
+    },
+    skillVersions: {},
   };
   const contextPrompt = JSON.stringify({ manifest, objective: task.objective, prompt });
   return {

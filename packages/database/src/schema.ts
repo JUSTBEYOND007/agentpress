@@ -97,6 +97,12 @@ export const approvalDecisionEnum = pgEnum('approval_decision', [
   'denied',
   'expired',
 ] as const);
+export const memoryCandidateStatusEnum = pgEnum('memory_candidate_status', [
+  'pending',
+  'accepted',
+  'rejected',
+  'superseded',
+] as const);
 
 export const appUsers = pgTable('app_users', {
   id: uuid('id').primaryKey(),
@@ -112,6 +118,77 @@ export const workspaces = pgTable('workspaces', {
   createdAt,
   updatedAt,
 });
+
+export const promptRevisions = pgTable(
+  'prompt_revisions',
+  {
+    id: uuid('id').primaryKey(),
+    promptId: varchar('prompt_id', { length: 160 }).notNull(),
+    version: varchar('version', { length: 80 }).notNull(),
+    content: text('content').notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    createdAt,
+  },
+  (table) => [unique('prompt_revisions_identity_unique').on(table.promptId, table.version)],
+);
+
+export const skillRevisions = pgTable(
+  'skill_revisions',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    skillId: varchar('skill_id', { length: 160 }).notNull(),
+    version: varchar('version', { length: 80 }).notNull(),
+    content: text('content').notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    allowedTools: jsonb('allowed_tools').$type<readonly string[]>().notNull(),
+    createdAt,
+  },
+  (table) => [
+    unique('skill_revisions_identity_unique').on(table.workspaceId, table.skillId, table.version),
+  ],
+);
+
+export const memoryCandidates = pgTable(
+  'memory_candidates',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'cascade' }),
+    subject: varchar('subject', { length: 200 }).notNull(),
+    value: text('value').notNull(),
+    valueHash: varchar('value_hash', { length: 80 }).notNull(),
+    confidenceBps: integer('confidence_bps').notNull(),
+    status: memoryCandidateStatusEnum('status').notNull().default('pending'),
+    supersedesId: uuid('supersedes_id').references((): AnyPgColumn => memoryCandidates.id, {
+      onDelete: 'set null',
+    }),
+    decidedAt: timestamp('decided_at', { withTimezone: true, precision: 3 }),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    unique('memory_candidates_workspace_value_unique').on(
+      table.workspaceId,
+      table.userId,
+      table.subject,
+      table.valueHash,
+    ),
+    index('memory_candidates_retrieval_idx').on(
+      table.workspaceId,
+      table.userId,
+      table.status,
+      table.updatedAt,
+    ),
+    check('memory_candidates_confidence_check', sql`${table.confidenceBps} between 0 and 10000`),
+  ],
+);
 
 export const workspaceMembers = pgTable(
   'workspace_members',
@@ -262,6 +339,28 @@ export const executionPlans = pgTable(
   (table) => [unique('execution_plans_run_unique').on(table.runId)],
 );
 
+export const mentionBindings = pgTable(
+  'mention_bindings',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    targetId: uuid('target_id').notNull(),
+    targetKind: varchar('target_kind', { length: 32 }).notNull(),
+    revision: varchar('revision', { length: 120 }).notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    authorizedUserId: uuid('authorized_user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'restrict' }),
+    createdAt,
+  },
+  (table) => [
+    unique('mention_bindings_run_target_unique').on(table.runId, table.targetId),
+    check('mention_bindings_kind_check', sql`${table.targetKind} in ('article', 'document')`),
+  ],
+);
+
 export const planRevisions = pgTable(
   'plan_revisions',
   {
@@ -342,6 +441,23 @@ export const agentTaskDependencies = pgTable(
   ],
 );
 
+export const modelSelections = pgTable(
+  'model_selections',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
+    purpose: varchar('purpose', { length: 80 }).notNull(),
+    policySnapshot: jsonb('policy_snapshot').$type<Readonly<Record<string, unknown>>>().notNull(),
+    selectedModel: varchar('selected_model', { length: 160 }).notNull(),
+    fallbackUsed: boolean('fallback_used').notNull().default(false),
+    createdAt,
+  },
+  (table) => [index('model_selections_run_idx').on(table.runId, table.createdAt)],
+);
+
 export const taskBriefs = pgTable(
   'task_briefs',
   {
@@ -365,6 +481,9 @@ export const contextPacks = pgTable(
     taskId: uuid('task_id')
       .notNull()
       .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    promptRevisionId: uuid('prompt_revision_id').references(() => promptRevisions.id, {
+      onDelete: 'restrict',
+    }),
     manifest: jsonb('manifest').$type<Readonly<Record<string, unknown>>>().notNull(),
     contentHash: varchar('content_hash', { length: 80 }).notNull(),
     tokenCount: integer('token_count').notNull(),
@@ -396,6 +515,28 @@ export const taskResults = pgTable(
     unique('task_results_task_attempt_unique').on(table.taskId, table.attempt),
     check('task_results_attempt_positive_check', sql`${table.attempt} > 0`),
     check('task_results_status_check', sql`${table.status} in ('succeeded', 'failed')`),
+  ],
+);
+
+export const reviewRounds = pgTable(
+  'review_rounds',
+  {
+    id: uuid('id').primaryKey(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    round: integer('round').notNull(),
+    reviewer: taskOwnerEnum('reviewer').$type<'editor' | 'fact_checker'>().notNull(),
+    accepted: boolean('accepted').notNull(),
+    issues: jsonb('issues').$type<readonly string[]>().notNull(),
+    inputHash: varchar('input_hash', { length: 80 }).notNull(),
+    outputHash: varchar('output_hash', { length: 80 }),
+    createdAt,
+  },
+  (table) => [
+    unique('review_rounds_task_round_unique').on(table.taskId, table.round),
+    check('review_rounds_round_check', sql`${table.round} between 1 and 3`),
+    check('review_rounds_reviewer_check', sql`${table.reviewer} in ('editor', 'fact_checker')`),
   ],
 );
 

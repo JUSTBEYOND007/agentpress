@@ -15,6 +15,7 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - Tiptap and ProseMirror — MIT
 - assistant-ui — MIT
 - Model Context Protocol TypeScript SDK — MIT
+- YAML — ISC
 
 ## Vendored Or Adapted Sources
 

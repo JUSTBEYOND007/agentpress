@@ -17,6 +17,9 @@ import {
   enqueueOutboxMessage,
   inboxMessages,
   markOutboxMessagePublished,
+  decideMemoryCandidate,
+  listAcceptedMemory,
+  proposeMemoryCandidate,
   processInboxMessage,
   rootRequests,
   runEvents,
@@ -185,5 +188,50 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     expect(
       await connection.db.select().from(runEvents).where(eq(runEvents.runId, ids.run)),
     ).toHaveLength(8);
+  });
+
+  it('persists confirmed memory and isolates retrieval by workspace and user', async () => {
+    const first = await proposeMemoryCandidate(connection.db, {
+      id: randomUUID(),
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      subject: 'writing_style',
+      value: 'concise',
+      valueHash: 'sha256:concise',
+      confidenceBps: 9000,
+    });
+    expect(
+      await listAcceptedMemory(connection.db, { workspaceId: ids.workspace, userId: ids.user }),
+    ).toEqual([]);
+    expect(
+      await decideMemoryCandidate(connection.db, {
+        id: first.id,
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        decision: 'accepted',
+      }),
+    ).toMatchObject({ status: 'accepted' });
+    const replacement = await proposeMemoryCandidate(connection.db, {
+      id: randomUUID(),
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      subject: 'writing_style',
+      value: 'detailed',
+      valueHash: 'sha256:detailed',
+      confidenceBps: 8500,
+      supersedesId: first.id,
+    });
+    await decideMemoryCandidate(connection.db, {
+      id: replacement.id,
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      decision: 'accepted',
+    });
+    expect(
+      await listAcceptedMemory(connection.db, { workspaceId: ids.workspace, userId: ids.user }),
+    ).toHaveLength(1);
+    expect(
+      await listAcceptedMemory(connection.db, { workspaceId: randomUUID(), userId: ids.user }),
+    ).toEqual([]);
   });
 });
