@@ -32,6 +32,7 @@ export function ArticleDiff({
           <div className="diff-actions">
             <button
               aria-label="接受修改"
+              aria-pressed={decisions[entry.operationId] === 'accepted'}
               className={decisions[entry.operationId] === 'accepted' ? 'is-selected' : ''}
               onClick={() => {
                 onDecision(entry.operationId, 'accepted');
@@ -43,6 +44,7 @@ export function ArticleDiff({
             </button>
             <button
               aria-label="拒绝修改"
+              aria-pressed={decisions[entry.operationId] === 'rejected'}
               className={decisions[entry.operationId] === 'rejected' ? 'is-selected' : ''}
               onClick={() => {
                 onDecision(entry.operationId, 'rejected');

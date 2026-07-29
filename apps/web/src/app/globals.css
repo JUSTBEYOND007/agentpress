@@ -35,7 +35,7 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 390px;
+  grid-template-columns: 248px minmax(0, 1fr) 430px;
   min-height: 100dvh;
   background: #ffffff;
 }
@@ -147,6 +147,11 @@ button {
 .icon-button:hover {
   background: #eeeeec;
   color: #202124;
+}
+
+.icon-button.is-active {
+  background: #e7eef8;
+  color: #2868aa;
 }
 
 .document-pane {
@@ -318,9 +323,10 @@ button {
 .agent-panel {
   position: relative;
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr) auto;
+  grid-template-rows: 52px minmax(0, 1fr);
   max-height: 100dvh;
   border-left: 1px solid #e8e8e6;
+  background: #fafafa;
 }
 
 .agent-header {
@@ -338,7 +344,6 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #34845a;
   font-size: 12px;
   font-weight: 500;
 }
@@ -347,84 +352,360 @@ button {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #48a975;
+  background: currentcolor;
   content: '';
 }
 
+.status-success {
+  color: #34845a;
+}
+
+.status-warning {
+  color: #9a641f;
+}
+
+.status-danger {
+  color: #a33e38;
+}
+
+.status-active {
+  color: #2b6fb8;
+}
+
+.aui-thread {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
 .agent-thread {
+  position: relative;
   min-height: 0;
   overflow-y: auto;
   padding: 22px 18px;
+  scroll-padding-bottom: 72px;
 }
 
-.user-message {
+.aui-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: #454642;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.aui-message p {
+  margin: 0;
+}
+
+.aui-user-message {
   width: fit-content;
   max-width: 88%;
   margin-left: auto;
   border-radius: 8px;
   background: #ececea;
   padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.55;
 }
 
-.run-progress {
-  margin-top: 24px;
-  border-top: 1px solid #e4e4e1;
-  border-bottom: 1px solid #e4e4e1;
-  padding: 18px 2px;
+.aui-assistant-message {
+  width: 100%;
 }
 
-.run-heading {
+.assistant-avatar {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #dededb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #555650;
+}
+
+.message-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-inspector {
+  margin: 22px 0 10px;
+  border-top: 1px solid #e1e1de;
+  border-bottom: 1px solid #e1e1de;
+}
+
+.inspector-heading {
   display: flex;
+  width: 100%;
+  height: 44px;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  background: transparent;
+  color: #30312e;
+  cursor: pointer;
   font-size: 13px;
 }
 
-.run-progress ol {
+.inspector-heading span,
+.inspector-section h3,
+.run-metadata span,
+.composer-context span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspector-heading > svg {
+  transition: transform 160ms ease;
+}
+
+.inspector-heading > svg.is-open {
+  transform: rotate(180deg);
+}
+
+.inspector-body {
+  padding: 0 0 14px;
+}
+
+.task-list {
   display: grid;
   gap: 10px;
-  margin: 16px 0 0;
+  margin: 4px 0 14px;
   padding: 0;
   list-style: none;
 }
 
-.step {
+.task-list li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+}
+
+.task-list strong,
+.task-list small {
+  display: block;
+}
+
+.task-list strong {
+  color: #343531;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.task-list small {
+  margin-top: 2px;
+  color: #92938e;
+  font-size: 11px;
+}
+
+.task-state {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  place-items: center;
+  border: 1px solid #c8c8c4;
+  border-radius: 50%;
+  color: #ffffff;
+}
+
+.task-succeeded {
+  border-color: #4e986c;
+  background: #4e986c;
+}
+
+.task-running {
+  border: 3px solid #e0ecf8;
+  background: #2b7de9;
+}
+
+.task-failed {
+  border-color: #b34b43;
+  background: #b34b43;
+}
+
+.specialist-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-bottom: 14px;
+}
+
+.specialist-row span,
+.composer-context span {
+  border: 1px solid #dededb;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #676862;
+  font-size: 11px;
+}
+
+.specialist-row span {
+  padding: 3px 6px;
+}
+
+.inspector-section {
+  border-top: 1px solid #e7e7e4;
+  padding: 13px 0;
+}
+
+.inspector-section h3 {
+  margin: 0 0 9px;
+  color: #656660;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.tool-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 122px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.tool-row strong,
+.tool-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-row strong {
+  color: #3e3f3b;
+  font-size: 12px;
+}
+
+.tool-row small {
+  color: #8d8e89;
+  font-size: 10px;
+}
+
+.tool-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: #73746e;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #eadcc9;
+  border-bottom: 1px solid #eadcc9;
+  background: #fffaf3;
+  padding: 10px 8px;
+  color: #8a5a1d;
+}
+
+.approval-row strong,
+.approval-row span {
+  display: block;
+}
+
+.approval-row strong {
+  font-size: 12px;
+}
+
+.approval-row span {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.approval-row > div:last-child {
+  display: flex;
+  gap: 3px;
+}
+
+.approval-row button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.approval-row button:hover,
+.approval-row button.is-selected {
+  background: #f1e5d4;
+}
+
+.evidence-list > div {
   display: flex;
   align-items: center;
-  gap: 9px;
-  color: #8a8b86;
-  font-size: 13px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 11px;
 }
 
-.step-indicator {
-  width: 8px;
-  height: 8px;
-  border: 1px solid #bbbcb7;
+.evidence-list strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-list span {
+  flex: 0 0 auto;
+  color: #92938e;
+}
+
+.proposal-preview .article-diff {
+  gap: 6px;
+}
+
+.proposal-preview .diff-before,
+.proposal-preview .diff-after {
+  padding: 7px 8px;
+}
+
+.proposal-preview .diff-before p,
+.proposal-preview .diff-after p {
+  font-size: 11px;
+}
+
+.run-metadata {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid #e7e7e4;
+  padding-top: 12px;
+  color: #858680;
+  font-size: 10px;
+}
+
+.thread-footer {
+  position: sticky;
+  bottom: 4px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scroll-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #dededb;
   border-radius: 50%;
-}
-
-.step-done .step-indicator {
-  border-color: #57a677;
-  background: #57a677;
-}
-
-.step-active {
-  color: #242522;
-}
-
-.step-active .step-indicator {
-  border: 2px solid #ffffff;
-  background: #2b7de9;
-  box-shadow: 0 0 0 1px #2b7de9;
-}
-
-.assistant-message {
-  margin-top: 20px;
-  color: #454642;
-  font-size: 14px;
-  line-height: 1.65;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgb(20 20 18 / 8%);
+  color: #696a65;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .agent-composer {
@@ -433,6 +714,21 @@ button {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 4px 16px rgb(20 20 18 / 6%);
+}
+
+.composer-context {
+  display: flex;
+  gap: 5px;
+  overflow: hidden;
+  padding: 9px 10px 0;
+}
+
+.composer-context span {
+  min-width: 0;
+  padding: 3px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-composer textarea {
@@ -460,6 +756,29 @@ button {
 
 .composer-actions > div {
   display: flex;
+  align-items: center;
+}
+
+.send-mode {
+  display: inline-flex;
+  height: 26px;
+  margin-left: 4px;
+  border: 1px solid #e0e0dd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.send-mode button {
+  padding: 0 7px;
+  background: transparent;
+  color: #858680;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.send-mode button.is-active {
+  background: #eeeeec;
+  color: #343531;
 }
 
 .send-button {

@@ -12,19 +12,13 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-import { AgentComposer } from '../components/agent-composer';
+import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
 
 const recentItems = [
   ['AI 产品观察', 'article'],
   ['Agent 架构笔记', 'article'],
   ['写作素材', 'folder'],
-] as const;
-
-const agentSteps = [
-  { label: '理解文章上下文', status: 'done' },
-  { label: '检查论据与引用', status: 'active' },
-  { label: '生成修改提案', status: 'pending' },
 ] as const;
 
 export default function WorkspacePage(): React.JSX.Element {
@@ -117,40 +111,7 @@ export default function WorkspacePage(): React.JSX.Element {
         <ArticleCanvas />
       </section>
 
-      <aside className="agent-panel" aria-label="Agent 工作台">
-        <header className="agent-header">
-          <div>
-            <strong>写作助手</strong>
-            <span className="status-dot">运行中</span>
-          </div>
-          <button aria-label="Agent 菜单" className="icon-button" title="Agent 菜单" type="button">
-            <MoreHorizontal aria-hidden="true" size={18} />
-          </button>
-        </header>
-
-        <div className="agent-thread">
-          <div className="user-message">核对文章论据，并给开头提出更有力的改写。</div>
-          <section className="run-progress" aria-label="运行步骤">
-            <div className="run-heading">
-              <Sparkles aria-hidden="true" size={16} />
-              <strong>研究与改写</strong>
-            </div>
-            <ol>
-              {agentSteps.map((step) => (
-                <li className={`step step-${step.status}`} key={step.label}>
-                  <span className="step-indicator" />
-                  <span>{step.label}</span>
-                </li>
-              ))}
-            </ol>
-          </section>
-          <div className="assistant-message">
-            Researcher 正在核对文章中的关键论点。完成后会生成可逐项接受的修改提案。
-          </div>
-        </div>
-
-        <AgentComposer />
-      </aside>
+      <AgentWorkbench />
     </main>
   );
 }
