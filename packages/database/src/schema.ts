@@ -493,6 +493,31 @@ export const runEvents = pgTable(
   ],
 );
 
+export const runDirectives = pgTable(
+  'run_directives',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    kind: varchar('kind', { length: 24 }).notNull(),
+    content: text('content').notNull(),
+    status: varchar('status', { length: 24 }).notNull().default('pending'),
+    createdAt,
+    appliedAt: timestamp('applied_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    unique('run_directives_run_sequence_unique').on(table.runId, table.sequence),
+    index('run_directives_run_status_idx').on(table.runId, table.status, table.sequence),
+    check('run_directives_kind_check', sql`${table.kind} in ('steering', 'follow_up')`),
+    check(
+      'run_directives_status_check',
+      sql`${table.status} in ('pending', 'applied', 'consumed')`,
+    ),
+  ],
+);
+
 export const outboxMessages = pgTable(
   'outbox_messages',
   {

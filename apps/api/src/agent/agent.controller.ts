@@ -25,6 +25,10 @@ type CreateRunBody = {
   readonly prompt?: unknown;
 };
 
+type RunDirectiveBody = {
+  readonly content?: unknown;
+};
+
 class StreamConnectionState {
   private closed = false;
 
@@ -151,6 +155,32 @@ export class AgentController {
     }
     return result;
   }
+
+  @Post('runs/:runId/steering')
+  @HttpCode(202)
+  public async steerRun(@Param('runId') runId: string, @Body() body: RunDirectiveBody) {
+    if (typeof body.content !== 'string') {
+      throw new BadRequestException('content must be a string');
+    }
+    try {
+      return await this.runs.enqueueSteering(runId, body.content);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
+
+  @Post('runs/:runId/follow-ups')
+  @HttpCode(202)
+  public async followUpRun(@Param('runId') runId: string, @Body() body: RunDirectiveBody) {
+    if (typeof body.content !== 'string') {
+      throw new BadRequestException('content must be a string');
+    }
+    try {
+      return await this.runs.enqueueFollowUp(runId, body.content);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
 }
 
 function parseLastEventId(value: string | undefined): number {
@@ -183,7 +213,11 @@ function mapApplicationError(error: unknown): Error {
   if (!(error instanceof AgentApplicationError)) {
     return error instanceof Error ? error : new Error('Unknown Agent application error');
   }
-  if (error.code === 'branch_not_found' || error.code === 'conversation_not_found') {
+  if (
+    error.code === 'branch_not_found' ||
+    error.code === 'conversation_not_found' ||
+    error.code === 'run_not_found'
+  ) {
     return new NotFoundException(error.message);
   }
   return new BadRequestException(error.message);

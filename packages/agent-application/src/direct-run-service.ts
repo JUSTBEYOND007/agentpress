@@ -15,6 +15,7 @@ import {
   conversations,
   enqueueOutboxMessage,
   rootRequests,
+  runDirectives,
   runEvents,
 } from '@agentpress/database';
 import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
@@ -27,9 +28,12 @@ import {
   type CreateDirectRunResult,
   type DurableRunEvent,
   type ExecuteDirectRunResult,
+  type EnqueueRunDirectiveResult,
   type RequestRunCancellationResult,
   type RunEventPublisher,
 } from './contracts.js';
+import { PlannedRunExecutor } from './planned-run-executor.js';
+import { classifyRun } from './run-classifier.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -50,10 +54,12 @@ type DirectRunServiceOptions = {
 export class DirectRunService {
   private readonly now: () => Date;
   private readonly createId: () => string;
+  private readonly plannedRuns: PlannedRunExecutor;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
+    this.plannedRuns = new PlannedRunExecutor(options);
   }
 
   public async create(input: CreateDirectRunInput): Promise<CreateDirectRunResult> {
@@ -76,6 +82,7 @@ export class DirectRunService {
           rootRequestId: rootRequests.id,
           messageId: rootRequests.messageId,
           status: agentRuns.status,
+          mode: agentRuns.mode,
         })
         .from(rootRequests)
         .innerJoin(agentRuns, eq(agentRuns.rootRequestId, rootRequests.id))
@@ -94,6 +101,7 @@ export class DirectRunService {
             rootRequestId: duplicate.rootRequestId,
             messageId: duplicate.messageId,
             status: duplicate.status,
+            mode: duplicate.mode,
             created: false,
           },
         };
@@ -133,6 +141,7 @@ export class DirectRunService {
       const runId = this.createId();
       const outboxId = this.createId();
       const now = this.now();
+      const classification = classifyRun(prompt);
       const userMessage: RuntimeMessage = {
         role: 'user',
         content: prompt,
@@ -160,7 +169,7 @@ export class DirectRunService {
         workspaceId: branch.workspaceId,
         branchId: input.branchId,
         rootRequestId,
-        mode: 'direct',
+        mode: classification.mode,
         status: 'queued',
         createdAt: now,
         updatedAt: now,
@@ -169,7 +178,7 @@ export class DirectRunService {
         id: this.createId(),
         runId,
         eventType: 'run.queued',
-        payload: { mode: 'direct', rootRequestId },
+        payload: { mode: classification.mode, reasons: classification.reasons, rootRequestId },
       });
       await enqueueOutboxMessage(transaction, {
         id: outboxId,
@@ -187,6 +196,7 @@ export class DirectRunService {
           rootRequestId,
           messageId,
           status: 'queued' as const,
+          mode: classification.mode,
           created: true,
         },
         event: toDurableEvent(queued),
@@ -212,6 +222,13 @@ export class DirectRunService {
     }
     if (context.status !== 'queued') {
       return { runId, status: 'ignored' };
+    }
+    if (context.mode === 'planned') {
+      const outcome = await this.plannedRuns.execute(runId, context.prompt, signal);
+      if (!outcome) {
+        return { runId, status: 'ignored' };
+      }
+      return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
     }
 
     const started = await this.options.database.transaction(async (transaction) => {
@@ -326,6 +343,14 @@ export class DirectRunService {
     return settled;
   }
 
+  public enqueueSteering(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
+    return this.enqueueDirective(runId, 'steering', content);
+  }
+
+  public enqueueFollowUp(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
+    return this.enqueueDirective(runId, 'follow_up', content);
+  }
+
   public async listEvents(runId: string, afterSequence = 0): Promise<readonly DurableRunEvent[]> {
     const events = await this.options.database
       .select()
@@ -341,6 +366,7 @@ export class DirectRunService {
         readonly prompt: string;
         readonly history: readonly RuntimeMessage[];
         readonly status: string;
+        readonly mode: 'direct' | 'planned';
       }
     | undefined
   > {
@@ -348,6 +374,7 @@ export class DirectRunService {
       .select({
         branchId: agentRuns.branchId,
         status: agentRuns.status,
+        mode: agentRuns.mode,
         messageSequence: conversationMessages.sequence,
         content: conversationMessages.content,
       })
@@ -386,6 +413,7 @@ export class DirectRunService {
       prompt: rootMessage.content,
       history,
       status: run.status,
+      mode: run.mode,
     };
   }
 
@@ -399,10 +427,71 @@ export class DirectRunService {
     }
   }
 
+  private async enqueueDirective(
+    runId: string,
+    kind: 'steering' | 'follow_up',
+    rawContent: string,
+  ): Promise<EnqueueRunDirectiveResult> {
+    const content = rawContent.trim();
+    if (content.length === 0 || content.length > 100_000) {
+      throw new AgentApplicationError(
+        'invalid_directive',
+        'Directive must contain between 1 and 100000 characters',
+      );
+    }
+    const persisted = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
+      const rows = await transaction
+        .select({ mode: agentRuns.mode, status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, runId))
+        .limit(1);
+      const run = rows[0];
+      if (!run) {
+        throw new AgentApplicationError('run_not_found', `Agent Run ${runId} does not exist`);
+      }
+      if (TERMINAL_RUN_STATES.includes(run.status as (typeof TERMINAL_RUN_STATES)[number])) {
+        throw new AgentApplicationError('invalid_directive', 'A terminal Run cannot accept input');
+      }
+      if (kind === 'steering' && run.mode !== 'planned') {
+        throw new AgentApplicationError(
+          'invalid_directive',
+          'Steering is available after a Run has entered Planned mode',
+        );
+      }
+      const sequences = await transaction
+        .select({ sequence: max(runDirectives.sequence) })
+        .from(runDirectives)
+        .where(eq(runDirectives.runId, runId));
+      const sequence = (sequences[0]?.sequence ?? 0) + 1;
+      const directiveId = this.createId();
+      await transaction.insert(runDirectives).values({
+        id: directiveId,
+        runId,
+        sequence,
+        kind,
+        content,
+      });
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: `${kind}.queued`,
+        payload: { directiveId, sequence },
+      });
+      return {
+        result: { directiveId, runId, kind, sequence, status: 'pending' as const },
+        event: toDurableEvent(event),
+      };
+    });
+    await this.options.publisher.publish({ durable: true, event: persisted.event });
+    return persisted.result;
+  }
+
   private async settleRun(
     branchId: string,
     runId: string,
     result: RuntimeResult,
+    completedWithDegradation = false,
   ): Promise<ExecuteDirectRunResult> {
     const durableEvents = await this.options.database.transaction(async (transaction) => {
       await transaction.execute(
@@ -439,7 +528,7 @@ export class DirectRunService {
         await transaction
           .update(agentRuns)
           .set({
-            status: 'completed',
+            status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
             finalOutcome: { usage: assistant.usage },
             completedAt: now,
             updatedAt: now,
@@ -456,8 +545,8 @@ export class DirectRunService {
         const completedEvent = await appendRunEvent(transaction, {
           id: this.createId(),
           runId,
-          eventType: 'run.completed',
-          payload: { usage: assistant.usage },
+          eventType: completedWithDegradation ? 'run.completed_with_degradation' : 'run.completed',
+          payload: { usage: assistant.usage, degraded: completedWithDegradation },
         });
         events.push(toDurableEvent(completedEvent));
         return events;
@@ -513,15 +602,75 @@ export class DirectRunService {
       await this.options.publisher.publish({ durable: true, event });
     }
     const terminal = durableEvents.at(-1)?.eventType;
-    return {
+    const response: ExecuteDirectRunResult = {
       runId,
       status:
-        terminal === 'run.completed'
-          ? 'completed'
+        terminal === 'run.completed' || terminal === 'run.completed_with_degradation'
+          ? terminal === 'run.completed_with_degradation'
+            ? 'completed_with_degradation'
+            : 'completed'
           : terminal === 'run.cancelled'
             ? 'cancelled'
             : 'failed',
     };
+    await this.activateNextFollowUp(branchId);
+    return response;
+  }
+
+  private async activateNextFollowUp(branchId: string): Promise<void> {
+    const claimed = await this.options.database.transaction(async (transaction) => {
+      const directives = await transaction
+        .select({
+          id: runDirectives.id,
+          content: runDirectives.content,
+          branchId: agentRuns.branchId,
+          conversationId: conversations.id,
+        })
+        .from(runDirectives)
+        .innerJoin(agentRuns, eq(agentRuns.id, runDirectives.runId))
+        .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
+        .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+        .where(
+          and(
+            eq(agentRuns.branchId, branchId),
+            eq(runDirectives.kind, 'follow_up'),
+            eq(runDirectives.status, 'pending'),
+          ),
+        )
+        .orderBy(asc(agentRuns.createdAt), asc(runDirectives.sequence))
+        .limit(1);
+      const directive = directives[0];
+      if (!directive) {
+        return undefined;
+      }
+      const updated = await transaction
+        .update(runDirectives)
+        .set({ status: 'applied', appliedAt: this.now() })
+        .where(and(eq(runDirectives.id, directive.id), eq(runDirectives.status, 'pending')))
+        .returning({ id: runDirectives.id });
+      return updated.length === 1 ? directive : undefined;
+    });
+    if (!claimed) {
+      return;
+    }
+    try {
+      await this.create({
+        conversationId: claimed.conversationId,
+        branchId: claimed.branchId,
+        prompt: claimed.content,
+        idempotencyKey: `follow-up:${claimed.id}`,
+      });
+      await this.options.database
+        .update(runDirectives)
+        .set({ status: 'consumed', appliedAt: this.now() })
+        .where(eq(runDirectives.id, claimed.id));
+    } catch (error) {
+      await this.options.database
+        .update(runDirectives)
+        .set({ status: 'pending', appliedAt: null })
+        .where(eq(runDirectives.id, claimed.id));
+      throw error;
+    }
   }
 }
 

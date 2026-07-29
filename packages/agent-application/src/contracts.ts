@@ -44,12 +44,13 @@ export type CreateDirectRunResult = {
   readonly rootRequestId: string;
   readonly messageId: string;
   readonly status: string;
+  readonly mode: 'direct' | 'planned';
   readonly created: boolean;
 };
 
 export type ExecuteDirectRunResult = {
   readonly runId: string;
-  readonly status: 'completed' | 'cancelled' | 'failed' | 'ignored';
+  readonly status: 'completed' | 'completed_with_degradation' | 'cancelled' | 'failed' | 'ignored';
 };
 
 export type RequestRunCancellationResult =
@@ -63,6 +64,7 @@ export class AgentApplicationError extends Error {
       | 'conversation_not_found'
       | 'branch_not_found'
       | 'invalid_prompt'
+      | 'invalid_directive'
       | 'run_not_found',
     message: string,
   ) {
@@ -70,3 +72,11 @@ export class AgentApplicationError extends Error {
     this.name = 'AgentApplicationError';
   }
 }
+
+export type EnqueueRunDirectiveResult = {
+  readonly directiveId: string;
+  readonly runId: string;
+  readonly kind: 'steering' | 'follow_up';
+  readonly sequence: number;
+  readonly status: 'pending';
+};
