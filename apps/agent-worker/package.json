@@ -17,10 +17,10 @@
     "@agentpress/config": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/observability": "workspace:*",
-    "@confluentinc/kafka-javascript": "catalog:",
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",
     "ioredis": "catalog:",
+    "kafkajs": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:"
   }

@@ -110,6 +110,11 @@ export const editProposalStatusEnum = pgEnum('edit_proposal_status', [
   'rejected',
   'expired',
 ] as const);
+export const mediaAssetKindEnum = pgEnum('media_asset_kind', ['generated', 'licensed'] as const);
+export const publicationStatusEnum = pgEnum('publication_status', [
+  'published',
+  'unpublished',
+] as const);
 
 export const appUsers = pgTable('app_users', {
   id: uuid('id').primaryKey(),
@@ -804,6 +809,157 @@ export const editProposalDecisions = pgTable(
     check(
       'edit_proposal_decisions_decision_check',
       sql`${table.decision} in ('accepted', 'rejected')`,
+    ),
+  ],
+);
+
+export const mediaAssets = pgTable(
+  'media_assets',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    createdByUserId: uuid('created_by_user_id').references(() => appUsers.id, {
+      onDelete: 'set null',
+    }),
+    approvedToolCallId: uuid('approved_tool_call_id').references(() => toolCalls.id, {
+      onDelete: 'restrict',
+    }),
+    kind: mediaAssetKindEnum('kind').notNull(),
+    objectKey: text('object_key').notNull().unique(),
+    mimeType: varchar('mime_type', { length: 120 }).notNull(),
+    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+    checksum: varchar('checksum', { length: 80 }).notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    sourceUrl: text('source_url'),
+    license: varchar('license', { length: 160 }),
+    attribution: text('attribution'),
+    prompt: text('prompt'),
+    model: varchar('model', { length: 200 }),
+    createdAt,
+  },
+  (table) => [
+    index('media_assets_workspace_created_idx').on(table.workspaceId, table.createdAt),
+    check('media_assets_size_check', sql`${table.byteSize} > 0`),
+    check(
+      'media_assets_provenance_check',
+      sql`(${table.kind} = 'generated' and ${table.prompt} is not null and ${table.model} is not null)
+          or (${table.kind} = 'licensed' and ${table.sourceUrl} is not null and ${table.license} is not null and ${table.attribution} is not null)`,
+    ),
+  ],
+);
+
+export const publicationEditions = pgTable(
+  'publication_editions',
+  {
+    id: uuid('id').primaryKey(),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'restrict' }),
+    articleRevisionId: uuid('article_revision_id')
+      .notNull()
+      .references(() => articleRevisions.id, { onDelete: 'restrict' }),
+    editionNumber: integer('edition_number').notNull(),
+    titleSnapshot: text('title_snapshot').notNull(),
+    documentSnapshot: jsonb('document_snapshot')
+      .$type<Readonly<Record<string, unknown>>>()
+      .notNull(),
+    coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id, {
+      onDelete: 'restrict',
+    }),
+    createdByUserId: uuid('created_by_user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'restrict' }),
+    createdAt,
+  },
+  (table) => [
+    unique('publication_editions_article_number_unique').on(table.articleId, table.editionNumber),
+    check('publication_editions_number_check', sql`${table.editionNumber} > 0`),
+  ],
+);
+
+export const publications = pgTable(
+  'publications',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'restrict' }),
+    editionId: uuid('edition_id')
+      .notNull()
+      .references(() => publicationEditions.id, { onDelete: 'restrict' }),
+    slug: varchar('slug', { length: 180 }).notNull().unique(),
+    status: publicationStatusEnum('status').notNull().default('published'),
+    publishedAt: timestamp('published_at', { withTimezone: true, precision: 3 })
+      .notNull()
+      .defaultNow(),
+    updatedAt,
+  },
+  (table) => [
+    unique('publications_edition_unique').on(table.editionId),
+    index('publications_status_published_idx').on(table.status, table.publishedAt),
+  ],
+);
+
+export const publicationReactions = pgTable(
+  'publication_reactions',
+  {
+    publicationId: uuid('publication_id')
+      .notNull()
+      .references(() => publications.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'cascade' }),
+    reaction: varchar('reaction', { length: 12 }).notNull(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    primaryKey({ columns: [table.publicationId, table.userId] }),
+    check('publication_reactions_value_check', sql`${table.reaction} in ('up', 'down')`),
+  ],
+);
+
+export const publicationViews = pgTable(
+  'publication_views',
+  {
+    id: uuid('id').primaryKey(),
+    publicationId: uuid('publication_id')
+      .notNull()
+      .references(() => publications.id, { onDelete: 'cascade' }),
+    viewerHash: varchar('viewer_hash', { length: 80 }).notNull(),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true, precision: 3 }).notNull(),
+    createdAt,
+  },
+  (table) => [
+    unique('publication_views_dedupe_unique').on(
+      table.publicationId,
+      table.viewerHash,
+      table.windowStartedAt,
+    ),
+    index('publication_views_publication_created_idx').on(table.publicationId, table.createdAt),
+  ],
+);
+
+export const publicationRankings = pgTable(
+  'publication_rankings',
+  {
+    publicationId: uuid('publication_id')
+      .primaryKey()
+      .references(() => publications.id, { onDelete: 'cascade' }),
+    upvotes: integer('upvotes').notNull().default(0),
+    downvotes: integer('downvotes').notNull().default(0),
+    views: integer('views').notNull().default(0),
+    score: integer('score').notNull().default(0),
+    updatedAt,
+  },
+  (table) => [
+    index('publication_rankings_score_idx').on(table.score, table.updatedAt),
+    check(
+      'publication_rankings_counts_check',
+      sql`${table.upvotes} >= 0 and ${table.downvotes} >= 0 and ${table.views} >= 0`,
     ),
   ],
 );

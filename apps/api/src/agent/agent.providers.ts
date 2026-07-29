@@ -3,6 +3,13 @@ import { loadApiEnvironment } from '@agentpress/config';
 import { connectDatabase } from '@agentpress/database';
 import type { DatabaseConnection } from '@agentpress/database';
 import { AutosaveService, ProposalService, RedisWriterLease } from '@agentpress/editor-application';
+import {
+  ArkImageGenerator,
+  MediaService,
+  MinioObjectStorage,
+  type ImageGenerator,
+} from '@agentpress/media-application';
+import { PublicationService } from '@agentpress/publication-application';
 import type { OnApplicationShutdown, Provider } from '@nestjs/common';
 import { ToolRegistry } from '@agentpress/tool-runtime';
 import { Redis } from 'ioredis';
@@ -14,6 +21,17 @@ const databaseConnection = connectDatabase(environment.databaseUrl);
 const eventBus = new RedisRunEventBus(environment.redisUrl);
 const writerRedis = new Redis(environment.redisUrl, { lazyConnect: true, maxRetriesPerRequest: 3 });
 const writerLease = new RedisWriterLease(writerRedis);
+const objectStorage = new MinioObjectStorage(environment.s3);
+const imageGenerator: ImageGenerator =
+  environment.arkApiKey && environment.arkImageModel
+    ? new ArkImageGenerator({
+        apiKey: environment.arkApiKey,
+        baseUrl: environment.arkBaseUrl,
+        model: environment.arkImageModel,
+      })
+    : {
+        generate: () => Promise.reject(new Error('ARK_API_KEY and ARK_IMAGE_MODEL are required')),
+      };
 const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
 
 class AgentResources implements OnApplicationShutdown {
@@ -47,6 +65,17 @@ export const agentProviders: Provider[] = [
   {
     provide: ProposalService,
     useFactory: (connection: DatabaseConnection) => new ProposalService(connection.db),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: PublicationService,
+    useFactory: (connection: DatabaseConnection) => new PublicationService(connection.db),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: MediaService,
+    useFactory: (connection: DatabaseConnection) =>
+      new MediaService({ database: connection.db, storage: objectStorage, imageGenerator }),
     inject: [DATABASE_CONNECTION],
   },
   {

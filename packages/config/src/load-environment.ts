@@ -23,6 +23,13 @@ const ApiEnvironmentSchema = Type.Intersect([
     API_PORT: Type.Optional(Type.String({ pattern: '^[0-9]{1,5}$' })),
     DATABASE_URL: Type.Optional(Type.String({ minLength: 1 })),
     REDIS_URL: Type.Optional(Type.String({ minLength: 1 })),
+    S3_ENDPOINT: Type.Optional(Type.String({ minLength: 1 })),
+    S3_BUCKET: Type.Optional(Type.String({ minLength: 1 })),
+    S3_ACCESS_KEY: Type.Optional(Type.String({ minLength: 1 })),
+    S3_SECRET_KEY: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_API_KEY: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_IMAGE_MODEL: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
 
@@ -32,6 +39,17 @@ export type ApiEnvironment = {
   readonly port: number;
   readonly databaseUrl: string;
   readonly redisUrl: string;
+  readonly s3: {
+    readonly endPoint: string;
+    readonly port: number;
+    readonly useSSL: boolean;
+    readonly bucket: string;
+    readonly accessKey: string;
+    readonly secretKey: string;
+  };
+  readonly arkApiKey?: string;
+  readonly arkBaseUrl: string;
+  readonly arkImageModel?: string;
 };
 
 const WorkerEnvironmentSchema = Type.Intersect([
@@ -85,6 +103,7 @@ export function loadApiEnvironment(source: NodeJS.ProcessEnv = process.env): Api
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('API_PORT must be an integer between 1 and 65535');
   }
+  const s3Url = new URL(clean.S3_ENDPOINT ?? 'http://localhost:9000');
 
   return {
     ...commonValues(source),
@@ -92,6 +111,17 @@ export function loadApiEnvironment(source: NodeJS.ProcessEnv = process.env): Api
     databaseUrl:
       clean.DATABASE_URL ?? 'postgresql://agentpress:agentpress@localhost:5432/agentpress',
     redisUrl: clean.REDIS_URL ?? 'redis://localhost:16379',
+    s3: {
+      endPoint: s3Url.hostname,
+      port: Number(s3Url.port || (s3Url.protocol === 'https:' ? '443' : '80')),
+      useSSL: s3Url.protocol === 'https:',
+      bucket: clean.S3_BUCKET ?? 'agentpress',
+      accessKey: clean.S3_ACCESS_KEY ?? 'agentpress',
+      secretKey: clean.S3_SECRET_KEY ?? 'agentpress-local-secret',
+    },
+    arkBaseUrl: clean.ARK_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3',
+    ...(clean.ARK_API_KEY ? { arkApiKey: clean.ARK_API_KEY } : {}),
+    ...(clean.ARK_IMAGE_MODEL ? { arkImageModel: clean.ARK_IMAGE_MODEL } : {}),
   };
 }
 

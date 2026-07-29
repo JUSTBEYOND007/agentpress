@@ -4,7 +4,6 @@ packages:
 
 catalog:
   '@assistant-ui/react': 0.15.1
-  '@confluentinc/kafka-javascript': 1.10.0
   '@earendil-works/pi-agent-core': 0.82.1
   '@earendil-works/pi-ai': 0.82.1
   '@modelcontextprotocol/sdk': 1.30.0
@@ -21,6 +20,7 @@ catalog:
   drizzle-orm: 0.45.2
   fastify: 5.10.0
   ioredis: 5.8.2
+  kafkajs: 2.2.4
   minio: 8.0.6
   nestjs-pino: 4.5.0
   next: 16.2.12

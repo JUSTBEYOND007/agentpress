@@ -10,7 +10,7 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - Next.js and React — MIT
 - NestJS and Fastify — MIT
 - Drizzle ORM — Apache-2.0
-- Confluent Kafka JavaScript client — Apache-2.0
+- KafkaJS 2.2.4 — MIT; patched locally to clamp empty request-queue timers for Node 24 compatibility
 - ioredis — MIT
 - Tiptap and ProseMirror — MIT
 - assistant-ui — MIT

@@ -10,6 +10,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Inject,
   NotFoundException,
   Param,
   Post,
@@ -34,9 +35,9 @@ type ProposalBody = { readonly userId?: unknown; readonly decisions?: unknown };
 @Controller()
 export class EditorController {
   public constructor(
-    private readonly autosave: AutosaveService,
-    private readonly proposals: ProposalService,
-    private readonly leases: RedisWriterLease,
+    @Inject(AutosaveService) private readonly autosave: AutosaveService,
+    @Inject(ProposalService) private readonly proposals: ProposalService,
+    @Inject(RedisWriterLease) private readonly leases: RedisWriterLease,
   ) {}
   @Post('articles/:articleId/writer-lease')
   @HttpCode(200)

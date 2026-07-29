@@ -16,6 +16,9 @@
         "@emnapi/core": "1.11.1",
         "@emnapi/runtime": "1.11.1"
       }
+    },
+    "patchedDependencies": {
+      "kafkajs@2.2.4": "patches/kafkajs@2.2.4.patch"
     }
   },
   "scripts": {
@@ -36,8 +39,8 @@
     "@types/node": "24.10.1",
     "eslint": "10.8.0",
     "prettier": "3.8.2",
-    "turbo": "2.10.7",
     "tsx": "4.21.0",
+    "turbo": "2.10.7",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.10"

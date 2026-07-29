@@ -5,6 +5,8 @@ import { HealthController } from './health.controller.js';
 import { AgentController } from './agent/agent.controller.js';
 import { agentProviders } from './agent/agent.providers.js';
 import { EditorController } from './editor/editor.controller.js';
+import { MediaController } from './media/media.controller.js';
+import { PublicationController } from './publication/publication.controller.js';
 
 @Module({
   imports: [
@@ -20,7 +22,13 @@ import { EditorController } from './editor/editor.controller.js';
       },
     }),
   ],
-  controllers: [HealthController, AgentController, EditorController],
+  controllers: [
+    HealthController,
+    AgentController,
+    EditorController,
+    MediaController,
+    PublicationController,
+  ],
   providers: [...agentProviders],
 })
 export class AppModule {}

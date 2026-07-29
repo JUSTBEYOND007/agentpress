@@ -12,6 +12,7 @@ import {
   Controller,
   Headers,
   HttpCode,
+  Inject,
   NotFoundException,
   Optional,
   Param,
@@ -52,9 +53,9 @@ class StreamConnectionState {
 @Controller()
 export class AgentController {
   public constructor(
-    private readonly runs: DirectRunService,
-    private readonly eventBus: RedisRunEventBus,
-    @Optional() private readonly toolCalls?: ToolCallService,
+    @Inject(DirectRunService) private readonly runs: DirectRunService,
+    @Inject(RedisRunEventBus) private readonly eventBus: RedisRunEventBus,
+    @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
   ) {}
 
   @Post('conversations/:conversationId/runs')

@@ -13,9 +13,12 @@
   },
   "dependencies": {
     "@agentpress/config": "workspace:*",
+    "@agentpress/database": "workspace:*",
     "@agentpress/observability": "workspace:*",
+    "@agentpress/publication-application": "workspace:*",
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",
+    "kafkajs": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:"
   }

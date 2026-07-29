@@ -18,9 +18,9 @@ import {
   type DatabaseConnection,
 } from '@agentpress/database';
 import { createServiceLogger } from '@agentpress/observability';
-import { KafkaJS } from '@confluentinc/kafka-javascript';
 import { Injectable, type OnApplicationShutdown, type OnModuleInit } from '@nestjs/common';
 import { Redis } from 'ioredis';
+import { Kafka, Partitioners } from 'kafkajs';
 
 import { RedisRunLeaseManager } from './redis-run-lease.js';
 
@@ -46,18 +46,17 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     maxRetriesPerRequest: null,
     lazyConnect: true,
   });
-  private readonly kafka = new KafkaJS.Kafka({
-    'bootstrap.servers': this.environment.kafkaBrokers.join(','),
-    'client.id': `agentpress-agent-worker-${String(process.pid)}`,
+  private readonly kafka = new Kafka({
+    brokers: [...this.environment.kafkaBrokers],
+    clientId: `agentpress-agent-worker-${String(process.pid)}`,
   });
   private readonly producer = this.kafka.producer({
-    'enable.idempotence': true,
-    acks: -1,
+    createPartitioner: Partitioners.DefaultPartitioner,
+    idempotent: true,
+    maxInFlightRequests: 1,
   });
   private readonly consumer = this.kafka.consumer({
-    'group.id': CONSUMER_GROUP,
-    'auto.offset.reset': 'earliest',
-    'enable.auto.commit': true,
+    groupId: CONSUMER_GROUP,
   });
   private readonly activeRuns = new Map<string, AbortController>();
   private readonly runLeases = new RedisRunLeaseManager(this.redisPublisher);
@@ -84,6 +83,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
   private stopping = false;
 
   public async onModuleInit(): Promise<void> {
+    await this.ensureTopic();
     await Promise.all([
       this.redisPublisher.connect(),
       this.redisSubscriber.connect(),
@@ -96,7 +96,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       }
     });
     await this.redisSubscriber.subscribe(AGENT_RUN_CANCEL_CHANNEL);
-    await this.consumer.subscribe({ topics: [AGENT_RUN_COMMAND_TOPIC] });
+    await this.consumer.subscribe({ topics: [AGENT_RUN_COMMAND_TOPIC], fromBeginning: true });
     await this.consumer.run({
       partitionsConsumedConcurrently: 8,
       eachMessage: async ({ topic, partition, message }) => {
@@ -116,6 +116,20 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       { brokers: this.environment.kafkaBrokers, topic: AGENT_RUN_COMMAND_TOPIC },
       'Agent worker transports started',
     );
+  }
+
+  private async ensureTopic(): Promise<void> {
+    const admin = this.kafka.admin();
+    await admin.connect();
+    try {
+      if ((await admin.listTopics()).includes(AGENT_RUN_COMMAND_TOPIC)) return;
+      await admin.createTopics({
+        topics: [{ topic: AGENT_RUN_COMMAND_TOPIC }],
+        waitForLeaders: true,
+      });
+    } finally {
+      await admin.disconnect();
+    }
   }
 
   public async onApplicationShutdown(): Promise<void> {

@@ -10,6 +10,15 @@ describe('loadApiEnvironment', () => {
       port: 4000,
       databaseUrl: 'postgresql://agentpress:agentpress@localhost:5432/agentpress',
       redisUrl: 'redis://localhost:16379',
+      s3: {
+        endPoint: 'localhost',
+        port: 9000,
+        useSSL: false,
+        bucket: 'agentpress',
+        accessKey: 'agentpress',
+        secretKey: 'agentpress-local-secret',
+      },
+      arkBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     });
   });
 
