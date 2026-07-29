@@ -16,6 +16,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  vector,
 } from 'drizzle-orm/pg-core';
 
 export const DATABASE_AGENT_RUN_STATES = [
@@ -515,6 +516,56 @@ export const runDirectives = pgTable(
       'run_directives_status_check',
       sql`${table.status} in ('pending', 'applied', 'consumed')`,
     ),
+  ],
+);
+
+export const knowledgeDocuments = pgTable(
+  'knowledge_documents',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sourceUri: text('source_uri').notNull(),
+    title: text('title').notNull(),
+    revisionHash: varchar('revision_hash', { length: 80 }).notNull(),
+    acl: jsonb('acl').$type<readonly string[]>().notNull(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    unique('knowledge_documents_source_revision_unique').on(
+      table.workspaceId,
+      table.sourceUri,
+      table.revisionHash,
+    ),
+    index('knowledge_documents_workspace_idx').on(table.workspaceId, table.updatedAt),
+  ],
+);
+
+export const knowledgeChunks = pgTable(
+  'knowledge_chunks',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
+    ordinal: integer('ordinal').notNull(),
+    content: text('content').notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    embedding: vector('embedding', { dimensions: 1536 }).notNull(),
+    tokenCount: integer('token_count').notNull(),
+    createdAt,
+  },
+  (table) => [
+    unique('knowledge_chunks_document_ordinal_unique').on(table.documentId, table.ordinal),
+    index('knowledge_chunks_fts_idx').using('gin', sql`to_tsvector('simple', ${table.content})`),
+    index('knowledge_chunks_embedding_hnsw_idx').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops'),
+    ),
+    check('knowledge_chunks_ordinal_check', sql`${table.ordinal} >= 0`),
+    check('knowledge_chunks_token_count_check', sql`${table.tokenCount} > 0`),
   ],
 );
 

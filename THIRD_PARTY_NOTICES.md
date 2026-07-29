@@ -18,9 +18,25 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 
 ## Vendored Or Adapted Sources
 
-No third-party source code has been copied into the repository yet. Every future copied unit must
-add its repository, immutable commit, upstream path, local path, license, and adaptation summary
-here before it is committed.
+### Pi Web Access SSRF Protection
+
+- Upstream: `https://github.com/nicobailon/pi-web-access`
+- Commit: `b537183632d555d1b2e61cb8f6bdf585766f2380`
+- Source: `ssrf-protection.ts`, `test/ssrf-protection.test.mjs`
+- Local: `packages/web-research/src/ssrf-guard.ts`, `packages/web-research/test/ssrf-guard.test.ts`
+- License: MIT, Copyright (c) 2025 Nico Bailon
+- Changes: retained IP range, IPv4-mapped IPv6, DNS-answer and redirect defenses; removed desktop configuration and proxy exceptions; added injected DNS/fetch boundaries and AgentPress error contracts.
+- Verification: literal/resolved private targets, mixed DNS, redirect-to-loopback, redirect limit, media type and payload limits.
+
+### Pi MCP Adapter Lifecycle Tests
+
+- Upstream: `https://github.com/nicobailon/pi-mcp-adapter`
+- Commit: `e588296e28b36a22b081d40fcfba76f418d6f84e`
+- Source: `server-manager.ts`, `mcp-output-guard.ts`, `__tests__/server-manager-reconnect.test.ts`, `__tests__/init-failure-state.test.ts`, `__tests__/mcp-output-guard.test.ts`
+- Local: `packages/mcp-runtime/src/server-manager.ts`, `packages/mcp-runtime/src/output-guard.ts`, `packages/mcp-runtime/test/`
+- License: MIT, Copyright (c) 2026 Nico Bailon
+- Changes: reduced lifecycle to three in-process built-in servers; removed stdio, arbitrary remote configuration, OAuth and UI state; adapted guards to TypeBox and AgentPress Tool Registry.
+- Verification: lazy coalesced startup, degraded recovery, deterministic close, schema mismatch, secret redaction and hostile output size.
 
 ## Visual Reference
 

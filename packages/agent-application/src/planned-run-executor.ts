@@ -835,7 +835,7 @@ function capabilitiesFor(role: SpecialistRole): readonly string[] {
   switch (role) {
     case 'researcher':
     case 'fact_checker':
-      return ['workspace.read', 'evidence.read'];
+      return ['web.research', 'workspace.knowledge.read', 'evidence.read'];
     case 'writer':
     case 'editor':
       return ['article.read', 'evidence.read'];
