@@ -21,6 +21,8 @@ const ApiEnvironmentSchema = Type.Intersect([
   CommonEnvironmentSchema,
   Type.Object({
     API_PORT: Type.Optional(Type.String({ pattern: '^[0-9]{1,5}$' })),
+    DATABASE_URL: Type.Optional(Type.String({ minLength: 1 })),
+    REDIS_URL: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
 
@@ -28,9 +30,32 @@ export type ApiEnvironment = {
   readonly logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   readonly nodeEnv: 'development' | 'test' | 'production';
   readonly port: number;
+  readonly databaseUrl: string;
+  readonly redisUrl: string;
 };
 
-export type WorkerEnvironment = Omit<ApiEnvironment, 'port'>;
+const WorkerEnvironmentSchema = Type.Intersect([
+  CommonEnvironmentSchema,
+  Type.Object({
+    DATABASE_URL: Type.Optional(Type.String({ minLength: 1 })),
+    REDIS_URL: Type.Optional(Type.String({ minLength: 1 })),
+    KAFKA_BROKERS: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_API_KEY: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_MODEL_PRO: Type.Optional(Type.String({ minLength: 1 })),
+  }),
+]);
+
+export type WorkerEnvironment = {
+  readonly logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
+  readonly nodeEnv: 'development' | 'test' | 'production';
+  readonly databaseUrl: string;
+  readonly redisUrl: string;
+  readonly kafkaBrokers: readonly string[];
+  readonly arkApiKey?: string;
+  readonly arkBaseUrl: string;
+  readonly arkModelPro?: string;
+};
 
 function cleanEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
@@ -38,7 +63,7 @@ function cleanEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
   );
 }
 
-function commonValues(source: NodeJS.ProcessEnv): WorkerEnvironment {
+function commonValues(source: NodeJS.ProcessEnv): Pick<WorkerEnvironment, 'logLevel' | 'nodeEnv'> {
   const clean = cleanEnvironment(source);
   if (!Value.Check(CommonEnvironmentSchema, clean)) {
     throw new Error('Invalid common environment configuration');
@@ -61,9 +86,36 @@ export function loadApiEnvironment(source: NodeJS.ProcessEnv = process.env): Api
     throw new Error('API_PORT must be an integer between 1 and 65535');
   }
 
-  return { ...commonValues(source), port };
+  return {
+    ...commonValues(source),
+    port,
+    databaseUrl:
+      clean.DATABASE_URL ?? 'postgresql://agentpress:agentpress@localhost:5432/agentpress',
+    redisUrl: clean.REDIS_URL ?? 'redis://localhost:16379',
+  };
 }
 
 export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): WorkerEnvironment {
-  return commonValues(source);
+  const clean = cleanEnvironment(source);
+  if (!Value.Check(WorkerEnvironmentSchema, clean)) {
+    throw new Error('Invalid worker environment configuration');
+  }
+  const kafkaBrokers = (clean.KAFKA_BROKERS ?? 'localhost:9092')
+    .split(',')
+    .map((broker) => broker.trim())
+    .filter(Boolean);
+  if (kafkaBrokers.length === 0) {
+    throw new Error('KAFKA_BROKERS must contain at least one broker');
+  }
+
+  return {
+    ...commonValues(source),
+    databaseUrl:
+      clean.DATABASE_URL ?? 'postgresql://agentpress:agentpress@localhost:5432/agentpress',
+    redisUrl: clean.REDIS_URL ?? 'redis://localhost:16379',
+    kafkaBrokers,
+    arkBaseUrl: clean.ARK_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3',
+    ...(clean.ARK_API_KEY ? { arkApiKey: clean.ARK_API_KEY } : {}),
+    ...(clean.ARK_MODEL_PRO ? { arkModelPro: clean.ARK_MODEL_PRO } : {}),
+  };
 }

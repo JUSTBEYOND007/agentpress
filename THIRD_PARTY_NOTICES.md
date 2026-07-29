@@ -10,6 +10,8 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - Next.js and React — MIT
 - NestJS and Fastify — MIT
 - Drizzle ORM — Apache-2.0
+- Confluent Kafka JavaScript client — Apache-2.0
+- ioredis — MIT
 - Tiptap and ProseMirror — MIT
 - assistant-ui — MIT
 - Model Context Protocol TypeScript SDK — MIT

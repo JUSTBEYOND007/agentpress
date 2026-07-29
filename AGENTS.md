@@ -11,6 +11,8 @@
 ## Frontend Reference
 
 - 前端的主要视觉与布局参考为 `docs/references/ui/notion-agent-editor-reference.png`。实现和评审相关页面前必须先查看该原图。
+- Agent 对话、消息流、composer 和 thread 基础交互必须复用成熟开源的 `assistant-ui@0.15.1`，通过 AgentPress adapter 对接 RunEvent/SSE；不得自行重复实现通用 Agent 聊天组件。
+- 自研前端组件仅用于计划、任务、Specialist、工具审批、Evidence/引用、费用、恢复状态和文章 diff 等 AgentPress 特有能力。
 - 工作台采用截图中的桌面三栏结构：左侧工作区导航与内容树、中间无卡片包裹的文章编辑器、右侧可持续对话的 Agent 工作台。
 - 参考 Notion 的信息密度、留白、排版层级、细边框、低干扰工具栏和上下文操作方式，并替换为 AgentPress 品牌、领域文案和真实功能。
 - 右侧 Agent 工作台需要展示多轮对话、运行步骤、工具结果、文章修改提案和接受/拒绝入口；正文修改仍遵循项目规定的红删绿增 diff，不照搬截图中的蓝色选区表现。

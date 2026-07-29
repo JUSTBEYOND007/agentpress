@@ -1,0 +1,30 @@
+{
+  "name": "@agentpress/agent-application",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "lint": "eslint src test",
+    "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
+    "test:integration": "vitest run test/direct-run.integration.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentpress/agent-runtime": "workspace:*",
+    "@agentpress/database": "workspace:*",
+    "drizzle-orm": "catalog:"
+  }
+}

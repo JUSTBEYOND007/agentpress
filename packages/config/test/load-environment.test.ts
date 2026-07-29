@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadApiEnvironment } from '../src/index.js';
+import { loadApiEnvironment, loadWorkerEnvironment } from '../src/index.js';
 
 describe('loadApiEnvironment', () => {
   it('provides local defaults', () => {
@@ -8,6 +8,8 @@ describe('loadApiEnvironment', () => {
       logLevel: 'info',
       nodeEnv: 'development',
       port: 4000,
+      databaseUrl: 'postgresql://agentpress:agentpress@localhost:5432/agentpress',
+      redisUrl: 'redis://localhost:16379',
     });
   });
 
@@ -15,5 +17,19 @@ describe('loadApiEnvironment', () => {
     expect(() => loadApiEnvironment({ API_PORT: '70000' })).toThrow(
       'API_PORT must be an integer between 1 and 65535',
     );
+  });
+
+  it('parses worker transport and Ark configuration', () => {
+    expect(
+      loadWorkerEnvironment({
+        KAFKA_BROKERS: 'kafka-1:9092, kafka-2:9092',
+        ARK_API_KEY: 'secret',
+        ARK_MODEL_PRO: 'endpoint-id',
+      }),
+    ).toMatchObject({
+      kafkaBrokers: ['kafka-1:9092', 'kafka-2:9092'],
+      arkApiKey: 'secret',
+      arkModelPro: 'endpoint-id',
+    });
   });
 });

@@ -12,12 +12,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/agent-application": "workspace:*",
     "@agentpress/config": "workspace:*",
     "@agentpress/contracts": "workspace:*",
+    "@agentpress/database": "workspace:*",
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",
     "@nestjs/platform-fastify": "catalog:",
     "fastify": "catalog:",
+    "ioredis": "catalog:",
     "nestjs-pino": "catalog:",
     "pino": "catalog:",
     "reflect-metadata": "catalog:",

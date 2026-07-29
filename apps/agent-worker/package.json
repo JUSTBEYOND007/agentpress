@@ -12,10 +12,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/agent-application": "workspace:*",
+    "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/config": "workspace:*",
+    "@agentpress/database": "workspace:*",
     "@agentpress/observability": "workspace:*",
+    "@confluentinc/kafka-javascript": "catalog:",
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",
+    "ioredis": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:"
   }
