@@ -103,7 +103,7 @@ export class EditorController {
   ) {
     await this.authorization.assertArticleAccess(articleId, user.id);
     const draft = await this.autosave.recover(articleId, user.id);
-    if (!draft) throw new NotFoundException('Draft does not exist');
+    if (!draft) return { document: null };
     return draft;
   }
   @Post('articles/:articleId/draft/commit')
