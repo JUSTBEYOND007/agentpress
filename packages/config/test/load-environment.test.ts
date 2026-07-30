@@ -19,6 +19,8 @@ describe('loadApiEnvironment', () => {
         secretKey: 'agentpress-local-secret',
       },
       arkBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      logtoEndpoint: 'http://localhost:3001',
+      logtoApiResource: 'http://localhost:4000/api',
     });
   });
 
@@ -34,11 +36,13 @@ describe('loadApiEnvironment', () => {
         KAFKA_BROKERS: 'kafka-1:9092, kafka-2:9092',
         ARK_API_KEY: 'secret',
         ARK_MODEL_PRO: 'endpoint-id',
+        ARK_EMBEDDING_MODEL: 'embedding-endpoint-id',
       }),
     ).toMatchObject({
       kafkaBrokers: ['kafka-1:9092', 'kafka-2:9092'],
       arkApiKey: 'secret',
       arkModelPro: 'endpoint-id',
+      arkEmbeddingModel: 'embedding-endpoint-id',
     });
   });
 });

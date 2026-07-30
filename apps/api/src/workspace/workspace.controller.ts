@@ -8,7 +8,9 @@ import {
   type DatabaseConnection,
   workspaceMembers,
   workspaces,
+  enqueueOutboxMessage,
 } from '@agentpress/database';
+import { ARTICLE_INDEX_COMMAND_TOPIC } from '@agentpress/knowledge-retrieval';
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
 import { asc, desc, eq, sql } from 'drizzle-orm';
 
@@ -163,6 +165,16 @@ export class WorkspaceController {
         title,
       });
       await transaction.insert(conversationBranches).values({ id: branchId, conversationId });
+      const indexMessageId = randomUUID();
+      await enqueueOutboxMessage(transaction, {
+        id: indexMessageId,
+        aggregateType: 'ArticleRevision',
+        aggregateId: revisionId,
+        topic: ARTICLE_INDEX_COMMAND_TOPIC,
+        messageKey: articleId,
+        payload: { command: 'article.index', messageId: indexMessageId, revisionId },
+        occurredAt: new Date(),
+      });
     });
 
     return {

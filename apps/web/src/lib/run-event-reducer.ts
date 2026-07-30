@@ -20,7 +20,7 @@ export type RunView = {
   readonly revision: number;
   readonly tasks: readonly TaskView[];
   readonly tools: readonly ToolView[];
-  readonly evidence: readonly { title: string; source: string }[];
+  readonly evidence: readonly { evidenceId: string; title: string; source: string; revision?: string }[];
   readonly usage: { inputTokens: number; outputTokens: number; costUsd: number };
   readonly recovery: string;
   readonly proposal?: ProposalView;
@@ -120,13 +120,52 @@ export function reduceRunEvent(state: RunView, event: AgentPressRunEvent): RunVi
       args: recordValue(payload.arguments ?? payload.args ?? current?.args),
     };
     const proposal = event.type === 'tool.succeeded' ? parseProposal(payload.output) : undefined;
+    const evidence = event.type === 'tool.succeeded' ? parseEvidence(payload.output) : [];
     return {
       ...base,
       tools: [...state.tools.filter((item) => item.id !== tool.id), tool],
       ...(proposal ? { proposal } : {}),
+      evidence:
+        evidence.length > 0
+          ? [...state.evidence.filter((item) => !evidence.some((next) => next.evidenceId === item.evidenceId)), ...evidence]
+          : state.evidence,
     };
   }
   return base;
+}
+
+function parseEvidence(value: unknown): RunView['evidence'] {
+  const guarded = recordValue(value);
+  const items = Array.isArray(guarded.value) ? guarded.value : [];
+  return items.flatMap((item, index) => {
+    const evidence = recordValue(item);
+    const source = firstNonEmpty(
+      stringValue(evidence.source),
+      stringValue(evidence.url),
+      stringValue(evidence.pageUrl),
+    );
+    const title = firstNonEmpty(
+      stringValue(evidence.title),
+      stringValue(evidence.text).slice(0, 80),
+      source,
+    );
+    if (!source || !title) return [];
+    const revision = firstNonEmpty(
+      stringValue(evidence.revisionHash),
+      stringValue(evidence.contentHash),
+    );
+    return [
+      {
+        evidenceId: firstNonEmpty(
+          stringValue(evidence.evidenceId),
+          `${source}:${revision}:${String(index)}`,
+        ),
+        title,
+        source,
+        ...(revision ? { revision } : {}),
+      },
+    ];
+  });
 }
 
 function parseProposal(value: unknown): ProposalView | undefined {

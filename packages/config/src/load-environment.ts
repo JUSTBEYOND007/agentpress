@@ -65,6 +65,7 @@ const WorkerEnvironmentSchema = Type.Intersect([
     ARK_API_KEY: Type.Optional(Type.String({ minLength: 1 })),
     ARK_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_MODEL_PRO: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_EMBEDDING_MODEL: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
 
@@ -77,6 +78,7 @@ export type WorkerEnvironment = {
   readonly arkApiKey?: string;
   readonly arkBaseUrl: string;
   readonly arkModelPro?: string;
+  readonly arkEmbeddingModel?: string;
 };
 
 function cleanEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
@@ -153,5 +155,6 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
     arkBaseUrl: clean.ARK_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3',
     ...(clean.ARK_API_KEY ? { arkApiKey: clean.ARK_API_KEY } : {}),
     ...(clean.ARK_MODEL_PRO ? { arkModelPro: clean.ARK_MODEL_PRO } : {}),
+    ...(clean.ARK_EMBEDDING_MODEL ? { arkEmbeddingModel: clean.ARK_EMBEDDING_MODEL } : {}),
   };
 }

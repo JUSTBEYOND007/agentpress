@@ -71,4 +71,31 @@ describe('AgentPress run event reducer', () => {
       diffs: [{ operationId: 'operation-1', blockId: 'block-1' }],
     });
   });
+
+  it('extracts revision-bound Evidence from guarded MCP output', () => {
+    const state = reduceRunEvent(initialRunView, {
+      type: 'tool.succeeded',
+      payload: {
+        toolCallId: 'tool-rag',
+        output: {
+          value: [
+            {
+              evidenceId: 'workspace:chunk:hash',
+              source: 'article:article-1',
+              text: 'Kafka evidence',
+              revisionHash: 'revision-hash',
+            },
+          ],
+        },
+      },
+    });
+    expect(state.evidence).toEqual([
+      {
+        evidenceId: 'workspace:chunk:hash',
+        title: 'Kafka evidence',
+        source: 'article:article-1',
+        revision: 'revision-hash',
+      },
+    ]);
+  });
 });

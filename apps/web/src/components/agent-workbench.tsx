@@ -611,9 +611,9 @@ function RunInspector({
               <FileCheck2 aria-hidden="true" size={14} /> Evidence
             </h3>
             {run.evidence.map((item) => (
-              <div key={item.title}>
+              <div key={item.evidenceId}>
                 <strong>{item.title}</strong>
-                <span>{item.source}</span>
+                <span title={item.revision}>{item.source}</span>
               </div>
             ))}
           </section>

@@ -8,8 +8,6 @@ import {
 import {
   agentRuns,
   type AgentPressDatabase,
-  knowledgeChunks,
-  knowledgeDocuments,
   rootRequests,
   workspaceMembers,
 } from '@agentpress/database';
@@ -22,7 +20,9 @@ import {
 } from '@agentpress/mcp-runtime';
 import { ToolRegistry } from '@agentpress/tool-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { ArkEmbeddingProvider, PostgresHybridSearch } from '@agentpress/knowledge-retrieval';
+import { loadWorkerEnvironment } from '@agentpress/config';
+import { and, eq } from 'drizzle-orm';
 
 export function createBuiltInToolRuntime(
   database: AgentPressDatabase,
@@ -40,6 +40,16 @@ export function createBuiltInToolRuntime(
 }
 
 function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
+  const environment = loadWorkerEnvironment();
+  const embeddings =
+    environment.arkApiKey && environment.arkEmbeddingModel
+      ? new ArkEmbeddingProvider({
+          apiKey: environment.arkApiKey,
+          baseUrl: environment.arkBaseUrl,
+          model: environment.arkEmbeddingModel,
+        })
+      : undefined;
+  const hybridSearch = new PostgresHybridSearch(database);
   return {
     web_research: async ({ query, limit }, signal) => {
       const endpoint = new URL('https://zh.wikipedia.org/w/api.php');
@@ -97,36 +107,17 @@ function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
         `role:${authorization.role}`,
         'workspace:members',
       ];
-      const rows = await database
-        .select({
-          chunkId: knowledgeChunks.id,
-          source: knowledgeDocuments.sourceUri,
-          title: knowledgeDocuments.title,
-          revisionHash: knowledgeDocuments.revisionHash,
-          contentHash: knowledgeChunks.contentHash,
-          text: knowledgeChunks.content,
-        })
-        .from(knowledgeChunks)
-        .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
-        .where(
-          and(
-            eq(knowledgeDocuments.workspaceId, authorization.workspaceId),
-            sql`${knowledgeDocuments.acl} ?| array[${sql.join(
-              principals.map((principal) => sql`${principal}`),
-              sql`, `,
-            )}]::text[]`,
-            or(
-              ilike(knowledgeChunks.content, `%${escapeLike(query)}%`),
-              ilike(knowledgeDocuments.title, `%${escapeLike(query)}%`),
-            ),
-          ),
-        )
-        .orderBy(desc(knowledgeDocuments.updatedAt), knowledgeChunks.ordinal)
-        .limit(limit);
-      return rows.map((row) => ({
-        evidenceId: `workspace:${row.chunkId}:${row.contentHash}`,
-        ...row,
-      }));
+      if (!embeddings)
+        throw new Error('ARK_API_KEY and ARK_EMBEDDING_MODEL are required for workspace RAG');
+      const [embedding] = await embeddings.embed([query]);
+      if (!embedding) throw new Error('Embedding provider returned no query vector');
+      return hybridSearch.search({
+        workspaceId: authorization.workspaceId,
+        principals,
+        query,
+        embedding,
+        limit,
+      });
     },
   };
 }
@@ -189,8 +180,4 @@ function stripTags(value: string): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, '\\$&');
 }

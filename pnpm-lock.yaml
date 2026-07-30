@@ -194,6 +194,9 @@ importers:
       '@agentpress/editor-application':
         specifier: workspace:*
         version: link:../../packages/editor-application
+      '@agentpress/knowledge-retrieval':
+        specifier: workspace:*
+        version: link:../../packages/knowledge-retrieval
       '@agentpress/mcp-runtime':
         specifier: workspace:*
         version: link:../../packages/mcp-runtime
@@ -242,6 +245,9 @@ importers:
       '@agentpress/editor-application':
         specifier: workspace:*
         version: link:../../packages/editor-application
+      '@agentpress/knowledge-retrieval':
+        specifier: workspace:*
+        version: link:../../packages/knowledge-retrieval
       '@agentpress/mcp-runtime':
         specifier: workspace:*
         version: link:../../packages/mcp-runtime
@@ -474,6 +480,9 @@ importers:
       '@agentpress/editor-patch':
         specifier: workspace:*
         version: link:../editor-patch
+      '@agentpress/knowledge-retrieval':
+        specifier: workspace:*
+        version: link:../knowledge-retrieval
       '@agentpress/tool-runtime':
         specifier: workspace:*
         version: link:../tool-runtime

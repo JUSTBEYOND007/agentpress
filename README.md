@@ -17,7 +17,7 @@ pnpm dev
 
 首次启动后在 Logto Console 创建 Single Page App，登记 `http://localhost:3000`（或实际 Web 端口）为 Redirect URI、Post sign-out redirect URI 和 CORS origin；再创建 API Resource `http://localhost:4000/api`。将 App ID 与 Resource 分别写入 `NEXT_PUBLIC_LOGTO_APP_ID` 和 `NEXT_PUBLIC_LOGTO_API_RESOURCE`，API 使用同一个 Resource 作为 `LOGTO_API_RESOURCE`。浏览器通过 Authorization Code + PKCE 登录，API 使用 Logto JWKS 校验 access token，不接受客户端提交的用户 ID。
 
-打开 [http://localhost:3000](http://localhost:3000)，API 健康检查为 [http://localhost:4000/v1/health](http://localhost:4000/v1/health)。`demo:prepare` 会在不存在时从 `.env.example` 创建 `.env`、启动本地依赖并执行迁移。真实 Agent Run 和图片生成需要填写 `ARK_API_KEY`、`ARK_MODEL_PRO` 与 `ARK_IMAGE_MODEL`；没有真实方舟 Key 时 Agent composer 会明确禁用，不会用 Fake Runtime 冒充真实执行。
+打开 [http://localhost:3000](http://localhost:3000)，API 健康检查为 [http://localhost:4000/v1/health](http://localhost:4000/v1/health)。`demo:prepare` 会在不存在时从 `.env.example` 创建 `.env`、启动本地依赖并执行迁移。真实 Agent Run、RAG 和图片生成需要填写 `ARK_API_KEY`、`ARK_MODEL_PRO`、`ARK_EMBEDDING_MODEL` 与 `ARK_IMAGE_MODEL`；没有真实方舟 Key 时 Agent composer 会明确禁用，不会用 Fake Runtime 或伪向量冒充真实执行。
 
 常用命令：
 

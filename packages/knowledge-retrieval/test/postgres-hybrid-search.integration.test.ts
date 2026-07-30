@@ -1,19 +1,79 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   connectDatabase,
+  appUsers,
+  articleRevisions,
+  articles,
   knowledgeChunks,
   knowledgeDocuments,
   workspaces,
 } from '@agentpress/database';
 import { describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 
-import { PostgresHybridSearch } from '../src/index.js';
+import { ArticleKnowledgeIndexer, PostgresHybridSearch } from '../src/index.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
 
 describeWithDatabase('PostgreSQL hybrid retrieval', () => {
+  it('indexes an immutable article revision into deterministic chunks with real provider vectors', async () => {
+    const connection = connectDatabase(connectionString ?? '');
+    const workspaceId = randomUUID();
+    const userId = randomUUID();
+    const articleId = randomUUID();
+    const revisionId = randomUUID();
+    const document = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { blockId: 'block-1' },
+          content: [{ type: 'text', text: 'Kafka durable recovery' }],
+        },
+      ],
+    };
+    await connection.db.insert(appUsers).values({
+      id: userId,
+      logtoSubject: `indexer|${userId}`,
+      displayName: 'Indexer',
+    });
+    await connection.db.insert(workspaces).values({ id: workspaceId, name: 'Indexer' });
+    await connection.db.insert(articles).values({ id: articleId, workspaceId, title: 'Kafka' });
+    await connection.db.insert(articleRevisions).values({
+      id: revisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash: createHash('sha256').update(JSON.stringify(document)).digest('hex'),
+      source: 'manual',
+      createdByUserId: userId,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: revisionId })
+      .where(eq(articles.id, articleId));
+    const vector = Array.from({ length: 1536 }, (_, index) => (index === 0 ? 1 : 0));
+    const indexer = new ArticleKnowledgeIndexer(connection.db, {
+      embed: (texts) => Promise.resolve(texts.map(() => vector)),
+    });
+    await expect(indexer.indexRevision(revisionId)).resolves.toMatchObject({ duplicate: false });
+    await expect(indexer.indexRevision(revisionId)).resolves.toMatchObject({ duplicate: true });
+    const documents = await connection.db
+      .select()
+      .from(knowledgeDocuments)
+      .where(eq(knowledgeDocuments.sourceUri, `article:${articleId}`));
+    expect(documents).toHaveLength(1);
+    const chunks = await connection.db
+      .select()
+      .from(knowledgeChunks)
+      .where(eq(knowledgeChunks.documentId, documents[0]?.id ?? ''));
+    expect(chunks[0]).toMatchObject({ content: 'Kafka durable recovery', ordinal: 0 });
+    await connection.close();
+  });
+
   it('filters workspace and ACL before fusion and emits revision-bound Evidence', async () => {
     const connection = connectDatabase(connectionString ?? '');
     const workspaceId = randomUUID();

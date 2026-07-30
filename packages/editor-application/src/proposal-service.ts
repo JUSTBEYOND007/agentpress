@@ -11,8 +11,10 @@ import {
   articleRevisions,
   editProposalDecisions,
   editProposals,
+  enqueueOutboxMessage,
   type AgentPressDatabase,
 } from '@agentpress/database';
+import { ARTICLE_INDEX_COMMAND_TOPIC } from '@agentpress/knowledge-retrieval';
 import { and, eq, max, sql } from 'drizzle-orm';
 import { EditorApplicationError } from './contracts.js';
 
@@ -186,6 +188,20 @@ export class ProposalService {
               eq(articles.currentRevisionId, proposal.baseRevisionId),
             ),
           );
+        const indexMessageId = this.createId();
+        await enqueueOutboxMessage(transaction, {
+          id: indexMessageId,
+          aggregateType: 'ArticleRevision',
+          aggregateId: revisionId,
+          topic: ARTICLE_INDEX_COMMAND_TOPIC,
+          messageKey: article.id,
+          payload: {
+            command: 'article.index',
+            messageId: indexMessageId,
+            revisionId,
+          },
+          occurredAt: this.now(),
+        });
       }
       await transaction
         .update(editProposals)

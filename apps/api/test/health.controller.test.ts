@@ -14,10 +14,14 @@ describe('HealthController', () => {
     expect(new HealthController({ ARK_API_KEY: 'secret' }).getAgentRuntime()).toEqual({
       provider: 'ark',
       ready: false,
-      missing: ['ARK_MODEL_PRO'],
+      missing: ['ARK_MODEL_PRO', 'ARK_EMBEDDING_MODEL'],
     });
     expect(
-      new HealthController({ ARK_API_KEY: 'secret', ARK_MODEL_PRO: 'endpoint' }).getAgentRuntime(),
+      new HealthController({
+        ARK_API_KEY: 'secret',
+        ARK_MODEL_PRO: 'endpoint',
+        ARK_EMBEDDING_MODEL: 'embedding-endpoint',
+      }).getAgentRuntime(),
     ).toEqual({ provider: 'ark', ready: true, missing: [] });
   });
 });
