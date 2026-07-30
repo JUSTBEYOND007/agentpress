@@ -32,9 +32,29 @@ export function AuthProvider({ children }: { readonly children: ReactNode }): Re
 }
 
 function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  const callbackPending = hasSignInCallbackParameters();
+  return (
+    <>
+      {callbackPending ? <SignInCallback /> : null}
+      <AuthenticatedContent callbackPending={callbackPending}>{children}</AuthenticatedContent>
+    </>
+  );
+}
+
+function SignInCallback(): null {
   useHandleSignInCallback(() => {
     window.history.replaceState({}, '', '/');
   });
+  return null;
+}
+
+function AuthenticatedContent({
+  callbackPending,
+  children,
+}: {
+  readonly callbackPending: boolean;
+  readonly children: ReactNode;
+}): React.JSX.Element {
   // The React SDK marks the overloaded member deprecated even when the object form is used below.
   // eslint-disable-next-line @typescript-eslint/no-deprecated
   const { isAuthenticated, isLoading, error, signIn, signOut, getAccessToken } = useLogto();
@@ -53,7 +73,8 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
     };
   }, [isAuthenticated]);
 
-  if (isLoading && !tokenProviderReady) return <main className="auth-screen">正在验证身份...</main>;
+  if ((callbackPending || isLoading) && !tokenProviderReady)
+    return <main className="auth-screen">正在验证身份...</main>;
   if (error) return <main className="auth-screen">身份验证失败：{error.message}</main>;
   if (!isAuthenticated) {
     return (
@@ -82,6 +103,12 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
       </button>
     </>
   );
+}
+
+function hasSignInCallbackParameters(): boolean {
+  if (typeof window === 'undefined') return false;
+  const search = new URLSearchParams(window.location.search);
+  return search.has('code') && search.has('state');
 }
 
 function rootUrl(): string {
