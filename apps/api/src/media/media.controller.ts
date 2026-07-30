@@ -14,30 +14,32 @@ import {
 import { PublicRoute } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
+import { AuthorizationService } from '../auth/authorization.service.js';
 
 @Controller()
 export class MediaController {
-  public constructor(@Inject(MediaService) private readonly media: MediaService) {}
+  public constructor(
+    @Inject(MediaService) private readonly media: MediaService,
+    @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
+  ) {}
+
+  @Get('workspaces/:workspaceId/media')
+  public async list(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization?.assertWorkspaceMember(workspaceId, user.id);
+    return this.media.list(workspaceId);
+  }
 
   @Post('media/generate')
-  public async generate(
+  public generate(
     @Body() body: Record<string, unknown>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    if (typeof body.approvedToolCallId !== 'string' || typeof body.prompt !== 'string') {
-      throw new BadRequestException('approvedToolCallId and prompt are required');
-    }
-    try {
-      return await this.media.generate({
-        approvedToolCallId: body.approvedToolCallId,
-        userId: user.id,
-        prompt: body.prompt,
-      });
-    } catch (error) {
-      throw new BadRequestException(
-        error instanceof Error ? error.message : 'Media generation failed',
-      );
-    }
+    void body;
+    void user;
+    throw new BadRequestException('Image generation is only available through an approved Agent Tool Call');
   }
 
   @Get('media/:assetId/content')

@@ -18,6 +18,7 @@
     "@agentpress/editor-patch": "workspace:*",
     "@tiptap/core": "catalog:",
     "@tiptap/extension-unique-id": "catalog:",
+    "@tiptap/extension-image": "catalog:",
     "@tiptap/pm": "catalog:",
     "@tiptap/react": "catalog:",
     "@tiptap/starter-kit": "catalog:",

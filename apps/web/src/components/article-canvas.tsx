@@ -1,6 +1,7 @@
 'use client';
 
 import UniqueID from '@tiptap/extension-unique-id';
+import Image from '@tiptap/extension-image';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useRef, useState } from 'react';
@@ -8,6 +9,29 @@ import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../l
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
+const AgentPressImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      assetId: { default: null },
+      attribution: { default: null },
+      license: { default: null },
+      blockId: { default: null },
+    };
+  },
+  renderHTML({ HTMLAttributes }) {
+    const assetId = typeof HTMLAttributes.assetId === 'string' ? HTMLAttributes.assetId : '';
+    const source = typeof HTMLAttributes.src === 'string' ? HTMLAttributes.src : '';
+    return [
+      'img',
+      {
+        ...HTMLAttributes,
+        src: assetId ? `${apiUrl}/media/${assetId}/content` : source,
+        loading: 'lazy',
+      },
+    ];
+  },
+});
 
 export function ArticleCanvas({
   articleId,
@@ -32,6 +56,7 @@ export function ArticleCanvas({
       editable: false,
       extensions: [
         StarterKit,
+        AgentPressImage.configure({ allowBase64: false, inline: false }),
         UniqueID.configure({
           attributeName: 'blockId',
           types: [

@@ -63,6 +63,19 @@ function renderNode(value: unknown, key: string): React.ReactNode {
   if (node.type === 'orderedList') return <ol key={key}>{children}</ol>;
   if (node.type === 'listItem') return <li key={key}>{children}</li>;
   if (node.type === 'hardBreak') return <br key={key} />;
+  if (node.type === 'image') {
+    const attrs = recordValue(node.attrs);
+    const assetId = typeof attrs.assetId === 'string' ? attrs.assetId : '';
+    if (!assetId) return null;
+    const alt = typeof attrs.alt === 'string' ? attrs.alt : '';
+    const attribution = typeof attrs.attribution === 'string' ? attrs.attribution : '';
+    return (
+      <figure className="publication-inline-image" key={key}>
+        <img alt={alt} loading="lazy" src={mediaUrl(assetId)} />
+        {attribution ? <figcaption>{attribution}</figcaption> : null}
+      </figure>
+    );
+  }
   return children;
 }
 

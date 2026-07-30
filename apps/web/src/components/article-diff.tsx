@@ -65,6 +65,10 @@ export function ArticleDiff({
   );
 }
 function blockText(block: DiffEntry['before']): string {
+  if (block?.type === 'image') {
+    const prompt = typeof block.attrs.prompt === 'string' ? block.attrs.prompt : '';
+    return prompt ? `图片 · ${prompt}` : '图片';
+  }
   if (!block?.content) return block?.type ?? '';
   return block.content
     .flatMap((item) =>

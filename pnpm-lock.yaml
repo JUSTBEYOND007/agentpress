@@ -60,6 +60,9 @@ catalogs:
     '@tiptap/core':
       specifier: 3.29.2
       version: 3.29.2
+    '@tiptap/extension-image':
+      specifier: 3.29.2
+      version: 3.29.2
     '@tiptap/extension-unique-id':
       specifier: 3.29.2
       version: 3.29.2
@@ -200,6 +203,9 @@ importers:
       '@agentpress/mcp-runtime':
         specifier: workspace:*
         version: link:../../packages/mcp-runtime
+      '@agentpress/media-application':
+        specifier: workspace:*
+        version: link:../../packages/media-application
       '@agentpress/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -212,6 +218,9 @@ importers:
       '@nestjs/core':
         specifier: 'catalog:'
         version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@sinclair/typebox':
+        specifier: 'catalog:'
+        version: 0.34.41
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)
@@ -347,6 +356,9 @@ importers:
       '@tiptap/core':
         specifier: 'catalog:'
         version: 3.29.2(@tiptap/pm@3.29.2)
+      '@tiptap/extension-image':
+        specifier: 'catalog:'
+        version: 3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))
       '@tiptap/extension-unique-id':
         specifier: 'catalog:'
         version: 3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@tiptap/pm@3.29.2)
@@ -3061,6 +3073,11 @@ packages:
     peerDependencies:
       '@tiptap/core': 3.29.2
       '@tiptap/pm': 3.29.2
+
+  '@tiptap/extension-image@3.29.2':
+    resolution: {integrity: sha512-F+S4iru247mNVZdkNwNDZHeb281DkjsBJinaOGsOyJTvXY+KU5Uq7vY1LQTn493dTfU48Z0yMBUXwJffCT92Mg==}
+    peerDependencies:
+      '@tiptap/core': 3.29.2
 
   '@tiptap/extension-italic@3.29.2':
     resolution: {integrity: sha512-iH63V/5wsaMnY4Jz0+meaAGhaec4AiOzOduzl6ZZr5IyGhZ1kthyW84ELt0dyLI3hNceAUhaNWc+I7+vX0aoXA==}
@@ -7861,6 +7878,10 @@ snapshots:
     dependencies:
       '@tiptap/core': 3.29.2(@tiptap/pm@3.29.2)
       '@tiptap/pm': 3.29.2
+
+  '@tiptap/extension-image@3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))':
+    dependencies:
+      '@tiptap/core': 3.29.2(@tiptap/pm@3.29.2)
 
   '@tiptap/extension-italic@3.29.2(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))':
     dependencies:

@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { agentRuns, mediaAssets, toolCalls, type AgentPressDatabase } from '@agentpress/database';
+import {
+  agentRuns,
+  mediaAssets,
+  rootRequests,
+  toolCalls,
+  type AgentPressDatabase,
+} from '@agentpress/database';
 import { and, eq } from 'drizzle-orm';
 
 import type { ImageGenerator, ObjectStorage } from './contracts.js';
@@ -15,29 +21,29 @@ export class MediaService {
     },
   ) {}
 
-  public async generate(input: {
-    readonly approvedToolCallId: string;
-    readonly userId: string;
+  public async generateForTool(input: {
+    readonly toolCallId: string;
     readonly prompt: string;
   }) {
     const approved = await this.options.database
-      .select({ workspaceId: agentRuns.workspaceId })
+      .select({ workspaceId: agentRuns.workspaceId, userId: rootRequests.requestedByUserId })
       .from(toolCalls)
       .innerJoin(agentRuns, eq(agentRuns.id, toolCalls.runId))
+      .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
       .where(
         and(
-          eq(toolCalls.id, input.approvedToolCallId),
-          eq(toolCalls.status, 'approved'),
+          eq(toolCalls.id, input.toolCallId),
+          eq(toolCalls.status, 'executing'),
           eq(toolCalls.toolId, 'image.generate'),
         ),
       )
       .limit(1);
-    if (!approved[0]) throw new Error('Image generation requires an approved Tool Call');
+    if (!approved[0]?.userId) throw new Error('Image generation requires an executing Tool Call');
     const artifact = await this.options.imageGenerator.generate(input.prompt);
     return this.persist({
       workspaceId: approved[0].workspaceId,
-      userId: input.userId,
-      approvedToolCallId: input.approvedToolCallId,
+      userId: approved[0].userId,
+      approvedToolCallId: input.toolCallId,
       kind: 'generated',
       bytes: artifact.bytes,
       mimeType: artifact.mimeType,
@@ -72,6 +78,24 @@ export class MediaService {
       .limit(1);
     if (!rows[0]) return undefined;
     return this.options.storage.get(rows[0].objectKey);
+  }
+
+  public list(workspaceId: string) {
+    return this.options.database
+      .select({
+        id: mediaAssets.id,
+        kind: mediaAssets.kind,
+        mimeType: mediaAssets.mimeType,
+        checksum: mediaAssets.checksum,
+        sourceUrl: mediaAssets.sourceUrl,
+        license: mediaAssets.license,
+        attribution: mediaAssets.attribution,
+        prompt: mediaAssets.prompt,
+        model: mediaAssets.model,
+        createdAt: mediaAssets.createdAt,
+      })
+      .from(mediaAssets)
+      .where(eq(mediaAssets.workspaceId, workspaceId));
   }
 
   private async persist(input: {
@@ -116,6 +140,19 @@ export class MediaService {
       prompt: input.prompt,
       model: input.model,
     });
-    return { id, objectKey, checksum, mimeType: input.mimeType };
+    return {
+      id,
+      assetId: id,
+      contentUrl: `/v1/media/${id}/content`,
+      objectKey,
+      checksum,
+      mimeType: input.mimeType,
+      kind: input.kind,
+      sourceUrl: input.sourceUrl,
+      license: input.license,
+      attribution: input.attribution,
+      prompt: input.prompt,
+      model: input.model,
+    };
   }
 }

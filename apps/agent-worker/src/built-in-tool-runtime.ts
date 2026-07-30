@@ -22,6 +22,8 @@ import { ToolRegistry } from '@agentpress/tool-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
 import { ArkEmbeddingProvider, PostgresHybridSearch } from '@agentpress/knowledge-retrieval';
 import { loadWorkerEnvironment } from '@agentpress/config';
+import { ArkImageGenerator, MediaService, MinioObjectStorage } from '@agentpress/media-application';
+import { Type } from '@sinclair/typebox';
 import { and, eq } from 'drizzle-orm';
 
 export function createBuiltInToolRuntime(
@@ -35,6 +37,34 @@ export function createBuiltInToolRuntime(
   registerBuiltInMcpTools(registry, new McpClientGateway(manager));
   registerArticleTools(registry, database, new ProposalService(database));
   registerContextTools(registry, new ContextGovernanceService(database));
+  const environment = loadWorkerEnvironment();
+  if (environment.arkApiKey && environment.arkImageModel) {
+    const media = new MediaService({
+      database,
+      storage: new MinioObjectStorage(environment.s3),
+      imageGenerator: new ArkImageGenerator({
+        apiKey: environment.arkApiKey,
+        baseUrl: environment.arkBaseUrl,
+        model: environment.arkImageModel,
+      }),
+    });
+    registry.register({
+      toolId: 'image.generate',
+      version: '1.0.0',
+      owner: 'agentpress.media',
+      description: 'Generate an image, persist it in object storage and return provenance metadata',
+      capabilities: ['image.generate'],
+      inputSchema: Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 4_000 }) }),
+      outputSchema: Type.Any(),
+      risk: 'external_write',
+      sideEffect: 'Calls the configured image model and stores immutable image bytes in MinIO',
+      idempotency: 'provider_key',
+      timeoutMs: 120_000,
+      estimateCost: () => ({ images: 1 }),
+      execute: ({ prompt }, context) =>
+        media.generateForTool({ toolCallId: context.toolCallId, prompt }),
+    });
+  }
   const toolCalls = new ToolCallService({ database, publisher, registry });
   return { bridge: new PersistentToolBridge({ database, registry, toolCalls }), manager };
 }

@@ -162,6 +162,15 @@ button {
   outline: none;
 }
 
+.modal select {
+  width: 100%;
+  border: 1px solid #d7d7d3;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 9px 10px;
+  color: #353632;
+}
+
 .workspace-list-view input:focus,
 .modal input:focus {
   border-color: #5085bd;
@@ -1349,6 +1358,23 @@ button {
   padding: 4px 6px;
   color: #62635e;
   font-size: 10px;
+}
+
+.publication-inline-image {
+  margin: 28px 0;
+}
+
+.publication-inline-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.publication-inline-image figcaption {
+  margin-top: 7px;
+  color: #81827d;
+  font-size: 12px;
 }
 
 .publication-body {

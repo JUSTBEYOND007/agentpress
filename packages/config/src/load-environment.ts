@@ -66,6 +66,11 @@ const WorkerEnvironmentSchema = Type.Intersect([
     ARK_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_MODEL_PRO: Type.Optional(Type.String({ minLength: 1 })),
     ARK_EMBEDDING_MODEL: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_IMAGE_MODEL: Type.Optional(Type.String({ minLength: 1 })),
+    S3_ENDPOINT: Type.Optional(Type.String({ minLength: 1 })),
+    S3_BUCKET: Type.Optional(Type.String({ minLength: 1 })),
+    S3_ACCESS_KEY: Type.Optional(Type.String({ minLength: 1 })),
+    S3_SECRET_KEY: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
 
@@ -79,6 +84,8 @@ export type WorkerEnvironment = {
   readonly arkBaseUrl: string;
   readonly arkModelPro?: string;
   readonly arkEmbeddingModel?: string;
+  readonly arkImageModel?: string;
+  readonly s3: ApiEnvironment['s3'];
 };
 
 function cleanEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
@@ -145,6 +152,7 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
   if (kafkaBrokers.length === 0) {
     throw new Error('KAFKA_BROKERS must contain at least one broker');
   }
+  const s3Url = new URL(clean.S3_ENDPOINT ?? 'http://localhost:9000');
 
   return {
     ...commonValues(source),
@@ -153,8 +161,17 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
     redisUrl: clean.REDIS_URL ?? 'redis://localhost:16379',
     kafkaBrokers,
     arkBaseUrl: clean.ARK_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3',
+    s3: {
+      endPoint: s3Url.hostname,
+      port: Number(s3Url.port || (s3Url.protocol === 'https:' ? '443' : '80')),
+      useSSL: s3Url.protocol === 'https:',
+      bucket: clean.S3_BUCKET ?? 'agentpress',
+      accessKey: clean.S3_ACCESS_KEY ?? 'agentpress',
+      secretKey: clean.S3_SECRET_KEY ?? 'agentpress-local-secret',
+    },
     ...(clean.ARK_API_KEY ? { arkApiKey: clean.ARK_API_KEY } : {}),
     ...(clean.ARK_MODEL_PRO ? { arkModelPro: clean.ARK_MODEL_PRO } : {}),
     ...(clean.ARK_EMBEDDING_MODEL ? { arkEmbeddingModel: clean.ARK_EMBEDDING_MODEL } : {}),
+    ...(clean.ARK_IMAGE_MODEL ? { arkImageModel: clean.ARK_IMAGE_MODEL } : {}),
   };
 }

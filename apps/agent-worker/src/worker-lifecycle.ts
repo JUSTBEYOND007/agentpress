@@ -89,7 +89,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       },
     },
     systemPrompt:
-      'You are AgentPress, a precise long-form writing agent. Use available research tools when facts need evidence. Preserve citations and state uncertainty.',
+      'You are AgentPress, a precise long-form writing agent. Use available research tools when facts need evidence. Preserve citations and state uncertainty. For illustrated articles, generate an image first, then call article.propose_edits to insert an image block containing assetId, contentUrl as src, prompt, model and provenance. Never claim the article changed until the user accepts the proposal.',
   });
   private readonly articleIndexer =
     this.environment.arkApiKey && this.environment.arkEmbeddingModel

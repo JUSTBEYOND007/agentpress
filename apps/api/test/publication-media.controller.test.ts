@@ -84,26 +84,11 @@ describe('PublicationController', () => {
 });
 
 describe('MediaController', () => {
-  it('requires an approved Tool Call and delegates image generation', async () => {
-    const generate = vi.fn(() => Promise.resolve({ assetId: 'asset-1' }));
-    const controller = new MediaController({ generate } as unknown as MediaService);
-
-    await controller.generate(
-      {
-        approvedToolCallId: 'tool-call-1',
-        prompt: 'Editorial illustration',
-      },
-      user,
-    );
-
-    expect(generate).toHaveBeenCalledWith({
-      approvedToolCallId: 'tool-call-1',
-      userId: 'user-1',
-      prompt: 'Editorial illustration',
-    });
-    await expect(controller.generate({ prompt: 'Missing approval' }, user)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+  it('rejects direct image generation outside the Agent Tool ledger', () => {
+    const controller = new MediaController({} as MediaService);
+    expect(() => {
+      controller.generate({ approvedToolCallId: 'tool-call-1', prompt: 'Illustration' }, user);
+    }).toThrow(BadRequestException);
   });
 
   it('returns stored bytes as an immutable stream', async () => {
