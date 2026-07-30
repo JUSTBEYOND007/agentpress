@@ -52,6 +52,7 @@ export function ArticleCanvas({
   const revisionId = useRef(baseRevisionId);
   const commitTimer = useRef<number | undefined>(undefined);
   const isRecovering = useRef(false);
+  const leaseGeneration = useRef(0);
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -165,6 +166,8 @@ export function ArticleCanvas({
     };
   }, [articleId, editor]);
   useEffect(() => {
+    leaseGeneration.current += 1;
+    const generation = leaseGeneration.current;
     const timer = window.setInterval(() => {
       if (!leaseOwned.current) return;
       void writerLeaseRequest(articleId, leaseId.current, 'renew').then(async (response) => {
@@ -178,7 +181,10 @@ export function ArticleCanvas({
     }, 10_000);
     return () => {
       window.clearInterval(timer);
-      void writerLeaseRequest(articleId, leaseId.current, 'release');
+      window.setTimeout(() => {
+        if (leaseGeneration.current === generation)
+          void writerLeaseRequest(articleId, leaseId.current, 'release');
+      });
     };
   }, [articleId, editor]);
 
