@@ -66,6 +66,7 @@ const WorkerEnvironmentSchema = Type.Intersect([
     ARK_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_MODEL_PRO: Type.Optional(Type.String({ minLength: 1 })),
     ARK_EMBEDDING_MODEL: Type.Optional(Type.String({ minLength: 1 })),
+    ARK_RERANK_MODEL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_IMAGE_MODEL: Type.Optional(Type.String({ minLength: 1 })),
     S3_ENDPOINT: Type.Optional(Type.String({ minLength: 1 })),
     S3_BUCKET: Type.Optional(Type.String({ minLength: 1 })),
@@ -84,6 +85,7 @@ export type WorkerEnvironment = {
   readonly arkBaseUrl: string;
   readonly arkModelPro?: string;
   readonly arkEmbeddingModel?: string;
+  readonly arkRerankModel?: string;
   readonly arkImageModel?: string;
   readonly s3: ApiEnvironment['s3'];
 };
@@ -172,6 +174,7 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
     ...(clean.ARK_API_KEY ? { arkApiKey: clean.ARK_API_KEY } : {}),
     ...(clean.ARK_MODEL_PRO ? { arkModelPro: clean.ARK_MODEL_PRO } : {}),
     ...(clean.ARK_EMBEDDING_MODEL ? { arkEmbeddingModel: clean.ARK_EMBEDDING_MODEL } : {}),
+    ...(clean.ARK_RERANK_MODEL ? { arkRerankModel: clean.ARK_RERANK_MODEL } : {}),
     ...(clean.ARK_IMAGE_MODEL ? { arkImageModel: clean.ARK_IMAGE_MODEL } : {}),
   };
 }

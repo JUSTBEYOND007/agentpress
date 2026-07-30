@@ -20,7 +20,11 @@ import {
 } from '@agentpress/mcp-runtime';
 import { ToolRegistry } from '@agentpress/tool-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
-import { ArkEmbeddingProvider, PostgresHybridSearch } from '@agentpress/knowledge-retrieval';
+import {
+  ArkEmbeddingProvider,
+  ArkRerankProvider,
+  PostgresHybridSearch,
+} from '@agentpress/knowledge-retrieval';
 import { loadWorkerEnvironment } from '@agentpress/config';
 import { ArkImageGenerator, MediaService, MinioObjectStorage } from '@agentpress/media-application';
 import { Type } from '@sinclair/typebox';
@@ -80,6 +84,14 @@ function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
         })
       : undefined;
   const hybridSearch = new PostgresHybridSearch(database);
+  const reranker =
+    environment.arkApiKey && environment.arkRerankModel
+      ? new ArkRerankProvider({
+          apiKey: environment.arkApiKey,
+          baseUrl: environment.arkBaseUrl,
+          model: environment.arkRerankModel,
+        })
+      : undefined;
   return {
     web_research: async ({ query, limit }, signal) => {
       const endpoint = new URL('https://zh.wikipedia.org/w/api.php');
@@ -147,6 +159,9 @@ function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
         query,
         embedding,
         limit,
+        ...(reranker
+          ? { rerank: (rerankQuery, candidates) => reranker.rerank(rerankQuery, candidates) }
+          : {}),
       });
     },
   };
