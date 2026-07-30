@@ -36,6 +36,13 @@ const initialMessages: readonly AgentMessage[] = [
   },
 ];
 
+function replaceInitialMessage(
+  current: readonly AgentMessage[],
+  replacement: AgentMessage,
+): readonly AgentMessage[] {
+  return current.length === 1 && current[0]?.id === 'runtime-checking' ? [replacement] : current;
+}
+
 export function useAgentPressAssistantRuntime(
   sendMode: AgentSendMode,
   context: {
@@ -116,32 +123,24 @@ export function useAgentPressAssistantRuntime(
         if (result.ready === true) {
           setReadiness({ status: 'ready', missing });
           setMessages((current) =>
-            current.length > 1
-              ? current
-              : [
-                  {
-                    id: 'workspace-ready',
-                    role: 'assistant',
-                    text: 'Agent 运行时已就绪。发送消息后将创建真实 Run，并通过 SSE 展示执行状态。',
-                    status: 'complete',
-                  },
-                ],
+            replaceInitialMessage(current, {
+              id: 'workspace-ready',
+              role: 'assistant',
+              text: 'Agent 运行时已就绪。发送消息后将创建真实 Run，并通过 SSE 展示执行状态。',
+              status: 'complete',
+            }),
           );
           return;
         }
         setReadiness({ status: 'unavailable', missing });
         setRun((current) => ({ ...current, status: '未配置' }));
         setMessages((current) =>
-          current.length > 1
-            ? current
-            : [
-                {
-                  id: 'runtime-unavailable',
-                  role: 'assistant',
-                  text: `Agent 运行时不可用。缺少环境配置：${missing.join('、') || '未知配置'}。`,
-                  status: 'error',
-                },
-              ],
+          replaceInitialMessage(current, {
+            id: 'runtime-unavailable',
+            role: 'assistant',
+            text: `Agent 运行时不可用。缺少环境配置：${missing.join('、') || '未知配置'}。`,
+            status: 'error',
+          }),
         );
       })
       .catch((error: unknown) => {
@@ -149,16 +148,12 @@ export function useAgentPressAssistantRuntime(
         setReadiness({ status: 'unavailable', missing: [] });
         setRun((current) => ({ ...current, status: '连接失败' }));
         setMessages((current) =>
-          current.length > 1
-            ? current
-            : [
-                {
-                  id: 'runtime-readiness-error',
-                  role: 'assistant',
-                  text: error instanceof Error ? error.message : '无法检查 Agent 运行时状态。',
-                  status: 'error',
-                },
-              ],
+          replaceInitialMessage(current, {
+            id: 'runtime-readiness-error',
+            role: 'assistant',
+            text: error instanceof Error ? error.message : '无法检查 Agent 运行时状态。',
+            status: 'error',
+          }),
         );
       });
     return () => {
