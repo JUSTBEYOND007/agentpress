@@ -119,7 +119,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       this.redisSubscriber.connect(),
       this.producer.connect(),
       this.consumer.connect(),
-      this.indexConsumer.connect(),
+      ...(this.articleIndexer ? [this.indexConsumer.connect()] : []),
     ]);
     this.redisSubscriber.on('message', (channel: string, runId: string) => {
       if (channel === AGENT_RUN_CANCEL_CHANNEL) {
@@ -128,10 +128,12 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     });
     await this.redisSubscriber.subscribe(AGENT_RUN_CANCEL_CHANNEL);
     await this.consumer.subscribe({ topics: [AGENT_RUN_COMMAND_TOPIC], fromBeginning: true });
-    await this.indexConsumer.subscribe({
-      topics: [ARTICLE_INDEX_COMMAND_TOPIC],
-      fromBeginning: true,
-    });
+    if (this.articleIndexer) {
+      await this.indexConsumer.subscribe({
+        topics: [ARTICLE_INDEX_COMMAND_TOPIC],
+        fromBeginning: true,
+      });
+    }
     await this.consumer.run({
       partitionsConsumedConcurrently: 8,
       eachMessage: async ({ topic, partition, message }) => {
@@ -143,17 +145,24 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
         );
       },
     });
-    await this.indexConsumer.run({
-      partitionsConsumedConcurrently: 4,
-      eachMessage: async ({ topic, partition, message }) => {
-        await this.handleIndexCommand(
-          topic,
-          partition,
-          Number(message.offset),
-          message.value?.toString(),
-        );
-      },
-    });
+    if (this.articleIndexer) {
+      await this.indexConsumer.run({
+        partitionsConsumedConcurrently: 4,
+        eachMessage: async ({ topic, partition, message }) => {
+          await this.handleIndexCommand(
+            topic,
+            partition,
+            Number(message.offset),
+            message.value?.toString(),
+          );
+        },
+      });
+    } else {
+      this.logger.warn(
+        { topic: ARTICLE_INDEX_COMMAND_TOPIC },
+        'Article indexing consumer disabled until Ark embedding is configured',
+      );
+    }
     this.outboxTimer = setInterval(() => {
       void this.dispatchOutbox();
     }, OUTBOX_INTERVAL_MS);
@@ -192,7 +201,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     }
     await Promise.allSettled([
       this.consumer.disconnect(),
-      this.indexConsumer.disconnect(),
+      ...(this.articleIndexer ? [this.indexConsumer.disconnect()] : []),
       this.producer.disconnect(),
       this.redisSubscriber.unsubscribe(AGENT_RUN_CANCEL_CHANNEL),
       ...(['web_research', 'workspace_knowledge', 'licensed_media'] as const).map((serverId) =>
