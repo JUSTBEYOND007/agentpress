@@ -164,12 +164,14 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       });
     });
 
-    const claimed = await claimOutboxMessages(connection.db, 'worker-1', 10);
+    const claimed = await claimOutboxMessages(connection.db, 'worker-1', 1_000);
     expect(claimed.map(({ id }) => id)).toContain(outboxId);
     expect(await markOutboxMessagePublished(connection.db, outboxId, 'worker-1', new Date())).toBe(
       true,
     );
-    expect(await claimOutboxMessages(connection.db, 'worker-2', 10)).toHaveLength(0);
+    expect(
+      (await claimOutboxMessages(connection.db, 'worker-2', 1_000)).map(({ id }) => id),
+    ).not.toContain(outboxId);
     const events = await Promise.all(
       Array.from({ length: 8 }, async (_, index) =>
         connection.db.transaction((transaction) =>

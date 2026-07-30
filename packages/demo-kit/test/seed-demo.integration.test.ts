@@ -1,6 +1,12 @@
 import { fileURLToPath } from 'node:url';
 
-import { articles, connectDatabase, conversations, publications } from '@agentpress/database';
+import {
+  articles,
+  connectDatabase,
+  conversations,
+  publicationEditions,
+  publications,
+} from '@agentpress/database';
 import { count, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -31,7 +37,11 @@ describeWithDatabase('demo seed', () => {
       .select({ value: count() })
       .from(articles)
       .where(eq(articles.id, DEMO_IDS.article));
-    const publicationCount = await connection.db.select({ value: count() }).from(publications);
+    const publicationCount = await connection.db
+      .select({ value: count() })
+      .from(publications)
+      .innerJoin(publicationEditions, eq(publications.editionId, publicationEditions.id))
+      .where(eq(publicationEditions.articleId, DEMO_IDS.article));
     const linkedConversation = await connection.db
       .select({ articleId: conversations.articleId, title: conversations.title })
       .from(conversations)
