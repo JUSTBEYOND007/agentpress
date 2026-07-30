@@ -19,5 +19,8 @@
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "unpdf": "1.8.0"
   }
 }

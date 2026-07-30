@@ -1,4 +1,7 @@
 import { assertSafeUrl, type DnsAddress } from './ssrf-guard.js';
+import { extractText, getDocumentProxy } from 'unpdf';
+
+const MAX_PDF_PAGES = 200;
 
 export type ResearchSource = {
   readonly url: string;
@@ -43,7 +46,8 @@ export async function fetchResearchSource(
     throw new Error(`Research source returned HTTP ${String(response?.status ?? 0)}`);
   }
   const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
+  const isPdf = contentType.includes('application/pdf');
+  if (!contentType.includes('text/html') && !contentType.includes('text/plain') && !isPdf) {
     throw new Error(`Unsupported research content type: ${contentType}`);
   }
   const declaredLength = Number(response.headers.get('content-length') ?? 0);
@@ -53,22 +57,49 @@ export async function fetchResearchSource(
   if (buffer.byteLength > maxBytes) {
     throw new Error(`Research source exceeds ${String(maxBytes)} bytes`);
   }
-  const raw = new TextDecoder().decode(buffer);
-  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(raw)?.[1]?.trim() ?? current.hostname;
+  const extracted = isPdf
+    ? await extractPdf(buffer)
+    : extractTextContent(new TextDecoder().decode(buffer), current.hostname);
+  return {
+    url: rawUrl,
+    finalUrl: current.toString(),
+    title: extracted.title,
+    text: extracted.text,
+    contentType,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function extractPdf(
+  buffer: ArrayBuffer,
+): Promise<{ readonly title: string; readonly text: string }> {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.byteLength < 5 || new TextDecoder('ascii').decode(bytes.subarray(0, 5)) !== '%PDF-') {
+    throw new Error('Research PDF has an invalid file signature');
+  }
+  const document = await getDocumentProxy(bytes);
+  if (document.numPages > MAX_PDF_PAGES) {
+    throw new Error(`Research PDF exceeds ${String(MAX_PDF_PAGES)} pages`);
+  }
+  const result = await extractText(document, { mergePages: true });
+  return {
+    title: 'PDF document',
+    text: typeof result.text === 'string' ? result.text.trim() : '',
+  };
+}
+
+function extractTextContent(
+  raw: string,
+  fallbackTitle: string,
+): { readonly title: string; readonly text: string } {
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(raw)?.[1]?.trim() ?? fallbackTitle;
   const text = raw
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return {
-    url: rawUrl,
-    finalUrl: current.toString(),
-    title,
-    text,
-    contentType,
-    fetchedAt: new Date().toISOString(),
-  };
+  return { title, text };
 }
 
 export async function fetchPublicImage(

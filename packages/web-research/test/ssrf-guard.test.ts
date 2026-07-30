@@ -100,4 +100,16 @@ describe('SSRF guard', () => {
       }),
     ).rejects.toThrow(/Unsupported image/);
   });
+
+  it('rejects a response claiming to be a PDF without a PDF signature', async () => {
+    await expect(
+      fetchResearchSource('https://example.test/report.pdf', {
+        lookup: publicLookup,
+        fetch: () =>
+          Promise.resolve(
+            new Response('not a pdf', { headers: { 'content-type': 'application/pdf' } }),
+          ),
+      }),
+    ).rejects.toThrow(/signature/);
+  });
 });
