@@ -204,6 +204,17 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(tools.map(({ label }) => label)).toEqual(['publication.publish']);
   });
 
+  it('uses the capability catalog to expose only the semantically relevant tool set', async () => {
+    const runId = await createRunningRun();
+    const tools = await new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+      capabilityLimit: 1,
+    }).createForRun(runId, 'search the workspace');
+    expect(tools.map(({ label }) => label)).toEqual(['workspace.search']);
+  });
+
   it('rejects approval if exact persisted arguments no longer match', async () => {
     const runId = await createRunningRun();
     const proposal = await proposePublish(runId);

@@ -611,7 +611,7 @@ export class PlannedRunExecutor {
               : []),
           ].join('\n\n'),
           ...(this.options.runtimeToolFactory
-            ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
+            ? { tools: await this.options.runtimeToolFactory.createForRun(runId, task.objective) }
             : {}),
         },
         () => undefined,
@@ -777,7 +777,7 @@ export class PlannedRunExecutor {
           history: [],
           prompt: `Synthesize the final answer for this request:\n${prompt}\n\nAccepted specialist artifacts:\n${artifacts}`,
           ...(this.options.runtimeToolFactory
-            ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
+            ? { tools: await this.options.runtimeToolFactory.createForRun(runId, prompt) }
             : {}),
         },
         async (event) => {

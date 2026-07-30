@@ -9,7 +9,7 @@ import {
   skillRevisions,
   workspaceMembers,
 } from '@agentpress/database';
-import { ToolRegistry } from '@agentpress/tool-runtime';
+import { CapabilityCatalog, ToolRegistry } from '@agentpress/tool-runtime';
 import { and, eq } from 'drizzle-orm';
 
 import type { RuntimeToolFactory } from './contracts.js';
@@ -19,12 +19,13 @@ type PersistentToolBridgeOptions = {
   readonly database: AgentPressDatabase;
   readonly registry: ToolRegistry;
   readonly toolCalls: ToolCallService;
+  readonly capabilityLimit?: number;
 };
 
 export class PersistentToolBridge implements RuntimeToolFactory {
   public constructor(private readonly options: PersistentToolBridgeOptions) {}
 
-  public async createForRun(runId: string): Promise<readonly RuntimeTool[]> {
+  public async createForRun(runId: string, query = ''): Promise<readonly RuntimeTool[]> {
     const rows = await this.options.database
       .select({
         userId: rootRequests.requestedByUserId,
@@ -66,45 +67,61 @@ export class PersistentToolBridge implements RuntimeToolFactory {
     const allowedCapabilities = new Set(
       definitions.flatMap((definition) => [...definition.capabilities]),
     );
+    const eligibleRegistry = new ToolRegistry();
+    for (const definition of definitions) eligibleRegistry.register(definition);
+    const selected = new CapabilityCatalog(eligibleRegistry).select(
+      query,
+      {
+        platform: allowedCapabilities,
+        workspace: allowedCapabilities,
+        agent: allowedCapabilities,
+        skill: allowedCapabilities,
+        task: allowedCapabilities,
+      },
+      this.options.capabilityLimit ?? 8,
+    );
+    const selectedKeys = new Set(selected.map(({ toolId, version }) => `${toolId}@${version}`));
 
-    return definitions.map((definition) => ({
-      name: runtimeToolName(definition.toolId, definition.version),
-      label: definition.toolId,
-      description: definition.description,
-      parameters: definition.inputSchema,
-      executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
-      execute: async (arguments_, context) => {
-        const proposal = await this.options.toolCalls.propose({
-          runId,
-          toolId: definition.toolId,
-          toolVersion: definition.version,
-          arguments: arguments_,
-          requestedFromUserId: requestedByUserId,
-          allowedCapabilities,
-          idempotencyKey: toolIdempotencyKey(runId, context.providerToolCallId),
-        });
-        if (proposal.status === 'awaiting_approval') {
-          const decision = await this.options.toolCalls.waitUntilExecutable(
-            proposal.toolCallId,
-            context.signal,
-          );
-          if (decision !== 'approved') {
+    return definitions
+      .filter((definition) => selectedKeys.has(`${definition.toolId}@${definition.version}`))
+      .map((definition) => ({
+        name: runtimeToolName(definition.toolId, definition.version),
+        label: definition.toolId,
+        description: definition.description,
+        parameters: definition.inputSchema,
+        executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
+        execute: async (arguments_, context) => {
+          const proposal = await this.options.toolCalls.propose({
+            runId,
+            toolId: definition.toolId,
+            toolVersion: definition.version,
+            arguments: arguments_,
+            requestedFromUserId: requestedByUserId,
+            allowedCapabilities,
+            idempotencyKey: toolIdempotencyKey(runId, context.providerToolCallId),
+          });
+          if (proposal.status === 'awaiting_approval') {
+            const decision = await this.options.toolCalls.waitUntilExecutable(
+              proposal.toolCallId,
+              context.signal,
+            );
+            if (decision !== 'approved') {
+              throw new ToolCallApplicationError(
+                decision === 'denied' ? 'approval_denied' : 'approval_expired',
+                `Tool Call ${proposal.toolCallId} was ${decision}`,
+              );
+            }
+          }
+          const result = await this.options.toolCalls.execute(proposal.toolCallId, context.signal);
+          if (result.status !== 'succeeded') {
             throw new ToolCallApplicationError(
-              decision === 'denied' ? 'approval_denied' : 'approval_expired',
-              `Tool Call ${proposal.toolCallId} was ${decision}`,
+              'invalid_tool_state',
+              `Tool Call ${proposal.toolCallId} settled as ${result.status}`,
             );
           }
-        }
-        const result = await this.options.toolCalls.execute(proposal.toolCallId, context.signal);
-        if (result.status !== 'succeeded') {
-          throw new ToolCallApplicationError(
-            'invalid_tool_state',
-            `Tool Call ${proposal.toolCallId} settled as ${result.status}`,
-          );
-        }
-        return result.output;
-      },
-    }));
+          return result.output;
+        },
+      }));
   }
 }
 

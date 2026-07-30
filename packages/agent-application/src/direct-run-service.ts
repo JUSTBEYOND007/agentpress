@@ -314,7 +314,7 @@ export class DirectRunService {
           history: context.history,
           prompt: effectivePrompt,
           ...(this.options.runtimeToolFactory
-            ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
+            ? { tools: await this.options.runtimeToolFactory.createForRun(runId, effectivePrompt) }
             : {}),
         },
         (event) => this.publishRuntimeEvent(runId, event),
