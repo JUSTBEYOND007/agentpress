@@ -76,10 +76,7 @@ export class ContextGovernanceService {
       .select()
       .from(memoryCandidates)
       .where(
-        and(
-          eq(memoryCandidates.workspaceId, workspaceId),
-          eq(memoryCandidates.userId, userId),
-        ),
+        and(eq(memoryCandidates.workspaceId, workspaceId), eq(memoryCandidates.userId, userId)),
       )
       .orderBy(desc(memoryCandidates.updatedAt))
       .limit(100);

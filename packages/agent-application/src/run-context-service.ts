@@ -73,7 +73,9 @@ export class RunContextService {
             })
             .from(articles)
             .innerJoin(articleRevisions, eq(articleRevisions.id, articles.currentRevisionId))
-            .where(and(eq(articles.workspaceId, input.workspaceId), inArray(articles.id, mentions)));
+            .where(
+              and(eq(articles.workspaceId, input.workspaceId), inArray(articles.id, mentions)),
+            );
     if (mentionRows.length !== mentions.length)
       throw new AgentApplicationError(
         'unauthorized_context',
@@ -219,7 +221,10 @@ export class RunContextService {
 
   private async persistPromptRevision(transaction: DatabaseTransaction): Promise<string> {
     const id = this.createId();
-    await transaction.insert(promptRevisions).values({ id, ...this.prompt }).onConflictDoNothing();
+    await transaction
+      .insert(promptRevisions)
+      .values({ id, ...this.prompt })
+      .onConflictDoNothing();
     const rows = await transaction
       .select()
       .from(promptRevisions)

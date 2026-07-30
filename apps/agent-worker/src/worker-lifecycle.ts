@@ -122,7 +122,10 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     });
     await this.redisSubscriber.subscribe(AGENT_RUN_CANCEL_CHANNEL);
     await this.consumer.subscribe({ topics: [AGENT_RUN_COMMAND_TOPIC], fromBeginning: true });
-    await this.indexConsumer.subscribe({ topics: [ARTICLE_INDEX_COMMAND_TOPIC], fromBeginning: true });
+    await this.indexConsumer.subscribe({
+      topics: [ARTICLE_INDEX_COMMAND_TOPIC],
+      fromBeginning: true,
+    });
     await this.consumer.run({
       partitionsConsumedConcurrently: 8,
       eachMessage: async ({ topic, partition, message }) => {
@@ -280,7 +283,9 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
         topic,
         partition,
         offset,
-        payloadHash: createHash('sha256').update(rawPayload ?? '').digest('hex'),
+        payloadHash: createHash('sha256')
+          .update(rawPayload ?? '')
+          .digest('hex'),
       },
       () => Promise.resolve(),
     );

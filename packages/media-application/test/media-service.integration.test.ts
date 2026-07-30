@@ -31,40 +31,75 @@ describeWithDatabase('Agent image generation ledger', () => {
       migrationsFolder: fileURLToPath(new URL('../../database/migrations', import.meta.url)),
     });
     const ids = {
-      user: randomUUID(), workspace: randomUUID(), conversation: randomUUID(), branch: randomUUID(),
-      message: randomUUID(), request: randomUUID(), run: randomUUID(), tool: randomUUID(),
+      user: randomUUID(),
+      workspace: randomUUID(),
+      conversation: randomUUID(),
+      branch: randomUUID(),
+      message: randomUUID(),
+      request: randomUUID(),
+      run: randomUUID(),
+      tool: randomUUID(),
     };
     await connection.db.insert(appUsers).values({
-      id: ids.user, logtoSubject: `media|${ids.user}`, displayName: 'Media',
+      id: ids.user,
+      logtoSubject: `media|${ids.user}`,
+      displayName: 'Media',
     });
     await connection.db.insert(workspaces).values({ id: ids.workspace, name: 'Media' });
     await connection.db.insert(conversations).values({
-      id: ids.conversation, workspaceId: ids.workspace, title: 'Media',
+      id: ids.conversation,
+      workspaceId: ids.workspace,
+      title: 'Media',
     });
     await connection.db.insert(conversationBranches).values({
-      id: ids.branch, conversationId: ids.conversation,
+      id: ids.branch,
+      conversationId: ids.conversation,
     });
     await connection.db.insert(conversationMessages).values({
-      id: ids.message, branchId: ids.branch, role: 'user', sequence: 1, content: [], stable: true,
+      id: ids.message,
+      branchId: ids.branch,
+      role: 'user',
+      sequence: 1,
+      content: [],
+      stable: true,
     });
     await connection.db.insert(rootRequests).values({
-      id: ids.request, branchId: ids.branch, messageId: ids.message,
-      requestedByUserId: ids.user, idempotencyKey: randomUUID(),
+      id: ids.request,
+      branchId: ids.branch,
+      messageId: ids.message,
+      requestedByUserId: ids.user,
+      idempotencyKey: randomUUID(),
     });
     await connection.db.insert(agentRuns).values({
-      id: ids.run, workspaceId: ids.workspace, branchId: ids.branch,
-      rootRequestId: ids.request, mode: 'direct', status: 'running',
+      id: ids.run,
+      workspaceId: ids.workspace,
+      branchId: ids.branch,
+      rootRequestId: ids.request,
+      mode: 'direct',
+      status: 'running',
     });
     await connection.db.insert(toolCalls).values({
-      id: ids.tool, runId: ids.run, toolId: 'image.generate', toolVersion: '1.0.0',
-      arguments: { prompt: 'A Kafka diagram' }, argumentsHash: 'hash', risk: 'external_write',
-      sideEffect: 'generate', status: 'executing',
+      id: ids.tool,
+      runId: ids.run,
+      toolId: 'image.generate',
+      toolVersion: '1.0.0',
+      arguments: { prompt: 'A Kafka diagram' },
+      argumentsHash: 'hash',
+      risk: 'external_write',
+      sideEffect: 'generate',
+      status: 'executing',
     });
     const stored = new Map<string, Buffer>();
     const storage: ObjectStorage = {
-      put(key, bytes) { stored.set(key, bytes); return Promise.resolve(); },
+      put(key, bytes) {
+        stored.set(key, bytes);
+        return Promise.resolve();
+      },
       get(key) {
-        return Promise.resolve({ bytes: stored.get(key) ?? Buffer.alloc(0), mimeType: 'image/png' });
+        return Promise.resolve({
+          bytes: stored.get(key) ?? Buffer.alloc(0),
+          mimeType: 'image/png',
+        });
       },
     };
     const service = new MediaService({

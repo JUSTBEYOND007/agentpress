@@ -18,10 +18,12 @@ describe('ContextController', () => {
       { createSkill } as unknown as ContextGovernanceService,
       authorization,
     );
-    await expect(controller.createSkill('workspace', { markdown: 'skill' }, user)).resolves.toEqual({
-      skillId: 'news',
-      version: '1.0.0',
-    });
+    await expect(controller.createSkill('workspace', { markdown: 'skill' }, user)).resolves.toEqual(
+      {
+        skillId: 'news',
+        version: '1.0.0',
+      },
+    );
     expect(createSkill).toHaveBeenCalledWith('workspace', 'skill');
   });
 
@@ -29,10 +31,7 @@ describe('ContextController', () => {
     const authorization = {
       assertWorkspaceMember: vi.fn(() => Promise.resolve()),
     } as unknown as AuthorizationService;
-    const controller = new ContextController(
-      {} as ContextGovernanceService,
-      authorization,
-    );
+    const controller = new ContextController({} as ContextGovernanceService, authorization);
     await expect(
       controller.decideMemory('workspace', 'memory', { decision: 'maybe' }, user),
     ).rejects.toBeInstanceOf(BadRequestException);

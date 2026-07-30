@@ -205,10 +205,7 @@ describeWithDatabase('Direct Run application flow', () => {
     const [packs, mentions, skills] = await Promise.all([
       connection.db.select().from(runContextPacks).where(eq(runContextPacks.runId, run.runId)),
       connection.db.select().from(mentionBindings).where(eq(mentionBindings.runId, run.runId)),
-      connection.db
-        .select()
-        .from(runSkillBindings)
-        .where(eq(runSkillBindings.runId, run.runId)),
+      connection.db.select().from(runSkillBindings).where(eq(runSkillBindings.runId, run.runId)),
     ]);
     expect(mentions[0]).toMatchObject({
       targetId: ids.article,
@@ -222,7 +219,8 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(packs[0]?.content).toContain('Keep the answer concise.');
     expect(packs[0]?.content).toContain('Prefer short paragraphs');
     const manifest = packs[0]?.manifest as { readonly skillVersions?: unknown } | undefined;
-    expect(manifest?.skillVersions).toMatchObject({ concise: expect.stringMatching(/^1\.0\.0:/u) });
+    const skillVersions = manifest?.skillVersions as Record<string, unknown> | undefined;
+    expect(skillVersions?.concise).toEqual(expect.stringMatching(/^1\.0\.0:/u));
     await service.requestCancellation(run.runId);
     await service.execute(run.runId);
   });

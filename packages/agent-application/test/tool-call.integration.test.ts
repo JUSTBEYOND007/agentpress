@@ -157,7 +157,11 @@ describeWithDatabase('Tool Call application flow', () => {
 
   it('replays a settled provider Tool Call without executing its side effect twice', async () => {
     const runId = await createRunningRun();
-    const bridge = new PersistentToolBridge({ database: connection.db, registry, toolCalls: service });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    });
     const search = (await bridge.createForRun(runId)).find(
       (tool) => tool.label === 'workspace.search',
     );

@@ -56,7 +56,9 @@ function WorkspacePage(): React.JSX.Element {
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishSlug, setPublishSlug] = useState('');
   const [coverAssetId, setCoverAssetId] = useState('');
-  const [mediaAssets, setMediaAssets] = useState<readonly { id: string; prompt?: string; attribution?: string }[]>([]);
+  const [mediaAssets, setMediaAssets] = useState<
+    readonly { id: string; prompt?: string; attribution?: string }[]
+  >([]);
   const [publishedSlug, setPublishedSlug] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -149,7 +151,9 @@ function WorkspacePage(): React.JSX.Element {
     setPublishedSlug(undefined);
     const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/media`);
     if (response.ok)
-      setMediaAssets((await response.json()) as readonly { id: string; prompt?: string; attribution?: string }[]);
+      setMediaAssets(
+        (await response.json()) as readonly { id: string; prompt?: string; attribution?: string }[],
+      );
     setPublishOpen(true);
     setMenuOpen(false);
   }
@@ -157,15 +161,18 @@ function WorkspacePage(): React.JSX.Element {
   async function publishArticle(event: SyntheticEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!activeArticle) return;
-    const response = await authenticatedFetch(`${apiUrl}/articles/${activeArticle.id}/publications`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        revisionId: activeArticle.revisionId,
-        slug: publishSlug,
-        ...(coverAssetId ? { coverAssetId } : {}),
-      }),
-    });
+    const response = await authenticatedFetch(
+      `${apiUrl}/articles/${activeArticle.id}/publications`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          revisionId: activeArticle.revisionId,
+          slug: publishSlug,
+          ...(coverAssetId ? { coverAssetId } : {}),
+        }),
+      },
+    );
     if (!response.ok) {
       setError(await response.text());
       return;
@@ -326,7 +333,9 @@ function WorkspacePage(): React.JSX.Element {
               >
                 新建文章
               </button>
-              <button onClick={() => void openPublish()} type="button">发布当前修订</button>
+              <button onClick={() => void openPublish()} type="button">
+                发布当前修订
+              </button>
               <a href="/trending">打开热榜</a>
             </div>
           ) : null}
@@ -383,7 +392,9 @@ function WorkspacePage(): React.JSX.Element {
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
           onArticleUpdated={reloadArticles}
           {...(workspaceId ? { workspaceId } : {})}
-          {...(activeArticle ? { activeArticleId: activeArticle.id, activeArticleTitle: activeArticle.title } : {})}
+          {...(activeArticle
+            ? { activeArticleId: activeArticle.id, activeArticleTitle: activeArticle.title }
+            : {})}
         />
       ) : null}
 
@@ -437,20 +448,50 @@ function WorkspacePage(): React.JSX.Element {
           <form className="modal" onSubmit={(event) => void publishArticle(event)}>
             <div className="modal-heading">
               <strong>发布不可变 Edition</strong>
-              <button aria-label="关闭" onClick={() => { setPublishOpen(false); }} type="button"><X size={16} /></button>
+              <button
+                aria-label="关闭"
+                onClick={() => {
+                  setPublishOpen(false);
+                }}
+                type="button"
+              >
+                <X size={16} />
+              </button>
             </div>
             {publishedSlug ? (
-              <a className="primary-action" href={`/p/${publishedSlug}`}>打开已发布文章</a>
+              <a className="primary-action" href={`/p/${publishedSlug}`}>
+                打开已发布文章
+              </a>
             ) : (
               <>
                 <label htmlFor="publication-slug">Slug</label>
-                <input id="publication-slug" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" required value={publishSlug} onChange={(event) => { setPublishSlug(event.target.value); }} />
+                <input
+                  id="publication-slug"
+                  pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+                  required
+                  value={publishSlug}
+                  onChange={(event) => {
+                    setPublishSlug(event.target.value);
+                  }}
+                />
                 <label htmlFor="publication-cover">封面（可选）</label>
-                <select id="publication-cover" value={coverAssetId} onChange={(event) => { setCoverAssetId(event.target.value); }}>
+                <select
+                  id="publication-cover"
+                  value={coverAssetId}
+                  onChange={(event) => {
+                    setCoverAssetId(event.target.value);
+                  }}
+                >
                   <option value="">无封面</option>
-                  {mediaAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.prompt ?? asset.attribution ?? asset.id}</option>)}
+                  {mediaAssets.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.prompt ?? asset.attribution ?? asset.id}
+                    </option>
+                  ))}
                 </select>
-                <button className="primary-action" type="submit">发布当前修订</button>
+                <button className="primary-action" type="submit">
+                  发布当前修订
+                </button>
               </>
             )}
           </form>
@@ -461,6 +502,10 @@ function WorkspacePage(): React.JSX.Element {
 }
 
 function slugify(value: string): string {
-  const slug = value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
   return slug || `article-${Date.now().toString(36)}`;
 }

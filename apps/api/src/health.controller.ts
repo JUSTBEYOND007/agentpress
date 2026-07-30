@@ -19,9 +19,12 @@ export class HealthController {
 
   @Get('agent-runtime')
   getAgentRuntime() {
-    const missing = ['ARK_API_KEY', 'ARK_MODEL_PRO', 'ARK_EMBEDDING_MODEL', 'ARK_IMAGE_MODEL'].filter(
-      (name) => !this.environment[name]?.trim(),
-    );
+    const missing = [
+      'ARK_API_KEY',
+      'ARK_MODEL_PRO',
+      'ARK_EMBEDDING_MODEL',
+      'ARK_IMAGE_MODEL',
+    ].filter((name) => !this.environment[name]?.trim());
     return {
       provider: 'ark' as const,
       ready: missing.length === 0,

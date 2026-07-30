@@ -20,7 +20,12 @@ export type RunView = {
   readonly revision: number;
   readonly tasks: readonly TaskView[];
   readonly tools: readonly ToolView[];
-  readonly evidence: readonly { evidenceId: string; title: string; source: string; revision?: string }[];
+  readonly evidence: readonly {
+    evidenceId: string;
+    title: string;
+    source: string;
+    revision?: string;
+  }[];
   readonly usage: { inputTokens: number; outputTokens: number; costUsd: number };
   readonly recovery: string;
   readonly proposal?: ProposalView;
@@ -34,7 +39,13 @@ export type ProposalView = {
   readonly operations: readonly EditOperation[];
   readonly diffs: readonly DiffEntry[];
   readonly expiresAt: string;
-  readonly status: 'pending' | 'submitting' | 'accepted' | 'partially_accepted' | 'rejected' | 'error';
+  readonly status:
+    | 'pending'
+    | 'submitting'
+    | 'accepted'
+    | 'partially_accepted'
+    | 'rejected'
+    | 'error';
   readonly error: string | undefined;
 };
 
@@ -127,7 +138,12 @@ export function reduceRunEvent(state: RunView, event: AgentPressRunEvent): RunVi
       ...(proposal ? { proposal } : {}),
       evidence:
         evidence.length > 0
-          ? [...state.evidence.filter((item) => !evidence.some((next) => next.evidenceId === item.evidenceId)), ...evidence]
+          ? [
+              ...state.evidence.filter(
+                (item) => !evidence.some((next) => next.evidenceId === item.evidenceId),
+              ),
+              ...evidence,
+            ]
           : state.evidence,
     };
   }

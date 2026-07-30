@@ -33,13 +33,12 @@ export class MediaController {
   }
 
   @Post('media/generate')
-  public generate(
-    @Body() body: Record<string, unknown>,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  public generate(@Body() body: Record<string, unknown>, @CurrentUser() user: AuthenticatedUser) {
     void body;
     void user;
-    throw new BadRequestException('Image generation is only available through an approved Agent Tool Call');
+    throw new BadRequestException(
+      'Image generation is only available through an approved Agent Tool Call',
+    );
   }
 
   @Get('media/:assetId/content')

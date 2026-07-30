@@ -1061,7 +1061,11 @@ button {
   background: #ffffff;
   padding: 7px;
   color: #454642;
-  font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    10px/1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 .skill-editor button {

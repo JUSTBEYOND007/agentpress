@@ -58,7 +58,9 @@ export class ContextController {
     try {
       return await this.contexts.decideMemory(workspaceId, user.id, candidateId, body.decision);
     } catch (error) {
-      throw new BadRequestException(error instanceof Error ? error.message : 'Invalid memory decision');
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid memory decision',
+      );
     }
   }
 }

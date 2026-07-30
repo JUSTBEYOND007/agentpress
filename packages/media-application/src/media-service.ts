@@ -21,10 +21,7 @@ export class MediaService {
     },
   ) {}
 
-  public async generateForTool(input: {
-    readonly toolCallId: string;
-    readonly prompt: string;
-  }) {
+  public async generateForTool(input: { readonly toolCallId: string; readonly prompt: string }) {
     const approved = await this.options.database
       .select({ workspaceId: agentRuns.workspaceId, userId: rootRequests.requestedByUserId })
       .from(toolCalls)

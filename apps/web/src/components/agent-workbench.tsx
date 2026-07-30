@@ -305,9 +305,15 @@ function ContextControls({
       ) : null}
       {pending.map((memory) => (
         <div className="memory-candidate" key={memory.id}>
-          <span>{memory.subject}：{memory.value}</span>
-          <button onClick={() => void onMemoryDecision(memory.id, 'accepted')} type="button">接受</button>
-          <button onClick={() => void onMemoryDecision(memory.id, 'rejected')} type="button">拒绝</button>
+          <span>
+            {memory.subject}：{memory.value}
+          </span>
+          <button onClick={() => void onMemoryDecision(memory.id, 'accepted')} type="button">
+            接受
+          </button>
+          <button onClick={() => void onMemoryDecision(memory.id, 'rejected')} type="button">
+            拒绝
+          </button>
         </div>
       ))}
       {contextError ? <p role="alert">{contextError}</p> : null}
