@@ -27,9 +27,7 @@
     "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
+    "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:"
-  },
-  "devDependencies": {
-    "@sinclair/typebox": "catalog:"
   }
 }

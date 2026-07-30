@@ -5,6 +5,8 @@ import {
   agentRuns,
   type AgentPressDatabase,
   rootRequests,
+  runSkillBindings,
+  skillRevisions,
   workspaceMembers,
 } from '@agentpress/database';
 import { ToolRegistry } from '@agentpress/tool-runtime';
@@ -47,10 +49,20 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       );
     }
     const requestedByUserId = authorization.userId;
+    const skillRows = await this.options.database
+      .select({ allowedTools: runSkillBindings.allowedTools })
+      .from(runSkillBindings)
+      .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
+      .where(eq(runSkillBindings.runId, runId));
 
     const definitions = this.options.registry
       .list()
-      .filter((definition) => authorization.role !== 'viewer' || definition.risk === 'read_only');
+      .filter((definition) => authorization.role !== 'viewer' || definition.risk === 'read_only')
+      .filter(
+        (definition) =>
+          skillRows.length === 0 ||
+          skillRows.every(({ allowedTools }) => allowedTools.includes(definition.toolId)),
+      );
     const allowedCapabilities = new Set(
       definitions.flatMap((definition) => [...definition.capabilities]),
     );

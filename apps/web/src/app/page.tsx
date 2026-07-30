@@ -345,6 +345,8 @@ function WorkspacePage(): React.JSX.Element {
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
           onArticleUpdated={reloadArticles}
+          {...(workspaceId ? { workspaceId } : {})}
+          {...(activeArticle ? { activeArticleId: activeArticle.id, activeArticleTitle: activeArticle.title } : {})}
         />
       ) : null}
 

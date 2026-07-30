@@ -382,6 +382,44 @@ export const mentionBindings = pgTable(
   ],
 );
 
+export const runSkillBindings = pgTable(
+  'run_skill_bindings',
+  {
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    skillRevisionId: uuid('skill_revision_id')
+      .notNull()
+      .references(() => skillRevisions.id, { onDelete: 'restrict' }),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    allowedTools: jsonb('allowed_tools').$type<readonly string[]>().notNull(),
+    createdAt,
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.skillRevisionId] })],
+);
+
+export const runContextPacks = pgTable(
+  'run_context_packs',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    promptRevisionId: uuid('prompt_revision_id')
+      .notNull()
+      .references(() => promptRevisions.id, { onDelete: 'restrict' }),
+    manifest: jsonb('manifest').$type<Readonly<Record<string, unknown>>>().notNull(),
+    content: text('content').notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    tokenCount: integer('token_count').notNull(),
+    createdAt,
+  },
+  (table) => [
+    unique('run_context_packs_run_unique').on(table.runId),
+    check('run_context_packs_token_count_check', sql`${table.tokenCount} >= 0`),
+  ],
+);
+
 export const planRevisions = pgTable(
   'plan_revisions',
   {

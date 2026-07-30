@@ -39,6 +39,7 @@ import {
 } from './contracts.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import { classifyRun } from './run-classifier.js';
+import { RunContextService } from './run-context-service.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -61,11 +62,18 @@ export class DirectRunService {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly plannedRuns: PlannedRunExecutor;
+  private readonly contexts: RunContextService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.plannedRuns = new PlannedRunExecutor(options);
+    this.contexts = new RunContextService(
+      options.database,
+      options.systemPrompt,
+      128_000,
+      this.createId,
+    );
   }
 
   public async create(input: CreateDirectRunInput): Promise<CreateDirectRunResult> {
@@ -197,11 +205,24 @@ export class DirectRunService {
         createdAt: now,
         updatedAt: now,
       });
+      const contextPack = await this.contexts.prepare(transaction, {
+        runId,
+        workspaceId: branch.workspaceId,
+        userId: input.userId,
+        mentionTargetIds: input.mentionTargetIds ?? [],
+        skills: input.skills ?? [],
+      });
       const queued = await appendRunEvent(transaction, {
         id: this.createId(),
         runId,
         eventType: 'run.queued',
-        payload: { mode: classification.mode, reasons: classification.reasons, rootRequestId },
+        payload: {
+          mode: classification.mode,
+          reasons: classification.reasons,
+          rootRequestId,
+          contextManifest: contextPack.manifest,
+          contextHash: contextPack.contentHash,
+        },
       });
       await enqueueOutboxMessage(transaction, {
         id: outboxId,
@@ -246,11 +267,12 @@ export class DirectRunService {
     if (context.status !== 'queued' && context.status !== 'recovering') {
       return { runId, status: 'ignored' };
     }
+    const effectivePrompt = withContext(context.prompt, context.contextContent);
     if (context.mode === 'planned') {
       const outcome =
         context.status === 'recovering'
-          ? await this.plannedRuns.recover(runId, context.prompt, signal)
-          : await this.plannedRuns.execute(runId, context.prompt, signal);
+          ? await this.plannedRuns.recover(runId, effectivePrompt, signal)
+          : await this.plannedRuns.execute(runId, effectivePrompt, signal);
       if (!outcome) {
         return { runId, status: 'ignored' };
       }
@@ -289,7 +311,7 @@ export class DirectRunService {
           runId,
           systemPrompt: this.options.systemPrompt,
           history: context.history,
-          prompt: context.prompt,
+          prompt: effectivePrompt,
           ...(this.options.runtimeToolFactory
             ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
             : {}),
@@ -477,6 +499,7 @@ export class DirectRunService {
         readonly history: readonly RuntimeMessage[];
         readonly status: string;
         readonly mode: 'direct' | 'planned';
+        readonly contextContent: string;
       }
     | undefined
   > {
@@ -517,6 +540,8 @@ export class DirectRunService {
       const message = decodeRuntimeMessage(content);
       return message ? [message] : [];
     });
+    const contextPack = await this.contexts.load(runId);
+    if (!contextPack) throw new Error(`Agent Run ${runId} has no persisted Context Pack`);
 
     return {
       branchId: run.branchId,
@@ -524,6 +549,7 @@ export class DirectRunService {
       history,
       status: run.status,
       mode: run.mode,
+      contextContent: contextPack.content,
     };
   }
 
@@ -855,6 +881,12 @@ function findLastAssistantMessage(
   return messages.findLast(
     (message): message is RuntimeAssistantMessage => message.role === 'assistant',
   );
+}
+
+function withContext(prompt: string, context: string): string {
+  return context.length > 0
+    ? `${context}\n<root-request-json>${JSON.stringify(prompt)}</root-request-json>`
+    : prompt;
 }
 
 function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {

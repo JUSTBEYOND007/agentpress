@@ -30,6 +30,8 @@ import { AuthorizationService } from '../auth/authorization.service.js';
 type CreateRunBody = {
   readonly branchId?: unknown;
   readonly prompt?: unknown;
+  readonly mentionTargetIds?: unknown;
+  readonly skills?: unknown;
 };
 
 type RunDirectiveBody = {
@@ -75,6 +77,8 @@ export class AgentController {
     if (typeof body.branchId !== 'string' || typeof body.prompt !== 'string') {
       throw new BadRequestException('branchId and prompt must be strings');
     }
+    const mentionTargetIds = parseStringArray(body.mentionTargetIds, 'mentionTargetIds', 20);
+    const skills = parseSkills(body.skills);
 
     try {
       return await this.runs.create({
@@ -83,6 +87,8 @@ export class AgentController {
         userId: user.id,
         prompt: body.prompt,
         idempotencyKey,
+        mentionTargetIds,
+        skills,
       });
     } catch (error) {
       throw mapApplicationError(error);
@@ -244,6 +250,36 @@ function parseLastEventId(value: string | undefined): number {
     throw new BadRequestException('Last-Event-ID must be a non-negative integer');
   }
   return sequence;
+}
+
+function parseStringArray(value: unknown, field: string, maxItems: number): readonly string[] {
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value) ||
+    value.length > maxItems ||
+    !value.every((item) => typeof item === 'string' && item.length > 0 && item.length <= 160)
+  )
+    throw new BadRequestException(`${field} must be an array of at most ${String(maxItems)} IDs`);
+  return value as string[];
+}
+
+function parseSkills(value: unknown): readonly { skillId: string; version: string }[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 8)
+    throw new BadRequestException('skills must contain at most 8 versioned selections');
+  return value.map((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item))
+      throw new BadRequestException('Every Skill selection must be an object');
+    const selection = item as Record<string, unknown>;
+    if (
+      typeof selection.skillId !== 'string' ||
+      typeof selection.version !== 'string' ||
+      selection.skillId.length === 0 ||
+      selection.version.length === 0
+    )
+      throw new BadRequestException('Every Skill selection requires skillId and version');
+    return { skillId: selection.skillId, version: selection.version };
+  });
 }
 
 function toSseEvent(event: DurableRunEvent): MessageEvent {

@@ -23,6 +23,18 @@ export class AuthorizationService {
     if (!rows[0]) throw new ForbiddenException('User is not a member of this workspace');
   }
 
+  public async assertWorkspaceEditor(workspaceId: string, userId: string): Promise<void> {
+    const rows = await this.database
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(
+        and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)),
+      )
+      .limit(1);
+    if (!rows[0] || rows[0].role === 'viewer')
+      throw new ForbiddenException('Workspace editor permission is required');
+  }
+
   public async assertArticleAccess(articleId: string, userId: string): Promise<void> {
     const rows = await this.database
       .select({ workspaceId: articles.workspaceId })

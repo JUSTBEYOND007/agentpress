@@ -41,10 +41,14 @@ export function useAgentPressAssistantRuntime(
   context: {
     readonly conversationId?: string;
     readonly branchId?: string;
+    readonly mentionTargetIds?: readonly string[];
+    readonly skills?: readonly { readonly skillId: string; readonly version: string }[];
   } = {},
 ) {
   const conversationId = context.conversationId;
   const branchId = context.branchId;
+  const mentionTargetIds = context.mentionTargetIds ?? [];
+  const selectedSkills = context.skills ?? [];
   const [messages, setMessages] = useState<readonly AgentMessage[]>(initialMessages);
   const [run, setRun] = useState(initialRunView);
   const [runId, setRunId] = useState<string>();
@@ -214,7 +218,7 @@ export function useAgentPressAssistantRuntime(
         setRun((current) => ({ ...current, status: '排队中', tasks: [], tools: [] }));
         const created = await request(
           `${apiUrl}/conversations/${conversationId}/runs`,
-          { branchId, prompt },
+          { branchId, prompt, mentionTargetIds, skills: selectedSkills },
           true,
         );
         const nextRunId = stringValue(created.runId);
@@ -234,7 +238,7 @@ export function useAgentPressAssistantRuntime(
         ]);
       }
     },
-    [branchId, conversationId, run.status, runId, sendMode],
+    [branchId, conversationId, mentionTargetIds, run.status, runId, selectedSkills, sendMode],
   );
 
   const onCancel = useCallback(async () => {

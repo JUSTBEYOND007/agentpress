@@ -1,4 +1,8 @@
-import { DirectRunService, ToolCallService } from '@agentpress/agent-application';
+import {
+  ContextGovernanceService,
+  DirectRunService,
+  ToolCallService,
+} from '@agentpress/agent-application';
 import { loadApiEnvironment } from '@agentpress/config';
 import { connectDatabase } from '@agentpress/database';
 import type { DatabaseConnection } from '@agentpress/database';
@@ -94,6 +98,11 @@ export const agentProviders: Provider[] = [
     provide: MediaService,
     useFactory: (connection: DatabaseConnection) =>
       new MediaService({ database: connection.db, storage: objectStorage, imageGenerator }),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: ContextGovernanceService,
+    useFactory: (connection: DatabaseConnection) => new ContextGovernanceService(connection.db),
     inject: [DATABASE_CONNECTION],
   },
   {

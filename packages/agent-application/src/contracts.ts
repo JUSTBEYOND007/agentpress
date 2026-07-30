@@ -36,12 +36,19 @@ export type RuntimeToolFactory = {
   createForRun(runId: string): Promise<readonly RuntimeTool[]>;
 };
 
+export type SelectedSkillInput = {
+  readonly skillId: string;
+  readonly version: string;
+};
+
 export type CreateDirectRunInput = {
   readonly conversationId: string;
   readonly branchId: string;
   readonly userId: string;
   readonly prompt: string;
   readonly idempotencyKey: string;
+  readonly mentionTargetIds?: readonly string[];
+  readonly skills?: readonly SelectedSkillInput[];
 };
 
 export type CreateDirectRunResult = {
@@ -69,8 +76,10 @@ export class AgentApplicationError extends Error {
       | 'conversation_not_found'
       | 'branch_not_found'
       | 'invalid_prompt'
+      | 'invalid_context'
       | 'invalid_directive'
       | 'unauthorized_user'
+      | 'unauthorized_context'
       | 'run_not_found',
     message: string,
   ) {

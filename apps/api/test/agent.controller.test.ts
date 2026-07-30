@@ -41,6 +41,8 @@ describe('AgentController SSE replay', () => {
         userId: 'user-1',
         prompt: '研究 Kafka',
         idempotencyKey: 'request-1',
+        mentionTargetIds: [],
+        skills: [],
       },
     ]);
     await expect(

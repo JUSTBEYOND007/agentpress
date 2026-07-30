@@ -22,34 +22,118 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ArticleDiff } from './article-diff';
+import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
   type AgentSendMode,
 } from '../lib/agentpress-assistant-runtime';
 import { initialRunView } from '../lib/run-event-reducer';
 
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
+
 export function AgentWorkbench({
   conversationId,
   branchId,
   onArticleUpdated,
+  workspaceId,
+  activeArticleId,
+  activeArticleTitle,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
   readonly onArticleUpdated?: () => Promise<void>;
+  readonly workspaceId?: string;
+  readonly activeArticleId?: string;
+  readonly activeArticleTitle?: string;
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
+  const [skills, setSkills] = useState<readonly SkillView[]>([]);
+  const [selectedSkillKeys, setSelectedSkillKeys] = useState<readonly string[]>([]);
+  const [mentionActiveArticle, setMentionActiveArticle] = useState(true);
+  const [memories, setMemories] = useState<readonly MemoryView[]>([]);
+  const [contextError, setContextError] = useState<string>();
+  const selectedSkills = useMemo(
+    () =>
+      skills
+        .filter((skill) => selectedSkillKeys.includes(`${skill.skillId}@${skill.version}`))
+        .map(({ skillId, version }) => ({ skillId, version })),
+    [selectedSkillKeys, skills],
+  );
+  const mentionTargetIds = useMemo(
+    () => (mentionActiveArticle && activeArticleId ? [activeArticleId] : []),
+    [activeArticleId, mentionActiveArticle],
+  );
   const { runtime, run, decideTool, decideProposal, readiness } = useAgentPressAssistantRuntime(
     sendMode,
     conversationId || branchId
       ? {
           ...(conversationId ? { conversationId } : {}),
           ...(branchId ? { branchId } : {}),
+          ...(mentionTargetIds.length > 0 ? { mentionTargetIds } : {}),
+          ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
         }
       : {},
   );
+
+  const loadContext = useCallback(async (): Promise<void> => {
+    if (!workspaceId) return;
+    try {
+      const [skillResponse, memoryResponse] = await Promise.all([
+        authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/skills`),
+        authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/memories`),
+      ]);
+      if (!skillResponse.ok || !memoryResponse.ok) throw new Error('Agent 上下文加载失败');
+      setSkills((await skillResponse.json()) as SkillView[]);
+      setMemories((await memoryResponse.json()) as MemoryView[]);
+      setContextError(undefined);
+    } catch (error) {
+      setContextError(error instanceof Error ? error.message : 'Agent 上下文加载失败');
+    }
+  }, [workspaceId]);
+
+  useEffect(() => {
+    void loadContext();
+  }, [loadContext]);
+
+  useEffect(() => {
+    if (run.tools.some((tool) => tool.name === 'memory.propose' && tool.status === 'succeeded'))
+      void loadContext();
+  }, [loadContext, run.tools]);
+
+  const decideMemory = async (candidateId: string, decision: 'accepted' | 'rejected') => {
+    if (!workspaceId) return;
+    const response = await authenticatedFetch(
+      `${apiUrl}/workspaces/${workspaceId}/memories/${candidateId}/decision`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      },
+    );
+    if (!response.ok) {
+      setContextError(await response.text());
+      return;
+    }
+    await loadContext();
+  };
+
+  const createSkill = async (markdown: string): Promise<boolean> => {
+    if (!workspaceId) return false;
+    const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ markdown }),
+    });
+    if (!response.ok) {
+      setContextError(await response.text());
+      return false;
+    }
+    await loadContext();
+    return true;
+  };
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -76,6 +160,18 @@ export function AgentWorkbench({
             ) : (
               <div className="run-empty">尚未创建 Agent Run</div>
             )}
+            <ContextControls
+              {...(activeArticleTitle ? { activeArticleTitle } : {})}
+              {...(contextError ? { contextError } : {})}
+              memories={memories}
+              mentionActiveArticle={mentionActiveArticle}
+              onMemoryDecision={decideMemory}
+              onMentionChange={setMentionActiveArticle}
+              onSkillCreate={createSkill}
+              onSkillChange={setSelectedSkillKeys}
+              selectedSkillKeys={selectedSkillKeys}
+              skills={skills}
+            />
             <ThreadPrimitive.ViewportFooter className="thread-footer">
               <ThreadPrimitive.ScrollToBottom asChild>
                 <button
@@ -97,6 +193,125 @@ export function AgentWorkbench({
         </ThreadPrimitive.Root>
       </aside>
     </AssistantRuntimeProvider>
+  );
+}
+
+type SkillView = {
+  readonly skillId: string;
+  readonly version: string;
+  readonly description: string;
+};
+type MemoryView = {
+  readonly id: string;
+  readonly subject: string;
+  readonly value: string;
+  readonly status: 'pending' | 'accepted' | 'rejected' | 'superseded';
+};
+
+function ContextControls({
+  activeArticleTitle,
+  contextError,
+  memories,
+  mentionActiveArticle,
+  onMemoryDecision,
+  onMentionChange,
+  onSkillCreate,
+  onSkillChange,
+  selectedSkillKeys,
+  skills,
+}: {
+  readonly activeArticleTitle?: string;
+  readonly contextError?: string;
+  readonly memories: readonly MemoryView[];
+  readonly mentionActiveArticle: boolean;
+  readonly onMemoryDecision: (id: string, decision: 'accepted' | 'rejected') => Promise<void>;
+  readonly onMentionChange: (value: boolean) => void;
+  readonly onSkillCreate: (markdown: string) => Promise<boolean>;
+  readonly onSkillChange: (keys: readonly string[]) => void;
+  readonly selectedSkillKeys: readonly string[];
+  readonly skills: readonly SkillView[];
+}): React.JSX.Element {
+  const pending = memories.filter(({ status }) => status === 'pending');
+  const [skillEditorOpen, setSkillEditorOpen] = useState(false);
+  const [skillMarkdown, setSkillMarkdown] = useState('');
+  return (
+    <section className="context-controls" aria-label="Agent 上下文">
+      <strong>上下文</strong>
+      {activeArticleTitle ? (
+        <label>
+          <input
+            checked={mentionActiveArticle}
+            onChange={(event) => {
+              onMentionChange(event.target.checked);
+            }}
+            type="checkbox"
+          />
+          @{activeArticleTitle}
+        </label>
+      ) : null}
+      {skills.map((skill) => {
+        const key = `${skill.skillId}@${skill.version}`;
+        return (
+          <label key={key} title={skill.description}>
+            <input
+              checked={selectedSkillKeys.includes(key)}
+              onChange={(event) => {
+                onSkillChange(
+                  event.target.checked
+                    ? [...selectedSkillKeys, key]
+                    : selectedSkillKeys.filter((item) => item !== key),
+                );
+              }}
+              type="checkbox"
+            />
+            /{skill.skillId} · {skill.version}
+          </label>
+        );
+      })}
+      <button
+        className="context-secondary-action"
+        onClick={() => {
+          setSkillEditorOpen((current) => !current);
+        }}
+        type="button"
+      >
+        {skillEditorOpen ? '取消新建 Skill' : '新建 Skill'}
+      </button>
+      {skillEditorOpen ? (
+        <div className="skill-editor">
+          <textarea
+            aria-label="Skill Markdown"
+            onChange={(event) => {
+              setSkillMarkdown(event.target.value);
+            }}
+            placeholder="---&#10;id: news&#10;version: 1.0.0&#10;description: 新闻写作&#10;allowedTools: []&#10;---&#10;写作规则"
+            rows={8}
+            value={skillMarkdown}
+          />
+          <button
+            disabled={!skillMarkdown.trim()}
+            onClick={() => {
+              void onSkillCreate(skillMarkdown).then((created) => {
+                if (!created) return;
+                setSkillMarkdown('');
+                setSkillEditorOpen(false);
+              });
+            }}
+            type="button"
+          >
+            保存 Skill
+          </button>
+        </div>
+      ) : null}
+      {pending.map((memory) => (
+        <div className="memory-candidate" key={memory.id}>
+          <span>{memory.subject}：{memory.value}</span>
+          <button onClick={() => void onMemoryDecision(memory.id, 'accepted')} type="button">接受</button>
+          <button onClick={() => void onMemoryDecision(memory.id, 'rejected')} type="button">拒绝</button>
+        </div>
+      ))}
+      {contextError ? <p role="alert">{contextError}</p> : null}
+    </section>
   );
 }
 

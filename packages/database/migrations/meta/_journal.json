@@ -57,6 +57,13 @@
       "when": 1785414902229,
       "tag": "0007_nasty_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785419316115,
+      "tag": "0008_talented_lockheed",
+      "breakpoints": true
     }
   ]
 }

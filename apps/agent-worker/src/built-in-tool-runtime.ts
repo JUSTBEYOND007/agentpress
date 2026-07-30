@@ -1,5 +1,7 @@
 import {
+  ContextGovernanceService,
   PersistentToolBridge,
+  registerContextTools,
   ToolCallService,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
@@ -32,6 +34,7 @@ export function createBuiltInToolRuntime(
   const registry = new ToolRegistry();
   registerBuiltInMcpTools(registry, new McpClientGateway(manager));
   registerArticleTools(registry, database, new ProposalService(database));
+  registerContextTools(registry, new ContextGovernanceService(database));
   const toolCalls = new ToolCallService({ database, publisher, registry });
   return { bridge: new PersistentToolBridge({ database, registry, toolCalls }), manager };
 }

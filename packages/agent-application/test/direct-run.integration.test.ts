@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
@@ -6,6 +6,8 @@ import {
   agentTasks,
   agentRuns,
   appUsers,
+  articleRevisions,
+  articles,
   connectDatabase,
   contextPacks,
   conversationBranches,
@@ -14,8 +16,13 @@ import {
   executionPlans,
   planRevisions,
   rootRequests,
+  runContextPacks,
   runDirectives,
   runEvents,
+  runSkillBindings,
+  skillRevisions,
+  memoryCandidates,
+  mentionBindings,
   taskResults,
   workspaceMembers,
   workspaces,
@@ -24,7 +31,12 @@ import { eq, inArray } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DirectRunService, type LiveRunEvent, type RunEventPublisher } from '../src/index.js';
+import {
+  ContextGovernanceService,
+  DirectRunService,
+  type LiveRunEvent,
+  type RunEventPublisher,
+} from '../src/index.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -36,6 +48,10 @@ describeWithDatabase('Direct Run application flow', () => {
     workspace: randomUUID(),
     conversation: randomUUID(),
     branch: randomUUID(),
+    article: randomUUID(),
+    articleRevision: randomUUID(),
+    skillRevision: randomUUID(),
+    memory: randomUUID(),
   };
   const published: LiveRunEvent[] = [];
   const publisher: RunEventPublisher = {
@@ -53,6 +69,7 @@ describeWithDatabase('Direct Run application flow', () => {
     runtimeFactory: { create: () => runtime },
     systemPrompt: 'You are AgentPress.',
   });
+  const governance = new ContextGovernanceService(connection.db);
 
   beforeAll(async () => {
     await migrate(connection.db, {
@@ -76,6 +93,55 @@ describeWithDatabase('Direct Run application flow', () => {
       id: ids.conversation,
       workspaceId: ids.workspace,
       title: 'Direct Run',
+    });
+    const articleDocument = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { blockId: 'mention-block' },
+          content: [{ type: 'text', text: 'Mentioned immutable content' }],
+        },
+      ],
+    };
+    const articleHash = createHash('sha256').update(JSON.stringify(articleDocument)).digest('hex');
+    await connection.db
+      .insert(articles)
+      .values({ id: ids.article, workspaceId: ids.workspace, title: 'Mention target' });
+    await connection.db.insert(articleRevisions).values({
+      id: ids.articleRevision,
+      articleId: ids.article,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document: articleDocument,
+      documentHash: articleHash,
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: ids.articleRevision })
+      .where(eq(articles.id, ids.article));
+    const skillMarkdown =
+      '---\nid: concise\nversion: 1.0.0\ndescription: Concise output\nallowedTools:\n  - article.read_current\n---\nKeep the answer concise.';
+    await connection.db.insert(skillRevisions).values({
+      id: ids.skillRevision,
+      workspaceId: ids.workspace,
+      skillId: 'concise',
+      version: '1.0.0',
+      content: skillMarkdown,
+      contentHash: createHash('sha256').update(skillMarkdown).digest('hex'),
+      allowedTools: ['article.read_current'],
+    });
+    await connection.db.insert(memoryCandidates).values({
+      id: ids.memory,
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      subject: 'writing-style',
+      value: 'Prefer short paragraphs',
+      valueHash: createHash('sha256').update('Prefer short paragraphs').digest('hex'),
+      confidenceBps: 9000,
+      status: 'accepted',
     });
     await connection.db.insert(conversationBranches).values({
       id: ids.branch,
@@ -124,6 +190,65 @@ describeWithDatabase('Direct Run application flow', () => {
       await connection.db.select().from(runEvents).where(eq(runEvents.runId, second.runId)),
     ).toHaveLength(4);
     expect(published.some((event) => !event.durable)).toBe(true);
+  });
+
+  it('pins Mention, Skill, prompt and accepted memory into an immutable Context Manifest', async () => {
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Use the selected context',
+      idempotencyKey: randomUUID(),
+      mentionTargetIds: [ids.article],
+      skills: [{ skillId: 'concise', version: '1.0.0' }],
+    });
+    const [packs, mentions, skills] = await Promise.all([
+      connection.db.select().from(runContextPacks).where(eq(runContextPacks.runId, run.runId)),
+      connection.db.select().from(mentionBindings).where(eq(mentionBindings.runId, run.runId)),
+      connection.db
+        .select()
+        .from(runSkillBindings)
+        .where(eq(runSkillBindings.runId, run.runId)),
+    ]);
+    expect(mentions[0]).toMatchObject({
+      targetId: ids.article,
+      revision: ids.articleRevision,
+    });
+    expect(skills[0]).toMatchObject({
+      skillRevisionId: ids.skillRevision,
+      allowedTools: ['article.read_current'],
+    });
+    expect(packs[0]?.content).toContain('Mentioned immutable content');
+    expect(packs[0]?.content).toContain('Keep the answer concise.');
+    expect(packs[0]?.content).toContain('Prefer short paragraphs');
+    const manifest = packs[0]?.manifest as { readonly skillVersions?: unknown } | undefined;
+    expect(manifest?.skillVersions).toMatchObject({ concise: expect.stringMatching(/^1\.0\.0:/u) });
+    await service.requestCancellation(run.runId);
+    await service.execute(run.runId);
+  });
+
+  it('versions declarative Skills and requires confirmation before recalling Agent memory', async () => {
+    const markdown =
+      '---\nid: fact-check\nversion: 2.0.0\ndescription: Verify facts\nallowedTools:\n  - web_research.search\n---\nRequire evidence for factual claims.';
+    await expect(governance.createSkill(ids.workspace, markdown)).resolves.toMatchObject({
+      skillId: 'fact-check',
+      version: '2.0.0',
+      allowedTools: ['web_research.search'],
+    });
+    const runs = await connection.db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.workspaceId, ids.workspace));
+    const candidate = await governance.proposeMemoryForRun(
+      runs[0]?.id ?? '',
+      'tone',
+      'Use a neutral tone',
+      0.95,
+    );
+    expect(candidate.status).toBe('pending');
+    await expect(
+      governance.decideMemory(ids.workspace, ids.user, candidate.id, 'accepted'),
+    ).resolves.toMatchObject({ status: 'accepted' });
   });
 
   it('persists cancellation before aborting Pi and reaches a terminal state', async () => {

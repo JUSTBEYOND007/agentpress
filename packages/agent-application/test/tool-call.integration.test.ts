@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -11,6 +11,8 @@ import {
   conversationMessages,
   conversations,
   rootRequests,
+  runSkillBindings,
+  skillRevisions,
   toolCalls,
   workspaceMembers,
   workspaces,
@@ -168,6 +170,34 @@ describeWithDatabase('Tool Call application flow', () => {
       search?.execute({ query: 'replay-safe' }, { runId, providerToolCallId }),
     ).resolves.toEqual({ result: 'replay-safe' });
     expect(searchExecutions - before).toBe(1);
+  });
+
+  it('narrows runtime tools to the intersection of pinned Skill permissions', async () => {
+    const runId = await createRunningRun();
+    const markdown =
+      '---\nid: publish-only\nversion: 1.0.0\ndescription: Restrict tools\nallowedTools:\n  - publication.publish\n---\nOnly use the declared tool.';
+    const skillRevisionId = randomUUID();
+    await connection.db.insert(skillRevisions).values({
+      id: skillRevisionId,
+      workspaceId,
+      skillId: 'publish-only',
+      version: '1.0.0',
+      content: markdown,
+      contentHash: createHash('sha256').update(markdown).digest('hex'),
+      allowedTools: ['publication.publish'],
+    });
+    await connection.db.insert(runSkillBindings).values({
+      runId,
+      skillRevisionId,
+      contentHash: createHash('sha256').update(markdown).digest('hex'),
+      allowedTools: ['publication.publish'],
+    });
+    const tools = await new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    }).createForRun(runId);
+    expect(tools.map(({ label }) => label)).toEqual(['publication.publish']);
   });
 
   it('rejects approval if exact persisted arguments no longer match', async () => {
