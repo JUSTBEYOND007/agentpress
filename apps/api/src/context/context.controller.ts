@@ -1,5 +1,5 @@
 import { ContextGovernanceService } from '@agentpress/agent-application';
-import { BadRequestException, Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
 
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
@@ -8,8 +8,8 @@ import { AuthorizationService } from '../auth/authorization.service.js';
 @Controller()
 export class ContextController {
   public constructor(
-    private readonly contexts: ContextGovernanceService,
-    private readonly authorization: AuthorizationService,
+    @Inject(ContextGovernanceService) private readonly contexts: ContextGovernanceService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Get('workspaces/:workspaceId/skills')
