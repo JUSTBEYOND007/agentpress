@@ -22,8 +22,9 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import { ArticleDiff } from './article-diff';
 import {
   useAgentPressAssistantRuntime,
   type AgentSendMode,
@@ -33,12 +34,14 @@ import { initialRunView } from '../lib/run-event-reducer';
 export function AgentWorkbench({
   conversationId,
   branchId,
+  onArticleUpdated,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
+  readonly onArticleUpdated?: () => Promise<void>;
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
-  const { runtime, run, decideTool, readiness } = useAgentPressAssistantRuntime(
+  const { runtime, run, decideTool, decideProposal, readiness } = useAgentPressAssistantRuntime(
     sendMode,
     conversationId || branchId
       ? {
@@ -64,7 +67,12 @@ export function AgentWorkbench({
               {({ message }) => (message.role === 'user' ? <UserMessage /> : <AssistantMessage />)}
             </ThreadPrimitive.Messages>
             {run.runId ? (
-              <RunInspector onToolDecision={decideTool} run={run} />
+              <RunInspector
+                {...(onArticleUpdated ? { onArticleUpdated } : {})}
+                onProposalDecision={decideProposal}
+                onToolDecision={decideTool}
+                run={run}
+              />
             ) : (
               <div className="run-empty">尚未创建 Agent Run</div>
             )}
@@ -182,17 +190,55 @@ function AgentComposer({
 function RunInspector({
   run,
   onToolDecision,
+  onProposalDecision,
+  onArticleUpdated,
 }: {
   readonly run: typeof initialRunView;
   readonly onToolDecision: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
+  readonly onProposalDecision: (
+    proposalId: string,
+    decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
+  ) => Promise<Readonly<Record<string, unknown>>>;
+  readonly onArticleUpdated?: () => Promise<void>;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(true);
   const [toolDecisions, setToolDecisions] = useState<Record<string, 'approved' | 'denied'>>({});
+  const [proposalDecisions, setProposalDecisions] = useState<
+    Record<string, 'accepted' | 'rejected'>
+  >({});
   const approval = run.tools.find((tool) => tool.status === 'approval_requested');
   const groupedSpecialists = useMemo(
     () => [...new Set(run.tasks.map((task) => task.owner))],
     [run.tasks],
   );
+  const proposal = run.proposal;
+  const allProposalOperationsDecided =
+    proposal?.operations.every((operation) => proposalDecisions[operation.operationId]) ?? false;
+  const proposalSettled =
+    proposal?.status === 'accepted' ||
+    proposal?.status === 'partially_accepted' ||
+    proposal?.status === 'rejected';
+
+  useEffect(() => {
+    setProposalDecisions({});
+  }, [proposal?.proposalId]);
+
+  const decideAll = (decision: 'accepted' | 'rejected'): void => {
+    if (!proposal) return;
+    setProposalDecisions(
+      Object.fromEntries(proposal.operations.map((operation) => [operation.operationId, decision])),
+    );
+  };
+
+  const submitProposal = async (): Promise<void> => {
+    if (!proposal || !allProposalOperationsDecided || proposalSettled) return;
+    try {
+      await onProposalDecision(proposal.proposalId, proposalDecisions);
+      await onArticleUpdated?.();
+    } catch {
+      // The runtime and workspace owner expose the persisted error state to the user.
+    }
+  };
 
   return (
     <section className="run-inspector" aria-label="Agent 运行详情">
@@ -286,6 +332,65 @@ function RunInspector({
             </section>
           ) : null}
 
+          {proposal ? (
+            <section className="proposal-preview" aria-label="文章修改提案审核">
+              <div className="proposal-heading">
+                <div>
+                  <strong>文章修改提案</strong>
+                  <span>{proposal.operations.length} 项修改</span>
+                </div>
+                {!proposalSettled ? (
+                  <div>
+                    <button
+                      disabled={proposal.status === 'submitting'}
+                      onClick={() => {
+                        decideAll('accepted');
+                      }}
+                      type="button"
+                    >
+                      全部接受
+                    </button>
+                    <button
+                      disabled={proposal.status === 'submitting'}
+                      onClick={() => {
+                        decideAll('rejected');
+                      }}
+                      type="button"
+                    >
+                      全部拒绝
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <ArticleDiff
+                decisions={proposalDecisions}
+                disabled={proposal.status === 'submitting' || proposalSettled}
+                entries={proposal.diffs}
+                onDecision={(operationId, decision) => {
+                  setProposalDecisions((current) => ({ ...current, [operationId]: decision }));
+                }}
+              />
+              {proposal.error ? (
+                <p className="proposal-error" role="alert">
+                  {proposal.error}
+                </p>
+              ) : null}
+              <div className="proposal-submit-row">
+                <span>{proposalStatusText(proposal.status)}</span>
+                {!proposalSettled ? (
+                  <button
+                    className="primary-action"
+                    disabled={!allProposalOperationsDecided || proposal.status === 'submitting'}
+                    onClick={() => void submitProposal()}
+                    type="button"
+                  >
+                    {proposal.status === 'submitting' ? '提交中...' : '应用决策'}
+                  </button>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
           <section className="inspector-section evidence-list">
             <h3>
               <FileCheck2 aria-hidden="true" size={14} /> Evidence
@@ -312,6 +417,15 @@ function RunInspector({
       ) : null}
     </section>
   );
+}
+
+function proposalStatusText(status: NonNullable<typeof initialRunView.proposal>['status']): string {
+  if (status === 'submitting') return '正在写入不可变文章修订';
+  if (status === 'accepted') return '已接受全部修改';
+  if (status === 'partially_accepted') return '已应用部分修改';
+  if (status === 'rejected') return '已拒绝全部修改';
+  if (status === 'error') return '提交失败，可检查后重试';
+  return '请逐项审核后提交';
 }
 
 function compactJson(value: Readonly<Record<string, unknown>>): string {

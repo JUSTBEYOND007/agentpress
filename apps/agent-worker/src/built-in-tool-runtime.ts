@@ -19,6 +19,7 @@ import {
   type BuiltInSearchHandlers,
 } from '@agentpress/mcp-runtime';
 import { ToolRegistry } from '@agentpress/tool-runtime';
+import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
 import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 
 export function createBuiltInToolRuntime(
@@ -30,6 +31,7 @@ export function createBuiltInToolRuntime(
   for (const definition of createInMemoryBuiltInDefinitions(handlers)) manager.register(definition);
   const registry = new ToolRegistry();
   registerBuiltInMcpTools(registry, new McpClientGateway(manager));
+  registerArticleTools(registry, database, new ProposalService(database));
   const toolCalls = new ToolCallService({ database, publisher, registry });
   return { bridge: new PersistentToolBridge({ database, registry, toolCalls }), manager };
 }

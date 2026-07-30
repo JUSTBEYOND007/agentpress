@@ -16,6 +16,7 @@
     "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/config": "workspace:*",
     "@agentpress/database": "workspace:*",
+    "@agentpress/editor-application": "workspace:*",
     "@agentpress/mcp-runtime": "workspace:*",
     "@agentpress/observability": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",

@@ -23,7 +23,19 @@ export type RunView = {
   readonly evidence: readonly { title: string; source: string }[];
   readonly usage: { inputTokens: number; outputTokens: number; costUsd: number };
   readonly recovery: string;
+  readonly proposal?: ProposalView;
   readonly lastEventId: number;
+};
+
+export type ProposalView = {
+  readonly proposalId: string;
+  readonly articleId: string;
+  readonly baseRevisionId: string;
+  readonly operations: readonly EditOperation[];
+  readonly diffs: readonly DiffEntry[];
+  readonly expiresAt: string;
+  readonly status: 'pending' | 'submitting' | 'accepted' | 'partially_accepted' | 'rejected' | 'error';
+  readonly error: string | undefined;
 };
 
 export type AgentPressRunEvent = {
@@ -98,13 +110,51 @@ export function reduceRunEvent(state: RunView, event: AgentPressRunEvent): RunVi
     const current = state.tools.find((tool) => tool.id === id);
     const tool: ToolView = {
       id: id || `tool-${String(state.tools.length + 1)}`,
-      name: firstNonEmpty(stringValue(payload.toolName), current?.name ?? '', 'tool'),
+      name: firstNonEmpty(
+        stringValue(payload.toolName),
+        stringValue(payload.toolId),
+        current?.name ?? '',
+        'tool',
+      ),
       status: event.type.slice('tool.'.length),
       args: recordValue(payload.arguments ?? payload.args ?? current?.args),
     };
-    return { ...base, tools: [...state.tools.filter((item) => item.id !== tool.id), tool] };
+    const proposal = event.type === 'tool.succeeded' ? parseProposal(payload.output) : undefined;
+    return {
+      ...base,
+      tools: [...state.tools.filter((item) => item.id !== tool.id), tool],
+      ...(proposal ? { proposal } : {}),
+    };
   }
   return base;
+}
+
+function parseProposal(value: unknown): ProposalView | undefined {
+  const output = recordValue(value);
+  const proposalId = stringValue(output.proposalId);
+  const articleId = stringValue(output.articleId);
+  const baseRevisionId = stringValue(output.baseRevisionId);
+  const expiresAt = stringValue(output.expiresAt);
+  if (
+    !proposalId ||
+    !articleId ||
+    !baseRevisionId ||
+    !expiresAt ||
+    !Array.isArray(output.operations) ||
+    !Array.isArray(output.diffs)
+  ) {
+    return undefined;
+  }
+  return {
+    proposalId,
+    articleId,
+    baseRevisionId,
+    expiresAt,
+    operations: output.operations as readonly EditOperation[],
+    diffs: output.diffs as readonly DiffEntry[],
+    status: 'pending',
+    error: undefined,
+  };
 }
 
 function task(
@@ -159,3 +209,4 @@ function numberValue(value: unknown): number {
 function firstNonEmpty(...values: readonly string[]): string {
   return values.find((value) => value.length > 0) ?? '';
 }
+import type { DiffEntry, EditOperation } from '@agentpress/editor-patch';

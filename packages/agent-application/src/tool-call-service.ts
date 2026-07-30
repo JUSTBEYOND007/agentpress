@@ -91,6 +91,40 @@ export class ToolCallService {
     const now = this.now();
     const status = requiresApproval ? ('awaiting_approval' as const) : ('proposed' as const);
     const persisted = await this.options.database.transaction(async (transaction) => {
+      if (input.idempotencyKey) {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`,
+        );
+        const existingRows = await transaction
+          .select()
+          .from(toolCalls)
+          .where(eq(toolCalls.idempotencyKey, input.idempotencyKey))
+          .limit(1);
+        const existing = existingRows[0];
+        if (existing) {
+          if (
+            existing.runId !== input.runId ||
+            existing.toolId !== definition.toolId ||
+            existing.toolVersion !== definition.version ||
+            existing.argumentsHash !== argumentsHash
+          ) {
+            throw new ToolCallApplicationError(
+              'approval_mismatch',
+              'Idempotency key is already bound to a different Tool Call',
+            );
+          }
+          return {
+            result: {
+              toolCallId: existing.id,
+              status:
+                existing.status === 'awaiting_approval'
+                  ? ('awaiting_approval' as const)
+                  : ('proposed' as const),
+              argumentsHash,
+            },
+          };
+        }
+      }
       const runRows = await transaction
         .select({ status: agentRuns.status })
         .from(agentRuns)
@@ -143,16 +177,22 @@ export class ToolCallService {
           toolCallId,
           toolId: definition.toolId,
           toolVersion: definition.version,
+          arguments: input.arguments,
           argumentsHash,
           risk: definition.risk,
           sideEffect: definition.sideEffect,
           ...(approvalId ? { approvalId } : {}),
         },
       });
-      return toDurableEvent(event);
+      return {
+        event: toDurableEvent(event),
+        result: { toolCallId, status, ...(approvalId ? { approvalId } : {}), argumentsHash },
+      };
     });
-    await this.options.publisher.publish({ durable: true, event: persisted });
-    return { toolCallId, status, ...(approvalId ? { approvalId } : {}), argumentsHash };
+    if (persisted.event) {
+      await this.options.publisher.publish({ durable: true, event: persisted.event });
+    }
+    return persisted.result;
   }
 
   public async decideApproval(input: DecideToolCallApprovalInput): Promise<{
@@ -296,6 +336,15 @@ export class ToolCallService {
           'Stored Tool Call arguments were altered',
         );
       }
+      if (call.idempotencyKey && call.status === 'succeeded') {
+        return {
+          replay: {
+            toolCallId: call.id,
+            status: call.status,
+            output: call.output,
+          },
+        };
+      }
       const allowed =
         call.status === 'approved' ||
         (call.status === 'proposed' && !APPROVAL_RISKS.has(call.risk));
@@ -323,6 +372,7 @@ export class ToolCallService {
       });
       return { call, definition, event: toDurableEvent(event) };
     });
+    if ('replay' in claimed) return claimed.replay;
     await this.options.publisher.publish({ durable: true, event: claimed.event });
 
     let output: unknown;

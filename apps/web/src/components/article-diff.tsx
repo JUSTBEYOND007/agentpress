@@ -6,10 +6,12 @@ export function ArticleDiff({
   entries,
   decisions,
   onDecision,
+  disabled = false,
 }: {
   readonly entries: readonly DiffEntry[];
   readonly decisions: Readonly<Record<string, 'accepted' | 'rejected'>>;
   readonly onDecision: (operationId: string, decision: 'accepted' | 'rejected') => void;
+  readonly disabled?: boolean;
 }): React.JSX.Element {
   return (
     <section className="article-diff" aria-label="文章修改提案">
@@ -34,6 +36,7 @@ export function ArticleDiff({
               aria-label="接受修改"
               aria-pressed={decisions[entry.operationId] === 'accepted'}
               className={decisions[entry.operationId] === 'accepted' ? 'is-selected' : ''}
+              disabled={disabled}
               onClick={() => {
                 onDecision(entry.operationId, 'accepted');
               }}
@@ -46,6 +49,7 @@ export function ArticleDiff({
               aria-label="拒绝修改"
               aria-pressed={decisions[entry.operationId] === 'rejected'}
               className={decisions[entry.operationId] === 'rejected' ? 'is-selected' : ''}
+              disabled={disabled}
               onClick={() => {
                 onDecision(entry.operationId, 'rejected');
               }}

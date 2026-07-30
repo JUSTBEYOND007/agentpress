@@ -191,6 +191,9 @@ importers:
       '@agentpress/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@agentpress/editor-application':
+        specifier: workspace:*
+        version: link:../../packages/editor-application
       '@agentpress/mcp-runtime':
         specifier: workspace:*
         version: link:../../packages/mcp-runtime
@@ -472,6 +475,12 @@ importers:
       '@agentpress/editor-patch':
         specifier: workspace:*
         version: link:../editor-patch
+      '@agentpress/tool-runtime':
+        specifier: workspace:*
+        version: link:../tool-runtime
+      '@sinclair/typebox':
+        specifier: 'catalog:'
+        version: 0.34.41
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)

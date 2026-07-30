@@ -906,6 +906,76 @@ button {
   font-size: 11px;
 }
 
+.proposal-preview {
+  border-top: 1px solid #e7e7e4;
+  padding: 13px 0;
+}
+
+.proposal-heading,
+.proposal-heading > div,
+.proposal-submit-row {
+  display: flex;
+  align-items: center;
+}
+
+.proposal-heading,
+.proposal-submit-row {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.proposal-heading {
+  margin-bottom: 9px;
+}
+
+.proposal-heading > div {
+  gap: 6px;
+}
+
+.proposal-heading strong {
+  color: #3e3f3b;
+  font-size: 12px;
+}
+
+.proposal-heading span,
+.proposal-submit-row span {
+  color: #858680;
+  font-size: 10px;
+}
+
+.proposal-heading button {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #f2f2ef;
+  color: #555650;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.proposal-heading button:disabled,
+.proposal-submit-row button:disabled,
+.diff-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.proposal-submit-row {
+  margin-top: 9px;
+}
+
+.proposal-submit-row .primary-action {
+  min-width: 76px;
+  padding: 6px 9px;
+  font-size: 11px;
+}
+
+.proposal-error {
+  margin: 8px 0 0;
+  color: #a33c35;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .run-metadata {
   display: grid;
   gap: 5px;

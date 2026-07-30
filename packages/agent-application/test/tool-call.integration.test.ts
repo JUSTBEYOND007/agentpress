@@ -38,6 +38,7 @@ describeWithDatabase('Tool Call application flow', () => {
   const conversationId = randomUUID();
   const published: LiveRunEvent[] = [];
   const registry = new ToolRegistry();
+  let searchExecutions = 0;
   let externalExecutions = 0;
   registry.register({
     toolId: 'workspace.search',
@@ -52,7 +53,10 @@ describeWithDatabase('Tool Call application flow', () => {
     idempotency: 'none',
     timeoutMs: 1_000,
     estimateCost: () => ({}),
-    execute: ({ query }) => Promise.resolve({ result: query }),
+    execute: ({ query }) => {
+      searchExecutions += 1;
+      return Promise.resolve({ result: query });
+    },
   });
   registry.register({
     toolId: 'publication.publish',
@@ -147,6 +151,23 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(toolCalls)
       .where(eq(toolCalls.runId, runId));
     expect(rows).toEqual([{ status: 'succeeded' }]);
+  });
+
+  it('replays a settled provider Tool Call without executing its side effect twice', async () => {
+    const runId = await createRunningRun();
+    const bridge = new PersistentToolBridge({ database: connection.db, registry, toolCalls: service });
+    const search = (await bridge.createForRun(runId)).find(
+      (tool) => tool.label === 'workspace.search',
+    );
+    const providerToolCallId = randomUUID();
+    const before = searchExecutions;
+    await expect(
+      search?.execute({ query: 'replay-safe' }, { runId, providerToolCallId }),
+    ).resolves.toEqual({ result: 'replay-safe' });
+    await expect(
+      search?.execute({ query: 'replay-safe' }, { runId, providerToolCallId }),
+    ).resolves.toEqual({ result: 'replay-safe' });
+    expect(searchExecutions - before).toBe(1);
   });
 
   it('rejects approval if exact persisted arguments no longer match', async () => {

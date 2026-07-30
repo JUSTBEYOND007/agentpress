@@ -48,4 +48,27 @@ describe('AgentPress run event reducer', () => {
       args: { articleId: 'article-1', baseRevision: 'rev-7' },
     });
   });
+
+  it('extracts a persisted article proposal from a successful tool result', () => {
+    const state = reduceRunEvent(initialRunView, {
+      type: 'tool.succeeded',
+      payload: {
+        toolCallId: 'tool-2',
+        output: {
+          proposalId: 'proposal-1',
+          articleId: 'article-1',
+          baseRevisionId: 'revision-1',
+          expiresAt: '2026-07-30T10:00:00.000Z',
+          operations: [{ operationId: 'operation-1', kind: 'delete' }],
+          diffs: [{ operationId: 'operation-1', kind: 'delete', blockId: 'block-1' }],
+        },
+      },
+    });
+
+    expect(state.proposal).toMatchObject({
+      proposalId: 'proposal-1',
+      status: 'pending',
+      diffs: [{ operationId: 'operation-1', blockId: 'block-1' }],
+    });
+  });
 });

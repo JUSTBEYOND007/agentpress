@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 
 import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
@@ -55,6 +55,28 @@ function WorkspacePage(): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState<string>();
 
+  const loadArticles = useCallback(async (id: string): Promise<void> => {
+    const response = await authenticatedFetch(`${apiUrl}/workspaces/${id}/articles`);
+    if (!response.ok) throw new Error(`文章列表加载失败 (${String(response.status)})`);
+    const items = (await response.json()) as WorkspaceArticle[];
+    setArticles(items);
+    setActiveArticleId((current) =>
+      current && items.some((item) => item.id === current) ? current : items[0]?.id,
+    );
+  }, []);
+
+  const reloadArticles = useCallback(async (): Promise<void> => {
+    if (!workspaceId) throw new Error('工作区尚未就绪');
+    try {
+      await loadArticles(workspaceId);
+      setError(undefined);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : '文章重新加载失败';
+      setError(message);
+      throw reason;
+    }
+  }, [loadArticles, workspaceId]);
+
   useEffect(() => {
     void authenticatedFetch(`${apiUrl}/me/workspace`)
       .then(async (response) => {
@@ -63,20 +85,12 @@ function WorkspacePage(): React.JSX.Element {
       })
       .then((workspace) => {
         setWorkspaceId(workspace.id);
-        return authenticatedFetch(`${apiUrl}/workspaces/${workspace.id}/articles`);
-      })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`文章列表加载失败 (${String(response.status)})`);
-        return (await response.json()) as WorkspaceArticle[];
-      })
-      .then((items) => {
-        setArticles(items);
-        setActiveArticleId((current) => current ?? items[0]?.id);
+        return loadArticles(workspace.id);
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : '文章列表加载失败');
       });
-  }, []);
+  }, [loadArticles]);
 
   const activeArticle = articles.find((article) => article.id === activeArticleId) ?? articles[0];
   const filteredArticles = useMemo(() => {
@@ -262,7 +276,7 @@ function WorkspacePage(): React.JSX.Element {
             <div className="toolbar-popover">
               <strong>页面设置</strong>
               <span>自动保存与服务端恢复已开启</span>
-              <span>当前用户：Demo Workspace</span>
+              <span>当前空间：个人工作区</span>
             </div>
           ) : null}
           {menuOpen ? (
@@ -283,7 +297,7 @@ function WorkspacePage(): React.JSX.Element {
 
         {view === 'workspace' && activeArticle ? (
           <ArticleCanvas
-            key={activeArticle.id}
+            key={`${activeArticle.id}:${activeArticle.revisionId}`}
             articleId={activeArticle.id}
             baseRevisionId={activeArticle.revisionId}
             initialDocument={activeArticle.document}
@@ -330,6 +344,7 @@ function WorkspacePage(): React.JSX.Element {
             ? { conversationId: activeArticle.conversationId }
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
+          onArticleUpdated={reloadArticles}
         />
       ) : null}
 

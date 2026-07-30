@@ -246,6 +246,49 @@ export function useAgentPressAssistantRuntime(
     await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision });
   }, []);
 
+  const decideProposal = useCallback(
+    async (proposalId: string, decisions: Readonly<Record<string, 'accepted' | 'rejected'>>) => {
+      setRun((current) => ({
+        ...current,
+        ...(current.proposal?.proposalId === proposalId
+          ? { proposal: { ...current.proposal, status: 'submitting' as const, error: undefined } }
+          : {}),
+      }));
+      try {
+        const result = await request(`${apiUrl}/edit-proposals/${proposalId}/decisions`, {
+          decisions,
+        });
+        const status = stringValue(result.status);
+        if (!['accepted', 'partially_accepted', 'rejected'].includes(status)) {
+          throw new Error('提案决策响应缺少有效状态');
+        }
+        setRun((current) => ({
+          ...current,
+          ...(current.proposal?.proposalId === proposalId
+            ? {
+                proposal: {
+                  ...current.proposal,
+                  status: status as 'accepted' | 'partially_accepted' | 'rejected',
+                  error: undefined,
+                },
+              }
+            : {}),
+        }));
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '文章提案提交失败';
+        setRun((current) => ({
+          ...current,
+          ...(current.proposal?.proposalId === proposalId
+            ? { proposal: { ...current.proposal, status: 'error' as const, error: message } }
+            : {}),
+        }));
+        throw error;
+      }
+    },
+    [],
+  );
+
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage,
@@ -255,7 +298,7 @@ export function useAgentPressAssistantRuntime(
     isRunning: run.status === '运行中' || run.status === '规划中' || run.status === '排队中',
   });
 
-  return { runtime, run, decideTool, readiness };
+  return { runtime, run, decideTool, decideProposal, readiness };
 }
 
 function convertMessage(message: AgentMessage): ThreadMessageLike {
@@ -297,7 +340,10 @@ async function request(
     },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`Agent API request failed with ${String(response.status)}`);
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Agent API request failed with ${String(response.status)}`);
+  }
   return recordValue((await response.json()) as unknown);
 }
 

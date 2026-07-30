@@ -24,6 +24,8 @@
   "dependencies": {
     "@agentpress/database": "workspace:*",
     "@agentpress/editor-patch": "workspace:*",
+    "@agentpress/tool-runtime": "workspace:*",
+    "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:",
     "ioredis": "catalog:"
   }

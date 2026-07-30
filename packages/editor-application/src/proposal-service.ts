@@ -3,6 +3,7 @@ import {
   applyProposal,
   type ArticleDocument,
   type EditOperation,
+  previewProposal,
   StaleEditError,
 } from '@agentpress/editor-patch';
 import {
@@ -21,6 +22,72 @@ export class ProposalService {
     private readonly createId: () => string = randomUUID,
     private readonly now: () => Date = () => new Date(),
   ) {}
+  public async create(input: {
+    readonly articleId: string;
+    readonly runId?: string;
+    readonly operations: readonly unknown[];
+    readonly ttlMs?: number;
+  }) {
+    const ttlMs = input.ttlMs ?? 30 * 60_000;
+    if (!Number.isSafeInteger(ttlMs) || ttlMs < 60_000 || ttlMs > 24 * 60 * 60_000) {
+      throw new RangeError('Edit proposal TTL must be between 1 minute and 24 hours');
+    }
+    return this.database.transaction(async (transaction) => {
+      const articleRows = await transaction
+        .select()
+        .from(articles)
+        .where(eq(articles.id, input.articleId))
+        .for('update')
+        .limit(1);
+      const article = articleRows[0];
+      if (!article?.currentRevisionId) {
+        throw new EditorApplicationError('article_not_found', 'Article has no current revision');
+      }
+      const revisionRows = await transaction
+        .select()
+        .from(articleRevisions)
+        .where(eq(articleRevisions.id, article.currentRevisionId))
+        .limit(1);
+      const revision = revisionRows[0];
+      if (!revision) {
+        throw new EditorApplicationError('article_not_found', 'Current revision does not exist');
+      }
+      const operations = parseOperations(input.operations);
+      if (operations.length === 0 || operations.length > 200) {
+        throw new EditorApplicationError(
+          'invalid_batch',
+          'Edit proposal must contain between 1 and 200 operations',
+        );
+      }
+      const proposalId = this.createId();
+      const diffs = previewProposal(revision.document as ArticleDocument, revision.id, {
+        proposalId,
+        articleId: article.id,
+        baseRevision: revision.id,
+        operations,
+      });
+      const expiresAt = new Date(this.now().getTime() + ttlMs);
+      await transaction.insert(editProposals).values({
+        id: proposalId,
+        articleId: article.id,
+        ...(input.runId ? { runId: input.runId } : {}),
+        baseRevisionId: revision.id,
+        operations,
+        expiresAt,
+        createdAt: this.now(),
+        updatedAt: this.now(),
+      });
+      return {
+        proposalId,
+        articleId: article.id,
+        baseRevisionId: revision.id,
+        operations,
+        diffs,
+        expiresAt: expiresAt.toISOString(),
+      };
+    });
+  }
+
   public async decide(input: {
     readonly proposalId: string;
     readonly userId: string;
