@@ -1,6 +1,6 @@
 'use client';
 
-import { LogtoProvider, useHandleSignInCallback, useLogto } from '@logto/react';
+import { LogtoProvider, useHandleSignInCallback, useLogto, type LogtoConfig } from '@logto/react';
 import { LogIn } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -9,9 +9,11 @@ import { bindAccessTokenProvider } from '../lib/authenticated-fetch';
 const endpoint = process.env.NEXT_PUBLIC_LOGTO_ENDPOINT;
 const appId = process.env.NEXT_PUBLIC_LOGTO_APP_ID;
 const resource = process.env.NEXT_PUBLIC_LOGTO_API_RESOURCE ?? 'http://localhost:4000/api';
+const logtoConfig: LogtoConfig | undefined =
+  endpoint && appId ? { endpoint, appId, resources: [resource] } : undefined;
 
 export function AuthProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  if (!endpoint || !appId) {
+  if (!logtoConfig) {
     return (
       <main className="auth-screen">
         <div className="auth-panel">
@@ -23,7 +25,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }): Re
     );
   }
   return (
-    <LogtoProvider config={{ endpoint, appId, resources: [resource] }}>
+    <LogtoProvider config={logtoConfig}>
       <AuthGate>{children}</AuthGate>
     </LogtoProvider>
   );
