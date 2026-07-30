@@ -215,6 +215,9 @@ importers:
       '@agentpress/tool-runtime':
         specifier: workspace:*
         version: link:../../packages/tool-runtime
+      '@agentpress/web-research':
+        specifier: workspace:*
+        version: link:../../packages/web-research
       '@nestjs/common':
         specifier: 'catalog:'
         version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { assertSafeUrl, fetchResearchSource } from '../src/index.js';
+import { assertSafeUrl, fetchPublicImage, fetchResearchSource } from '../src/index.js';
 
 const publicLookup = () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]);
 
@@ -78,5 +78,26 @@ describe('SSRF guard', () => {
         maxBytes: 10,
       }),
     ).rejects.toThrow(/exceeds/);
+  });
+
+  it('downloads only bounded public image media', async () => {
+    await expect(
+      fetchPublicImage('https://example.test/image.png', {
+        lookup: publicLookup,
+        fetch: () =>
+          Promise.resolve(
+            new Response(new Uint8Array([1, 2, 3]), {
+              headers: { 'content-type': 'image/png' },
+            }),
+          ),
+      }),
+    ).resolves.toMatchObject({ mimeType: 'image/png', finalUrl: 'https://example.test/image.png' });
+    await expect(
+      fetchPublicImage('https://example.test/image.svg', {
+        lookup: publicLookup,
+        fetch: () =>
+          Promise.resolve(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } })),
+      }),
+    ).rejects.toThrow(/Unsupported image/);
   });
 });

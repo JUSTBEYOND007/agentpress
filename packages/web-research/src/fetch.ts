@@ -70,3 +70,47 @@ export async function fetchResearchSource(
     fetchedAt: new Date().toISOString(),
   };
 }
+
+export async function fetchPublicImage(
+  rawUrl: string,
+  options: {
+    readonly maxBytes?: number;
+    readonly maxRedirects?: number;
+    readonly signal?: AbortSignal;
+    readonly lookup?: (hostname: string) => Promise<readonly DnsAddress[]>;
+    readonly fetch?: typeof fetch;
+  } = {},
+): Promise<{
+  readonly bytes: Buffer;
+  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+  readonly finalUrl: string;
+}> {
+  const maxBytes = options.maxBytes ?? 15 * 1024 * 1024;
+  const maxRedirects = options.maxRedirects ?? 3;
+  const validate = (value: string): Promise<URL> =>
+    assertSafeUrl(value, options.lookup ? { lookup: options.lookup } : {});
+  let current = await validate(rawUrl);
+  let response: Response | undefined;
+  for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
+    response = await (options.fetch ?? fetch)(current, {
+      redirect: 'manual',
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    if (response.status < 300 || response.status >= 400) break;
+    const location = response.headers.get('location');
+    if (!location || redirect === maxRedirects)
+      throw new Error('Image redirect chain is invalid or too long');
+    current = await validate(new URL(location, current).toString());
+  }
+  if (!response?.ok) throw new Error(`Image source returned HTTP ${String(response?.status ?? 0)}`);
+  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim();
+  if (contentType !== 'image/png' && contentType !== 'image/jpeg' && contentType !== 'image/webp')
+    throw new Error(`Unsupported image content type: ${contentType ?? ''}`);
+  const declaredLength = Number(response.headers.get('content-length') ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes)
+    throw new Error(`Image source exceeds ${String(maxBytes)} bytes`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength === 0 || bytes.byteLength > maxBytes)
+    throw new Error(`Image source exceeds ${String(maxBytes)} bytes or is empty`);
+  return { bytes, mimeType: contentType, finalUrl: current.toString() };
+}

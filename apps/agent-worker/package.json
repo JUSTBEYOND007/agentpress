@@ -23,6 +23,7 @@
     "@agentpress/mcp-runtime": "workspace:*",
     "@agentpress/observability": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
+    "@agentpress/web-research": "workspace:*",
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",
     "@sinclair/typebox": "catalog:",

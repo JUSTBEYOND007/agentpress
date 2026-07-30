@@ -28,6 +28,7 @@ import {
 import { loadWorkerEnvironment } from '@agentpress/config';
 import { ArkImageGenerator, MediaService, MinioObjectStorage } from '@agentpress/media-application';
 import { Type } from '@sinclair/typebox';
+import { fetchPublicImage, fetchResearchSource } from '@agentpress/web-research';
 import { and, eq } from 'drizzle-orm';
 
 export function createBuiltInToolRuntime(
@@ -69,6 +70,42 @@ export function createBuiltInToolRuntime(
         media.generateForTool({ toolCallId: context.toolCallId, prompt }),
     });
   }
+  const media = new MediaService({
+    database,
+    storage: new MinioObjectStorage(environment.s3),
+    imageGenerator: {
+      generate: () => Promise.reject(new Error('Image generation is not configured')),
+    },
+  });
+  registry.register({
+    toolId: 'media.import_licensed',
+    version: '1.0.0',
+    owner: 'agentpress.media',
+    description: 'Import a licensed public image into immutable object storage with provenance',
+    capabilities: ['licensed_media.import'],
+    inputSchema: Type.Object({
+      sourceUrl: Type.String({ pattern: '^https://', maxLength: 4_000 }),
+      license: Type.String({ minLength: 1, maxLength: 160 }),
+      attribution: Type.String({ minLength: 1, maxLength: 2_000 }),
+    }),
+    outputSchema: Type.Any(),
+    risk: 'external_write',
+    sideEffect: 'Downloads an approved public image and stores immutable bytes in MinIO',
+    idempotency: 'provider_key',
+    timeoutMs: 60_000,
+    estimateCost: () => ({ externalRequests: 1 }),
+    execute: async ({ sourceUrl, license, attribution }, context) => {
+      const image = await fetchPublicImage(sourceUrl, { signal: context.signal });
+      return media.importLicensedForTool({
+        toolCallId: context.toolCallId,
+        bytes: image.bytes,
+        mimeType: image.mimeType,
+        sourceUrl: image.finalUrl,
+        license,
+        attribution,
+      });
+    },
+  });
   const toolCalls = new ToolCallService({ database, publisher, registry });
   return { bridge: new PersistentToolBridge({ database, registry, toolCalls }), manager };
 }
@@ -104,7 +141,25 @@ function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
         origin: '*',
       }).toString();
       const payload = await fetchJson(endpoint, signal);
-      return normalizeWikiSearch(payload);
+      const results = normalizeWikiSearch(payload);
+      return Promise.all(
+        results.map(async (result) => {
+          try {
+            const source = await fetchResearchSource(result.url, { signal, maxBytes: 750_000 });
+            return {
+              ...result,
+              title: source.title,
+              text: source.text.slice(0, 20_000),
+              fetchedAt: source.fetchedAt,
+            };
+          } catch (error) {
+            return {
+              ...result,
+              fetchError: error instanceof Error ? error.message : 'Source extraction failed',
+            };
+          }
+        }),
+      );
     },
     licensed_media: async ({ query, limit }, signal) => {
       const endpoint = new URL('https://commons.wikimedia.org/w/api.php');
@@ -176,7 +231,12 @@ async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
   return response.json() as Promise<unknown>;
 }
 
-function normalizeWikiSearch(value: unknown): readonly unknown[] {
+function normalizeWikiSearch(value: unknown): readonly {
+  readonly title: string;
+  readonly url: string;
+  readonly excerpt: string;
+  readonly source: string;
+}[] {
   if (!isRecord(value) || !isRecord(value.query) || !Array.isArray(value.query.search)) return [];
   return value.query.search.flatMap((item) => {
     if (!isRecord(item) || typeof item.title !== 'string' || typeof item.pageid !== 'number')

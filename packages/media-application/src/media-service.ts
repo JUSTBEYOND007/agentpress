@@ -67,6 +67,40 @@ export class MediaService {
     return this.persist({ ...input, kind: 'licensed' as const });
   }
 
+  public async importLicensedForTool(input: {
+    readonly toolCallId: string;
+    readonly bytes: Buffer;
+    readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+    readonly sourceUrl: string;
+    readonly license: string;
+    readonly attribution: string;
+  }) {
+    const approved = await this.options.database
+      .select({ workspaceId: agentRuns.workspaceId, userId: rootRequests.requestedByUserId })
+      .from(toolCalls)
+      .innerJoin(agentRuns, eq(agentRuns.id, toolCalls.runId))
+      .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
+      .where(
+        and(
+          eq(toolCalls.id, input.toolCallId),
+          eq(toolCalls.status, 'executing'),
+          eq(toolCalls.toolId, 'media.import_licensed'),
+        ),
+      )
+      .limit(1);
+    if (!approved[0]?.userId)
+      throw new Error('Licensed media import requires an executing Tool Call');
+    return this.importLicensed({
+      workspaceId: approved[0].workspaceId,
+      userId: approved[0].userId,
+      bytes: input.bytes,
+      mimeType: input.mimeType,
+      sourceUrl: input.sourceUrl,
+      license: input.license,
+      attribution: input.attribution,
+    });
+  }
+
   public async read(assetId: string) {
     const rows = await this.options.database
       .select({ objectKey: mediaAssets.objectKey, mimeType: mediaAssets.mimeType })

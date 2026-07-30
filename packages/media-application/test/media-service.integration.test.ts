@@ -122,5 +122,46 @@ describeWithDatabase('Agent image generation ledger', () => {
       createdByUserId: ids.user,
       model: 'ark-image',
     });
+
+    const licensedToolId = randomUUID();
+    await connection.db.insert(toolCalls).values({
+      id: licensedToolId,
+      runId: ids.run,
+      toolId: 'media.import_licensed',
+      toolVersion: '1.0.0',
+      arguments: {
+        sourceUrl: 'https://commons.wikimedia.org/example.png',
+        license: 'CC BY 4.0',
+        attribution: 'Example Author',
+      },
+      argumentsHash: 'licensed-hash',
+      risk: 'external_write',
+      sideEffect: 'import',
+      status: 'executing',
+    });
+    await expect(
+      service.importLicensedForTool({
+        toolCallId: licensedToolId,
+        bytes: Buffer.from('licensed-image'),
+        mimeType: 'image/png',
+        sourceUrl: 'https://commons.wikimedia.org/example.png',
+        license: 'CC BY 4.0',
+        attribution: 'Example Author',
+      }),
+    ).resolves.toMatchObject({
+      kind: 'licensed',
+      sourceUrl: 'https://commons.wikimedia.org/example.png',
+      license: 'CC BY 4.0',
+      attribution: 'Example Author',
+    });
+    const [licensed] = await connection.db
+      .select()
+      .from(mediaAssets)
+      .where(eq(mediaAssets.sourceUrl, 'https://commons.wikimedia.org/example.png'));
+    expect(licensed).toMatchObject({
+      workspaceId: ids.workspace,
+      createdByUserId: ids.user,
+      kind: 'licensed',
+    });
   });
 });
