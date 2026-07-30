@@ -5,17 +5,13 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { initialRunView, reduceRunEvent } from './run-event-reducer';
+import { authenticatedFetch } from './authenticated-fetch';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
-const defaultConversationId =
-  process.env.NEXT_PUBLIC_DEMO_CONVERSATION_ID ?? '00000000-0000-4000-8000-000000000005';
-const defaultBranchId =
-  process.env.NEXT_PUBLIC_DEMO_BRANCH_ID ?? '00000000-0000-4000-8000-000000000006';
-const defaultUserId =
-  process.env.NEXT_PUBLIC_DEMO_USER_ID ?? '00000000-0000-4000-8000-000000000001';
 
 export type AgentSendMode = 'steering' | 'follow-up';
 
@@ -40,47 +36,15 @@ const initialMessages: readonly AgentMessage[] = [
   },
 ];
 
-const eventTypes = [
-  'run.queued',
-  'run.planning',
-  'run.started',
-  'run.recovering',
-  'run.recovered',
-  'run.completed',
-  'run.completed_with_degradation',
-  'run.cancelled',
-  'run.failed',
-  'plan.revised',
-  'task.started',
-  'task.succeeded',
-  'task.failed',
-  'task.skipped',
-  'task.cancelled',
-  'tool.proposed',
-  'tool.approval_requested',
-  'tool.approved',
-  'tool.denied',
-  'tool.executing',
-  'tool.succeeded',
-  'tool.failed',
-  'tool.expired',
-  'message.started',
-  'message.completed',
-  'content.delta',
-  'usage.updated',
-] as const;
-
 export function useAgentPressAssistantRuntime(
   sendMode: AgentSendMode,
   context: {
     readonly conversationId?: string;
     readonly branchId?: string;
-    readonly userId?: string;
   } = {},
 ) {
-  const conversationId = context.conversationId ?? defaultConversationId;
-  const branchId = context.branchId ?? defaultBranchId;
-  const userId = context.userId ?? defaultUserId;
+  const conversationId = context.conversationId;
+  const branchId = context.branchId;
   const [messages, setMessages] = useState<readonly AgentMessage[]>(initialMessages);
   const [run, setRun] = useState(initialRunView);
   const [runId, setRunId] = useState<string>();
@@ -88,7 +52,7 @@ export function useAgentPressAssistantRuntime(
     status: 'checking',
     missing: [],
   });
-  const streamRef = useRef<EventSource | undefined>(undefined);
+  const streamRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -170,11 +134,11 @@ export function useAgentPressAssistantRuntime(
 
   useEffect(() => {
     if (!runId) return;
-    const stream = new EventSource(`${apiUrl}/runs/${runId}/events`, { withCredentials: true });
+    const stream = new AbortController();
     streamRef.current = stream;
-    const receive = (event: MessageEvent<string>) => {
+    const receive = (event: { readonly event: string; readonly data: string }) => {
       const data = parseEventData(event.data);
-      const type = event.type;
+      const type = event.event;
       const payload = recordValue(data.payload);
       setRun((current) =>
         reduceRunEvent(current, {
@@ -189,18 +153,34 @@ export function useAgentPressAssistantRuntime(
         const message = recordValue(payload.message ?? data.message);
         updateAssistant(stringValue(message.content), true);
       }
-      if (isTerminalEvent(type)) stream.close();
+      if (isTerminalEvent(type)) stream.abort();
     };
-    for (const type of eventTypes) stream.addEventListener(type, receive as EventListener);
-    stream.onerror = () => {
-      setRun((current) => ({
+    void fetchEventSource(`${apiUrl}/runs/${runId}/events`, {
+      signal: stream.signal,
+      fetch: authenticatedFetch,
+      openWhenHidden: true,
+      onmessage: receive,
+      onerror: () => {
+        setRun((current) => ({
+          ...current,
+          status: '正在重连',
+          recovery: 'SSE 断开 · 等待事件重放',
+        }));
+      },
+    }).catch((error: unknown) => {
+      if (stream.signal.aborted) return;
+      setMessages((current) => [
         ...current,
-        status: '正在重连',
-        recovery: 'SSE 断开 · 等待事件重放',
-      }));
-    };
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: error instanceof Error ? error.message : 'Agent 事件流连接失败',
+          status: 'error',
+        },
+      ]);
+    });
     return () => {
-      stream.close();
+      stream.abort();
       if (streamRef.current === stream) streamRef.current = undefined;
     };
   }, [runId, updateAssistant]);
@@ -209,6 +189,18 @@ export function useAgentPressAssistantRuntime(
     async (message: AppendMessage) => {
       const prompt = messageText(message);
       if (!prompt) return;
+      if (!conversationId || !branchId) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            text: '请先创建或选择一篇文章',
+            status: 'error',
+          },
+        ]);
+        return;
+      }
       setMessages((current) => [
         ...current,
         { id: crypto.randomUUID(), role: 'user', text: prompt },
@@ -222,7 +214,7 @@ export function useAgentPressAssistantRuntime(
         setRun((current) => ({ ...current, status: '排队中', tasks: [], tools: [] }));
         const created = await request(
           `${apiUrl}/conversations/${conversationId}/runs`,
-          { branchId, userId, prompt },
+          { branchId, prompt },
           true,
         );
         const nextRunId = stringValue(created.runId);
@@ -242,7 +234,7 @@ export function useAgentPressAssistantRuntime(
         ]);
       }
     },
-    [branchId, conversationId, run.status, runId, sendMode, userId],
+    [branchId, conversationId, run.status, runId, sendMode],
   );
 
   const onCancel = useCallback(async () => {
@@ -250,19 +242,16 @@ export function useAgentPressAssistantRuntime(
     await request(`${apiUrl}/runs/${runId}/cancel`, {});
   }, [runId]);
 
-  const decideTool = useCallback(
-    async (toolCallId: string, decision: 'approved' | 'denied') => {
-      await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision, userId });
-    },
-    [userId],
-  );
+  const decideTool = useCallback(async (toolCallId: string, decision: 'approved' | 'denied') => {
+    await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision });
+  }, []);
 
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage,
     onNew,
     onCancel,
-    isSendDisabled: readiness.status !== 'ready',
+    isSendDisabled: readiness.status !== 'ready' || !conversationId || !branchId,
     isRunning: run.status === '运行中' || run.status === '规划中' || run.status === '排队中',
   });
 
@@ -299,7 +288,7 @@ async function request(
   body: unknown,
   idempotent = false,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(url, {
+  const response = await authenticatedFetch(url, {
     method: 'POST',
     credentials: 'include',
     headers: {

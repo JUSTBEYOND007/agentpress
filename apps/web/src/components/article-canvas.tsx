@@ -5,8 +5,8 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useRef, useState } from 'react';
 import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../lib/autosave-queue';
+import { authenticatedFetch } from '../lib/authenticated-fetch';
 
-const userId = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? '00000000-0000-4000-8000-000000000001';
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 
 export function ArticleCanvas({
@@ -102,7 +102,7 @@ export function ArticleCanvas({
         await acknowledgeAutosave(batch.updateId);
       }
 
-      const draftResponse = await fetch(`${apiUrl}/articles/${articleId}/draft?userId=${userId}`);
+      const draftResponse = await authenticatedFetch(`${apiUrl}/articles/${articleId}/draft`);
       if (draftResponse.ok) {
         const draft = (await draftResponse.json()) as {
           readonly document?: Readonly<Record<string, unknown>>;
@@ -169,10 +169,10 @@ export function ArticleCanvas({
 }
 
 function writerLeaseRequest(articleId: string, leaseId: string, action: string): Promise<Response> {
-  return fetch(`${apiUrl}/articles/${articleId}/writer-lease`, {
+  return authenticatedFetch(`${apiUrl}/articles/${articleId}/writer-lease`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action, userId, leaseId }),
+    body: JSON.stringify({ action, leaseId }),
   });
 }
 
@@ -182,12 +182,11 @@ function sendAutosave(
   leaseId: string,
   batch: { readonly updateId: string; readonly steps: readonly unknown[] },
 ): Promise<Response> {
-  return fetch(`${apiUrl}/articles/${articleId}/autosave`, {
+  return authenticatedFetch(`${apiUrl}/articles/${articleId}/autosave`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       updateId: batch.updateId,
-      userId,
       writerLeaseId: leaseId,
       baseRevisionId,
       schemaVersion: 1,

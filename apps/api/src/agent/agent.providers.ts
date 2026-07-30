@@ -16,6 +16,8 @@ import { ToolRegistry } from '@agentpress/tool-runtime';
 import { Redis } from 'ioredis';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
+import { AuthService } from '../auth/auth.service.js';
+import { AuthorizationService } from '../auth/authorization.service.js';
 
 const environment = loadApiEnvironment();
 const databaseConnection = connectDatabase(environment.databaseUrl);
@@ -55,6 +57,17 @@ export const agentProviders: Provider[] = [
   {
     provide: DATABASE_CONNECTION,
     useValue: databaseConnection,
+  },
+  {
+    provide: AuthService,
+    useFactory: (connection: DatabaseConnection) =>
+      new AuthService(connection.db, environment.logtoEndpoint, environment.logtoApiResource),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: AuthorizationService,
+    useFactory: (connection: DatabaseConnection) => new AuthorizationService(connection.db),
+    inject: [DATABASE_CONNECTION],
   },
   {
     provide: RedisRunEventBus,

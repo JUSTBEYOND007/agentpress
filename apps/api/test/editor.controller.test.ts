@@ -6,6 +6,14 @@ import type {
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { EditorController } from '../src/editor/editor.controller.js';
+import type { AuthorizationService } from '../src/auth/authorization.service.js';
+import type { AuthenticatedUser } from '../src/auth/auth.service.js';
+
+const user: AuthenticatedUser = { id: 'user', subject: 'subject', displayName: 'User' };
+const authorization = {
+  assertArticleAccess: vi.fn(() => Promise.resolve()),
+  assertProposalAccess: vi.fn(() => Promise.resolve()),
+} as unknown as AuthorizationService;
 
 describe('EditorController', () => {
   it('passes a complete AutosaveBatch to the service', async () => {
@@ -14,15 +22,19 @@ describe('EditorController', () => {
       { save } as AutosaveService,
       {} as ProposalService,
       {} as RedisWriterLease,
+      authorization,
     );
-    await controller.save('article', {
-      updateId: 'update',
-      userId: 'user',
-      writerLeaseId: 'lease',
-      baseRevisionId: 'revision',
-      schemaVersion: 1,
-      steps: [{ stepType: 'replace' }],
-    });
+    await controller.save(
+      'article',
+      {
+        updateId: 'update',
+        writerLeaseId: 'lease',
+        baseRevisionId: 'revision',
+        schemaVersion: 1,
+        steps: [{ stepType: 'replace' }],
+      },
+      user,
+    );
     expect(save).toHaveBeenCalledWith({
       articleId: 'article',
       updateId: 'update',
@@ -38,9 +50,10 @@ describe('EditorController', () => {
       {} as AutosaveService,
       {} as ProposalService,
       {} as RedisWriterLease,
+      authorization,
     );
     await expect(
-      controller.decide('proposal', { userId: 'user', decisions: { op: 'maybe' } }),
+      controller.decide('proposal', { decisions: { op: 'maybe' } }, user),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -53,14 +66,18 @@ describe('EditorController', () => {
       {} as AutosaveService,
       {} as ProposalService,
       leases,
+      authorization,
     );
 
     await expect(
-      controller.writerLease('article', {
-        action: 'acquire',
-        userId: 'user',
-        leaseId: 'browser-session',
-      }),
+      controller.writerLease(
+        'article',
+        {
+          action: 'acquire',
+          leaseId: 'browser-session',
+        },
+        user,
+      ),
     ).resolves.toEqual({ articleId: 'article', leaseId: 'browser-session', owned: true });
   });
 });

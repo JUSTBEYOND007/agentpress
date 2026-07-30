@@ -17,10 +17,10 @@ import { useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 
 import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
+import { AuthProvider } from '../components/auth-provider';
+import { authenticatedFetch } from '../lib/authenticated-fetch';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
-const workspaceId = '00000000-0000-4000-8000-000000000002';
-const userId = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? '00000000-0000-4000-8000-000000000001';
 
 type WorkspaceArticle = {
   readonly id: string;
@@ -34,8 +34,17 @@ type WorkspaceArticle = {
 
 type View = 'workspace' | 'search' | 'recent';
 
-export default function WorkspacePage(): React.JSX.Element {
+export default function AuthenticatedWorkspacePage(): React.JSX.Element {
+  return (
+    <AuthProvider>
+      <WorkspacePage />
+    </AuthProvider>
+  );
+}
+
+function WorkspacePage(): React.JSX.Element {
   const [articles, setArticles] = useState<readonly WorkspaceArticle[]>([]);
+  const [workspaceId, setWorkspaceId] = useState<string>();
   const [activeArticleId, setActiveArticleId] = useState<string>();
   const [view, setView] = useState<View>('workspace');
   const [agentOpen, setAgentOpen] = useState(true);
@@ -47,7 +56,15 @@ export default function WorkspacePage(): React.JSX.Element {
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    void fetch(`${apiUrl}/workspaces/${workspaceId}/articles`)
+    void authenticatedFetch(`${apiUrl}/me/workspace`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`工作区加载失败 (${String(response.status)})`);
+        return (await response.json()) as { readonly id: string };
+      })
+      .then((workspace) => {
+        setWorkspaceId(workspace.id);
+        return authenticatedFetch(`${apiUrl}/workspaces/${workspace.id}/articles`);
+      })
       .then(async (response) => {
         if (!response.ok) throw new Error(`文章列表加载失败 (${String(response.status)})`);
         return (await response.json()) as WorkspaceArticle[];
@@ -56,9 +73,9 @@ export default function WorkspacePage(): React.JSX.Element {
         setArticles(items);
         setActiveArticleId((current) => current ?? items[0]?.id);
       })
-      .catch((reason: unknown) =>
-        { setError(reason instanceof Error ? reason.message : '文章列表加载失败'); },
-      );
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : '文章列表加载失败');
+      });
   }, []);
 
   const activeArticle = articles.find((article) => article.id === activeArticleId) ?? articles[0];
@@ -77,10 +94,11 @@ export default function WorkspacePage(): React.JSX.Element {
     event.preventDefault();
     setError(undefined);
     try {
-      const response = await fetch(`${apiUrl}/workspaces/${workspaceId}/articles`, {
+      if (!workspaceId) throw new Error('工作区尚未就绪');
+      const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/articles`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: newTitle, userId }),
+        body: JSON.stringify({ title: newTitle }),
       });
       if (!response.ok) throw new Error(`创建文章失败 (${String(response.status)})`);
       const article = (await response.json()) as WorkspaceArticle;
@@ -151,7 +169,9 @@ export default function WorkspacePage(): React.JSX.Element {
             <button
               aria-label="新建内容"
               className="icon-button"
-              onClick={() => { setNewArticleOpen(true); }}
+              onClick={() => {
+                setNewArticleOpen(true);
+              }}
               title="新建内容"
               type="button"
             >
@@ -162,7 +182,9 @@ export default function WorkspacePage(): React.JSX.Element {
             <button
               className={article.id === activeArticle?.id ? 'tree-item is-selected' : 'tree-item'}
               key={article.id}
-              onClick={() => { selectArticle(article.id); }}
+              onClick={() => {
+                selectArticle(article.id);
+              }}
               type="button"
             >
               <FileText aria-hidden="true" size={16} />
@@ -175,7 +197,13 @@ export default function WorkspacePage(): React.JSX.Element {
           <div className="section-heading">
             <span>Agents</span>
           </div>
-          <button className="tree-item" onClick={() => { setAgentOpen(true); }} type="button">
+          <button
+            className="tree-item"
+            onClick={() => {
+              setAgentOpen(true);
+            }}
+            type="button"
+          >
             <Bot aria-hidden="true" size={16} />
             <span>写作助手</span>
           </button>
@@ -221,7 +249,9 @@ export default function WorkspacePage(): React.JSX.Element {
             <button
               aria-label="切换 Agent 面板"
               className="icon-button"
-              onClick={() => { setAgentOpen((value) => !value); }}
+              onClick={() => {
+                setAgentOpen((value) => !value);
+              }}
               title="Agent 面板"
               type="button"
             >
@@ -265,14 +295,22 @@ export default function WorkspacePage(): React.JSX.Element {
               <input
                 aria-label="搜索文章"
                 autoFocus
-                onChange={(event) => { setSearchQuery(event.target.value); }}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                }}
                 placeholder="输入标题搜索"
                 value={searchQuery}
               />
             ) : null}
             <div className="workspace-results">
               {listedArticles.map((article) => (
-                <button key={article.id} onClick={() => { selectArticle(article.id); }} type="button">
+                <button
+                  key={article.id}
+                  onClick={() => {
+                    selectArticle(article.id);
+                  }}
+                  type="button"
+                >
                   <FileText size={17} />
                   <span>{article.title}</span>
                 </button>
@@ -288,7 +326,6 @@ export default function WorkspacePage(): React.JSX.Element {
       {agentOpen ? (
         <AgentWorkbench
           key={activeArticle?.conversationId ?? 'workspace-agent'}
-          userId={userId}
           {...(activeArticle?.conversationId
             ? { conversationId: activeArticle.conversationId }
             : {})}
@@ -299,7 +336,13 @@ export default function WorkspacePage(): React.JSX.Element {
       {error ? (
         <div className="workspace-toast" role="alert">
           {error}
-          <button aria-label="关闭提示" onClick={() => { setError(undefined); }} type="button">
+          <button
+            aria-label="关闭提示"
+            onClick={() => {
+              setError(undefined);
+            }}
+            type="button"
+          >
             <X size={14} />
           </button>
         </div>
@@ -309,14 +352,22 @@ export default function WorkspacePage(): React.JSX.Element {
           <form className="modal" onSubmit={(event) => void createArticle(event)}>
             <div className="modal-heading">
               <strong>新建文章</strong>
-              <button aria-label="关闭" onClick={() => { setNewArticleOpen(false); }} type="button">
+              <button
+                aria-label="关闭"
+                onClick={() => {
+                  setNewArticleOpen(false);
+                }}
+                type="button"
+              >
                 <X size={16} />
               </button>
             </div>
             <label htmlFor="new-article-title">标题</label>
             <input
               id="new-article-title"
-              onChange={(event) => { setNewTitle(event.target.value); }}
+              onChange={(event) => {
+                setNewTitle(event.target.value);
+              }}
               placeholder="输入文章标题"
               required
               value={newTitle}

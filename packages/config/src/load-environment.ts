@@ -30,6 +30,8 @@ const ApiEnvironmentSchema = Type.Intersect([
     ARK_API_KEY: Type.Optional(Type.String({ minLength: 1 })),
     ARK_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_IMAGE_MODEL: Type.Optional(Type.String({ minLength: 1 })),
+    LOGTO_ENDPOINT: Type.Optional(Type.String({ minLength: 1 })),
+    LOGTO_API_RESOURCE: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
 
@@ -50,6 +52,8 @@ export type ApiEnvironment = {
   readonly arkApiKey?: string;
   readonly arkBaseUrl: string;
   readonly arkImageModel?: string;
+  readonly logtoEndpoint: string;
+  readonly logtoApiResource: string;
 };
 
 const WorkerEnvironmentSchema = Type.Intersect([
@@ -120,6 +124,8 @@ export function loadApiEnvironment(source: NodeJS.ProcessEnv = process.env): Api
       secretKey: clean.S3_SECRET_KEY ?? 'agentpress-local-secret',
     },
     arkBaseUrl: clean.ARK_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/v3',
+    logtoEndpoint: clean.LOGTO_ENDPOINT ?? 'http://localhost:3001',
+    logtoApiResource: clean.LOGTO_API_RESOURCE ?? 'http://localhost:4000/api',
     ...(clean.ARK_API_KEY ? { arkApiKey: clean.ARK_API_KEY } : {}),
     ...(clean.ARK_IMAGE_MODEL ? { arkImageModel: clean.ARK_IMAGE_MODEL } : {}),
   };

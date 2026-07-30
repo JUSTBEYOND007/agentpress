@@ -11,24 +11,26 @@ import {
   Post,
   StreamableFile,
 } from '@nestjs/common';
+import { PublicRoute } from '../auth/auth.guard.js';
+import { CurrentUser } from '../auth/current-user.js';
+import type { AuthenticatedUser } from '../auth/auth.service.js';
 
 @Controller()
 export class MediaController {
   public constructor(@Inject(MediaService) private readonly media: MediaService) {}
 
   @Post('media/generate')
-  public async generate(@Body() body: Record<string, unknown>) {
-    if (
-      typeof body.approvedToolCallId !== 'string' ||
-      typeof body.userId !== 'string' ||
-      typeof body.prompt !== 'string'
-    ) {
-      throw new BadRequestException('approvedToolCallId, userId and prompt are required');
+  public async generate(
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (typeof body.approvedToolCallId !== 'string' || typeof body.prompt !== 'string') {
+      throw new BadRequestException('approvedToolCallId and prompt are required');
     }
     try {
       return await this.media.generate({
         approvedToolCallId: body.approvedToolCallId,
-        userId: body.userId,
+        userId: user.id,
         prompt: body.prompt,
       });
     } catch (error) {
@@ -39,6 +41,7 @@ export class MediaController {
   }
 
   @Get('media/:assetId/content')
+  @PublicRoute()
   @Header('Cache-Control', 'public, max-age=31536000, immutable')
   public async content(@Param('assetId') assetId: string): Promise<StreamableFile> {
     const asset = await this.media.read(assetId);

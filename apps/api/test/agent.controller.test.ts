@@ -9,6 +9,9 @@ import { describe, expect, it } from 'vitest';
 
 import { AgentController } from '../src/agent/agent.controller.js';
 import type { RedisRunEventBus } from '../src/agent/redis-run-event-bus.js';
+import type { AuthenticatedUser } from '../src/auth/auth.service.js';
+
+const user: AuthenticatedUser = { id: 'user-1', subject: 'logto-user', displayName: 'User' };
 
 describe('AgentController SSE replay', () => {
   it('requires caller identity and delegates Run creation exactly', async () => {
@@ -21,11 +24,15 @@ describe('AgentController SSE replay', () => {
     } as unknown as DirectRunService;
     const controller = new AgentController(runs, {} as RedisRunEventBus);
     await expect(
-      controller.createRun('conversation-1', 'request-1', {
-        branchId: 'branch-1',
-        userId: 'user-1',
-        prompt: '研究 Kafka',
-      }),
+      controller.createRun(
+        'conversation-1',
+        'request-1',
+        {
+          branchId: 'branch-1',
+          prompt: '研究 Kafka',
+        },
+        user,
+      ),
     ).resolves.toMatchObject({ status: 'queued' });
     expect(created).toEqual([
       {
@@ -37,10 +44,7 @@ describe('AgentController SSE replay', () => {
       },
     ]);
     await expect(
-      controller.createRun('conversation-1', 'request-2', {
-        branchId: 'branch-1',
-        prompt: 'missing identity',
-      }),
+      controller.createRun('conversation-1', 'request-2', { branchId: 'branch-1' }, user),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -90,7 +94,7 @@ describe('AgentController SSE replay', () => {
     );
 
     await expect(
-      controller.decideToolCall('call-1', { decision: 'approved', userId: 'user-1' }),
+      controller.decideToolCall('call-1', { decision: 'approved' }, user),
     ).resolves.toMatchObject({ status: 'approved' });
     expect(decisions).toEqual([{ toolCallId: 'call-1', decision: 'approved', userId: 'user-1' }]);
   });

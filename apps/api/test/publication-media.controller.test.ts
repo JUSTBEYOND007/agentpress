@@ -5,18 +5,31 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MediaController } from '../src/media/media.controller.js';
 import { PublicationController } from '../src/publication/publication.controller.js';
+import type { AuthorizationService } from '../src/auth/authorization.service.js';
+import type { AuthenticatedUser } from '../src/auth/auth.service.js';
+
+const user: AuthenticatedUser = { id: 'user-1', subject: 'subject', displayName: 'User' };
+const authorization = {
+  assertArticleAccess: vi.fn(() => Promise.resolve()),
+} as unknown as AuthorizationService;
 
 describe('PublicationController', () => {
   it('publishes the exact immutable revision and optional cover', async () => {
     const publish = vi.fn(() => Promise.resolve({ publicationId: 'publication-1' }));
-    const controller = new PublicationController({ publish } as unknown as PublicationService);
+    const controller = new PublicationController(
+      { publish } as unknown as PublicationService,
+      authorization,
+    );
 
-    await controller.publish('article-1', {
-      revisionId: 'revision-3',
-      userId: 'user-1',
-      slug: 'agent-writing',
-      coverAssetId: 'asset-1',
-    });
+    await controller.publish(
+      'article-1',
+      {
+        revisionId: 'revision-3',
+        slug: 'agent-writing',
+        coverAssetId: 'asset-1',
+      },
+      user,
+    );
 
     expect(publish).toHaveBeenCalledWith({
       articleId: 'article-1',
@@ -29,7 +42,10 @@ describe('PublicationController', () => {
 
   it('rejects invalid ranking limits before querying storage', async () => {
     const trending = vi.fn();
-    const controller = new PublicationController({ trending } as unknown as PublicationService);
+    const controller = new PublicationController(
+      { trending } as unknown as PublicationService,
+      authorization,
+    );
 
     await expect(controller.trending('51')).rejects.toBeInstanceOf(BadRequestException);
     expect(trending).not.toHaveBeenCalled();
@@ -37,7 +53,10 @@ describe('PublicationController', () => {
 
   it('hashes viewer identifiers before recording a view', async () => {
     const recordView = vi.fn(() => Promise.resolve({ counted: true }));
-    const controller = new PublicationController({ recordView } as unknown as PublicationService);
+    const controller = new PublicationController(
+      { recordView } as unknown as PublicationService,
+      authorization,
+    );
 
     await controller.view('publication-1', 'private-browser-id');
 
@@ -52,15 +71,15 @@ describe('PublicationController', () => {
     const react = vi.fn(() =>
       Promise.reject(new PublicationError('not_found', 'Publication or user not found')),
     );
-    const controller = new PublicationController({
-      findBySlug,
-      react,
-    } as unknown as PublicationService);
+    const controller = new PublicationController(
+      { findBySlug, react } as unknown as PublicationService,
+      authorization,
+    );
 
     await expect(controller.getPublication('missing')).rejects.toBeInstanceOf(NotFoundException);
-    await expect(
-      controller.react('missing', { userId: 'user-1', reaction: 'up' }),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.react('missing', { reaction: 'up' }, user)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
 
@@ -69,18 +88,20 @@ describe('MediaController', () => {
     const generate = vi.fn(() => Promise.resolve({ assetId: 'asset-1' }));
     const controller = new MediaController({ generate } as unknown as MediaService);
 
-    await controller.generate({
-      approvedToolCallId: 'tool-call-1',
-      userId: 'user-1',
-      prompt: 'Editorial illustration',
-    });
+    await controller.generate(
+      {
+        approvedToolCallId: 'tool-call-1',
+        prompt: 'Editorial illustration',
+      },
+      user,
+    );
 
     expect(generate).toHaveBeenCalledWith({
       approvedToolCallId: 'tool-call-1',
       userId: 'user-1',
       prompt: 'Editorial illustration',
     });
-    await expect(controller.generate({ prompt: 'Missing approval' })).rejects.toBeInstanceOf(
+    await expect(controller.generate({ prompt: 'Missing approval' }, user)).rejects.toBeInstanceOf(
       BadRequestException,
     );
   });

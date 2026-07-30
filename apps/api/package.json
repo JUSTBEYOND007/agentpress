@@ -28,6 +28,7 @@
     "drizzle-orm": "catalog:",
     "fastify": "catalog:",
     "ioredis": "catalog:",
+    "jose": "catalog:",
     "nestjs-pino": "catalog:",
     "pino": "catalog:",
     "reflect-metadata": "catalog:",

@@ -23,10 +23,12 @@ import {
 import { Observable } from 'rxjs';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
+import { CurrentUser } from '../auth/current-user.js';
+import type { AuthenticatedUser } from '../auth/auth.service.js';
+import { AuthorizationService } from '../auth/authorization.service.js';
 
 type CreateRunBody = {
   readonly branchId?: unknown;
-  readonly userId?: unknown;
   readonly prompt?: unknown;
 };
 
@@ -36,7 +38,6 @@ type RunDirectiveBody = {
 
 type ToolApprovalBody = {
   readonly decision?: unknown;
-  readonly userId?: unknown;
 };
 
 class StreamConnectionState {
@@ -57,6 +58,7 @@ export class AgentController {
     @Inject(DirectRunService) private readonly runs: DirectRunService,
     @Inject(RedisRunEventBus) private readonly eventBus: RedisRunEventBus,
     @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
+    @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
   ) {}
 
   @Post('conversations/:conversationId/runs')
@@ -65,23 +67,20 @@ export class AgentController {
     @Param('conversationId') conversationId: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() body: CreateRunBody,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     if (!idempotencyKey || idempotencyKey.length > 160) {
       throw new BadRequestException('A valid Idempotency-Key header is required');
     }
-    if (
-      typeof body.branchId !== 'string' ||
-      typeof body.userId !== 'string' ||
-      typeof body.prompt !== 'string'
-    ) {
-      throw new BadRequestException('branchId, userId and prompt must be strings');
+    if (typeof body.branchId !== 'string' || typeof body.prompt !== 'string') {
+      throw new BadRequestException('branchId and prompt must be strings');
     }
 
     try {
       return await this.runs.create({
         conversationId,
         branchId: body.branchId,
-        userId: body.userId,
+        userId: user.id,
         prompt: body.prompt,
         idempotencyKey,
       });
@@ -94,6 +93,7 @@ export class AgentController {
   public streamEvents(
     @Param('runId') runId: string,
     @Headers('last-event-id') lastEventId: string | undefined,
+    @CurrentUser() user?: AuthenticatedUser,
   ): Observable<MessageEvent> {
     const afterSequence = parseLastEventId(lastEventId);
 
@@ -130,6 +130,7 @@ export class AgentController {
 
       void (async () => {
         try {
+          if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
           unsubscribe = await this.eventBus.subscribe(runId, receive);
           if (connection.isClosed()) {
             await unsubscribe();
@@ -161,7 +162,8 @@ export class AgentController {
 
   @Post('runs/:runId/cancel')
   @HttpCode(202)
-  public async cancelRun(@Param('runId') runId: string) {
+  public async cancelRun(@Param('runId') runId: string, @CurrentUser() user?: AuthenticatedUser) {
+    if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
     const result = await this.runs.requestCancellation(runId);
     if (result.outcome === 'not_found') {
       throw new NotFoundException(`Agent Run ${runId} does not exist`);
@@ -174,10 +176,15 @@ export class AgentController {
 
   @Post('runs/:runId/steering')
   @HttpCode(202)
-  public async steerRun(@Param('runId') runId: string, @Body() body: RunDirectiveBody) {
+  public async steerRun(
+    @Param('runId') runId: string,
+    @Body() body: RunDirectiveBody,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
     if (typeof body.content !== 'string') {
       throw new BadRequestException('content must be a string');
     }
+    if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
     try {
       return await this.runs.enqueueSteering(runId, body.content);
     } catch (error) {
@@ -187,10 +194,15 @@ export class AgentController {
 
   @Post('runs/:runId/follow-ups')
   @HttpCode(202)
-  public async followUpRun(@Param('runId') runId: string, @Body() body: RunDirectiveBody) {
+  public async followUpRun(
+    @Param('runId') runId: string,
+    @Body() body: RunDirectiveBody,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
     if (typeof body.content !== 'string') {
       throw new BadRequestException('content must be a string');
     }
+    if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
     try {
       return await this.runs.enqueueFollowUp(runId, body.content);
     } catch (error) {
@@ -203,21 +215,19 @@ export class AgentController {
   public async decideToolCall(
     @Param('toolCallId') toolCallId: string,
     @Body() body: ToolApprovalBody,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     if (!this.toolCalls) {
       throw new BadRequestException('Tool Call service is unavailable');
     }
-    if (
-      (body.decision !== 'approved' && body.decision !== 'denied') ||
-      typeof body.userId !== 'string'
-    ) {
-      throw new BadRequestException('decision and userId are required');
+    if (body.decision !== 'approved' && body.decision !== 'denied') {
+      throw new BadRequestException('decision is required');
     }
     try {
       return await this.toolCalls.decideApproval({
         toolCallId,
         decision: body.decision,
-        userId: body.userId,
+        userId: user.id,
       });
     } catch (error) {
       throw mapApplicationError(error);

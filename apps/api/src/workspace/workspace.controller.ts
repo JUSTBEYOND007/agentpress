@@ -6,15 +6,19 @@ import {
   conversationBranches,
   conversations,
   type DatabaseConnection,
+  workspaceMembers,
+  workspaces,
 } from '@agentpress/database';
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { asc, desc, eq, sql } from 'drizzle-orm';
 
 import { DATABASE_CONNECTION } from '../agent/agent.providers.js';
+import { CurrentUser } from '../auth/current-user.js';
+import type { AuthenticatedUser } from '../auth/auth.service.js';
+import { AuthorizationService } from '../auth/authorization.service.js';
 
 type CreateArticleBody = {
   readonly title?: unknown;
-  readonly userId?: unknown;
 };
 
 const emptyDocument = {
@@ -33,10 +37,42 @@ const emptyDocument = {
 export class WorkspaceController {
   public constructor(
     @Inject(DATABASE_CONNECTION) private readonly connection: DatabaseConnection,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
+  @Get('me/workspace')
+  public async myWorkspace(@CurrentUser() user: AuthenticatedUser) {
+    return this.connection.db.transaction(async (transaction) => {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${user.id}))`);
+      const existing = await transaction
+        .select({ id: workspaces.id, name: workspaces.name, role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+        .where(eq(workspaceMembers.userId, user.id))
+        .orderBy(asc(workspaceMembers.createdAt))
+        .limit(1);
+      if (existing[0]) return existing[0];
+      const workspaceId = randomUUID();
+      const name = `${user.displayName}的工作区`.slice(0, 180);
+      await transaction.insert(workspaces).values({
+        id: workspaceId,
+        name,
+      });
+      await transaction.insert(workspaceMembers).values({
+        workspaceId,
+        userId: user.id,
+        role: 'owner',
+      });
+      return { id: workspaceId, name, role: 'owner' };
+    });
+  }
+
   @Get('workspaces/:workspaceId/articles')
-  public async listArticles(@Param('workspaceId') workspaceId: string) {
+  public async listArticles(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertWorkspaceMember(workspaceId, user.id);
     const rows = await this.connection.db
       .select({
         id: articles.id,
@@ -75,15 +111,17 @@ export class WorkspaceController {
   public async createArticle(
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateArticleBody,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    if (typeof body.title !== 'string' || typeof body.userId !== 'string') {
-      throw new BadRequestException('title and userId are required');
+    if (typeof body.title !== 'string') {
+      throw new BadRequestException('title is required');
     }
     const title = body.title.trim();
     if (title.length === 0 || title.length > 300) {
       throw new BadRequestException('title must contain between 1 and 300 characters');
     }
-    const userId = body.userId;
+    await this.authorization.assertWorkspaceMember(workspaceId, user.id);
+    const userId = user.id;
 
     const articleId = randomUUID();
     const revisionId = randomUUID();

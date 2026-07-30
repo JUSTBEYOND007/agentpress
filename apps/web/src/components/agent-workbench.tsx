@@ -33,20 +33,17 @@ import { initialRunView } from '../lib/run-event-reducer';
 export function AgentWorkbench({
   conversationId,
   branchId,
-  userId,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
-  readonly userId?: string;
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const { runtime, run, decideTool, readiness } = useAgentPressAssistantRuntime(
     sendMode,
-    conversationId || branchId || userId
+    conversationId || branchId
       ? {
           ...(conversationId ? { conversationId } : {}),
           ...(branchId ? { branchId } : {}),
-          ...(userId ? { userId } : {}),
         }
       : {},
   );
@@ -84,7 +81,11 @@ export function AgentWorkbench({
               </ThreadPrimitive.ScrollToBottom>
             </ThreadPrimitive.ViewportFooter>
           </ThreadPrimitive.Viewport>
-          <AgentComposer readiness={readiness.status} sendMode={sendMode} setSendMode={setSendMode} />
+          <AgentComposer
+            readiness={readiness.status}
+            sendMode={sendMode}
+            setSendMode={setSendMode}
+          />
         </ThreadPrimitive.Root>
       </aside>
     </AssistantRuntimeProvider>

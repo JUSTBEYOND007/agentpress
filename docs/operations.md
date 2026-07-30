@@ -51,6 +51,9 @@ docker compose ps
 - `S3_ENDPOINT`、`S3_BUCKET`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`
 - `ARK_API_KEY`、`ARK_BASE_URL`、`ARK_MODEL_PRO`、`ARK_IMAGE_MODEL`
 - `LOGTO_ENDPOINT`、`LOGTO_APP_ID`、`LOGTO_APP_SECRET`
+- `LOGTO_API_RESOURCE`（必须与 Logto API Resource identifier 完全一致）
+
+Web 还需要构建时变量 `NEXT_PUBLIC_LOGTO_ENDPOINT`、`NEXT_PUBLIC_LOGTO_APP_ID` 和 `NEXT_PUBLIC_LOGTO_API_RESOURCE`。Logto SPA 必须登记实际 Web origin 为 Redirect URI、Post sign-out redirect URI 与 CORS origin。API 对除健康检查、公开文章、热榜、媒体读取和匿名阅读计数之外的路由统一执行 JWT 签名、issuer、audience 与过期时间校验。
 
 OTLP Collector、PostgreSQL/pgvector、Kafka、Redis、对象存储、Ingress Controller、TLS secret 和备份策略属于平台责任。迁移 Job 必须先成功，再滚动 API/Worker；生产环境应为 PostgreSQL 做 PITR，并为 Kafka topic 配置保留期、分区、DLQ 和告警。
 

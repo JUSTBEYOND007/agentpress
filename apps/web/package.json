@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@assistant-ui/react": "catalog:",
+    "@logto/react": "catalog:",
+    "@microsoft/fetch-event-source": "catalog:",
     "@agentpress/editor-patch": "workspace:*",
     "@tiptap/core": "catalog:",
     "@tiptap/extension-unique-id": "catalog:",

@@ -1,8 +1,10 @@
 import { Controller, Get } from '@nestjs/common';
 
 import type { HealthResponse } from '@agentpress/contracts';
+import { PublicRoute } from './auth/auth.guard.js';
 
 @Controller('health')
+@PublicRoute()
 export class HealthController {
   public constructor(private readonly environment: NodeJS.ProcessEnv = process.env) {}
 

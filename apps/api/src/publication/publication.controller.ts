@@ -14,11 +14,16 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { PublicRoute } from '../auth/auth.guard.js';
+import { CurrentUser } from '../auth/current-user.js';
+import type { AuthenticatedUser } from '../auth/auth.service.js';
+import { AuthorizationService } from '../auth/authorization.service.js';
 
 @Controller()
 export class PublicationController {
   public constructor(
     @Inject(PublicationService) private readonly publications: PublicationService,
+    @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
   ) {}
 
   @Post('articles/:articleId/publications')
@@ -26,20 +31,21 @@ export class PublicationController {
   public async publish(
     @Param('articleId') articleId: string,
     @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     if (
       typeof body.revisionId !== 'string' ||
-      typeof body.userId !== 'string' ||
       typeof body.slug !== 'string' ||
       (body.coverAssetId !== undefined && typeof body.coverAssetId !== 'string')
     ) {
-      throw new BadRequestException('revisionId, userId and slug are required');
+      throw new BadRequestException('revisionId and slug are required');
     }
+    await this.authorization.assertArticleAccess(articleId, user.id);
     try {
       return await this.publications.publish({
         articleId,
         revisionId: body.revisionId,
-        userId: body.userId,
+        userId: user.id,
         slug: body.slug,
         ...(body.coverAssetId ? { coverAssetId: body.coverAssetId } : {}),
       });
@@ -49,6 +55,7 @@ export class PublicationController {
   }
 
   @Get('publications/:slug')
+  @PublicRoute()
   public async getPublication(@Param('slug') slug: string) {
     const article = await this.publications.findBySlug(slug);
     if (!article) throw new NotFoundException('Publication not found');
@@ -56,6 +63,7 @@ export class PublicationController {
   }
 
   @Get('trending')
+  @PublicRoute()
   public async trending(@Query('limit') rawLimit: string | undefined) {
     const limit = rawLimit === undefined ? 20 : Number(rawLimit);
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
@@ -68,18 +76,20 @@ export class PublicationController {
   public async react(
     @Param('publicationId') publicationId: string,
     @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    if (typeof body.userId !== 'string' || (body.reaction !== 'up' && body.reaction !== 'down')) {
-      throw new BadRequestException('userId and reaction are required');
+    if (body.reaction !== 'up' && body.reaction !== 'down') {
+      throw new BadRequestException('reaction is required');
     }
     try {
-      return await this.publications.react(publicationId, body.userId, body.reaction);
+      return await this.publications.react(publicationId, user.id, body.reaction);
     } catch (error) {
       throw mapPublicationError(error);
     }
   }
 
   @Post('publications/:publicationId/views')
+  @PublicRoute()
   public async view(
     @Param('publicationId') publicationId: string,
     @Headers('x-viewer-id') viewerId: string | undefined,
