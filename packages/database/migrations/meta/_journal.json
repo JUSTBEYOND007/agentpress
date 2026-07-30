@@ -43,6 +43,13 @@
       "when": 1785328475897,
       "tag": "0005_spooky_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785412988518,
+      "tag": "0006_windy_mandroid",
+      "breakpoints": true
     }
   ]
 }

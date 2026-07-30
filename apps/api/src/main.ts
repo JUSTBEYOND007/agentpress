@@ -29,7 +29,10 @@ async function bootstrap(): Promise<void> {
     type: common.VersioningType.URI,
   });
   app.enableCors({
-    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    origin: (process.env.WEB_ORIGIN ?? 'http://localhost:3000,http://localhost:3003')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     credentials: true,
   });
   app.enableShutdownHooks();

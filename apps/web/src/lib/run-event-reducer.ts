@@ -34,35 +34,14 @@ export type AgentPressRunEvent = {
 };
 
 export const initialRunView: RunView = {
-  status: '等待审批',
-  mode: 'planned',
-  revision: 2,
-  tasks: [
-    task('context', '理解文章上下文', 'Editor', 'succeeded', 'required'),
-    task('research', '检查论据与引用', 'Researcher', 'succeeded', 'required'),
-    task('rewrite', '生成修改提案', 'Writer', 'running', 'required'),
-    task('media', '补充授权配图', 'Media Curator', 'pending', 'optional'),
-  ],
-  tools: [
-    {
-      id: 'tool-demo-search',
-      name: 'web.search',
-      status: 'succeeded',
-      args: { query: 'Agent 写作 可验证引用' },
-    },
-    {
-      id: 'tool-demo-edit',
-      name: 'article.propose_edits',
-      status: 'approval_requested',
-      args: { articleId: 'current', baseRevision: 'rev-18', operations: 1 },
-    },
-  ],
-  evidence: [
-    { title: 'Agent 运行时设计文档', source: 'Workspace Knowledge' },
-    { title: '引用核验记录', source: 'Web Research MCP' },
-  ],
-  usage: { inputTokens: 6432, outputTokens: 1184, costUsd: 0.041 },
-  recovery: 'Checkpoint #7 · 已持久化',
+  status: '就绪',
+  mode: 'direct',
+  revision: 0,
+  tasks: [],
+  tools: [],
+  evidence: [],
+  usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+  recovery: '尚未创建运行',
   lastEventId: 0,
 };
 

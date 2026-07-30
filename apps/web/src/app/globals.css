@@ -40,6 +40,182 @@ button {
   background: #ffffff;
 }
 
+.workspace.agent-closed {
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.tree-item.is-selected {
+  background: #e9e9e7;
+  color: #202124;
+}
+
+.toolbar-popover {
+  position: absolute;
+  z-index: 20;
+  top: 44px;
+  right: 18px;
+  display: grid;
+  min-width: 220px;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 10%);
+  color: #6b6c67;
+  font-size: 12px;
+}
+
+.toolbar-menu {
+  gap: 2px;
+  padding: 6px;
+}
+
+.toolbar-menu button,
+.toolbar-menu a {
+  display: block;
+  padding: 8px;
+  border-radius: 5px;
+  background: transparent;
+  color: #41423e;
+  text-align: left;
+  text-decoration: none;
+}
+
+.toolbar-menu button:hover,
+.toolbar-menu a:hover {
+  background: #f0f0ee;
+}
+
+.workspace-list-view {
+  width: min(780px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 72px 0;
+}
+
+.workspace-list-view h1 {
+  margin: 0 0 20px;
+  font-size: 28px;
+  font-weight: 650;
+}
+
+.workspace-list-view input,
+.modal input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid #d7d7d3;
+  border-radius: 6px;
+  padding: 0 10px;
+  outline: none;
+}
+
+.workspace-list-view input:focus,
+.modal input:focus {
+  border-color: #5085bd;
+  box-shadow: 0 0 0 3px rgb(80 133 189 / 15%);
+}
+
+.workspace-results {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+}
+
+.workspace-results button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: transparent;
+  color: #444541;
+  cursor: pointer;
+  text-align: left;
+}
+
+.workspace-results button:hover {
+  background: #f1f1ef;
+}
+
+.workspace-empty {
+  margin: 28px 10px;
+  color: #8a8b86;
+  font-size: 13px;
+}
+
+.workspace-toast {
+  position: fixed;
+  z-index: 40;
+  right: 22px;
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  border: 1px solid #e8c5c5;
+  border-radius: 7px;
+  background: #fff7f7;
+  padding: 10px 12px;
+  color: #9a3f3f;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 10%);
+}
+
+.workspace-toast button,
+.modal-heading button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(32 33 36 / 28%);
+}
+
+.modal {
+  display: grid;
+  width: min(380px, calc(100vw - 32px));
+  gap: 10px;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 18%);
+}
+
+.modal-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.modal label {
+  color: #6f706b;
+  font-size: 12px;
+}
+
+.primary-action {
+  height: 36px;
+  margin-top: 4px;
+  border-radius: 6px;
+  background: #202124;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .sidebar,
 .agent-panel {
   min-width: 0;

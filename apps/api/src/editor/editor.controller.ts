@@ -50,7 +50,8 @@ export class EditorController {
       throw new BadRequestException('action, userId and leaseId are required');
     const owned =
       body.action === 'acquire'
-        ? await this.leases.acquire(articleId, body.userId, body.leaseId)
+        ? (await this.leases.acquire(articleId, body.userId, body.leaseId)) ||
+          (await this.leases.owns(articleId, body.userId, body.leaseId))
         : body.action === 'renew'
           ? await this.leases.renew(articleId, body.userId, body.leaseId)
           : await this.leases.release(articleId, body.userId, body.leaseId);

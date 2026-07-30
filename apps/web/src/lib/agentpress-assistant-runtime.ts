@@ -10,9 +10,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { initialRunView, reduceRunEvent } from './run-event-reducer';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
-const conversationId = process.env.NEXT_PUBLIC_DEMO_CONVERSATION_ID;
-const branchId = process.env.NEXT_PUBLIC_DEMO_BRANCH_ID;
-const userId = process.env.NEXT_PUBLIC_DEMO_USER_ID;
+const defaultConversationId =
+  process.env.NEXT_PUBLIC_DEMO_CONVERSATION_ID ?? '00000000-0000-4000-8000-000000000005';
+const defaultBranchId =
+  process.env.NEXT_PUBLIC_DEMO_BRANCH_ID ?? '00000000-0000-4000-8000-000000000006';
+const defaultUserId =
+  process.env.NEXT_PUBLIC_DEMO_USER_ID ?? '00000000-0000-4000-8000-000000000001';
 
 export type AgentSendMode = 'steering' | 'follow-up';
 
@@ -23,16 +26,16 @@ type AgentMessage = {
   readonly status?: 'running' | 'complete' | 'error';
 };
 
+export type AgentRuntimeReadiness =
+  | { readonly status: 'checking'; readonly missing: readonly string[] }
+  | { readonly status: 'ready'; readonly missing: readonly string[] }
+  | { readonly status: 'unavailable'; readonly missing: readonly string[] };
+
 const initialMessages: readonly AgentMessage[] = [
   {
-    id: 'demo-user-1',
-    role: 'user',
-    text: '核对文章论据，并给开头提出更有力的改写。',
-  },
-  {
-    id: 'demo-assistant-1',
+    id: 'runtime-checking',
     role: 'assistant',
-    text: '我已完成来源核验，Writer 正在生成一项可逐条审批的修改提案。',
+    text: '正在检查 Agent 运行时配置。',
     status: 'complete',
   },
 ];
@@ -67,11 +70,78 @@ const eventTypes = [
   'usage.updated',
 ] as const;
 
-export function useAgentPressAssistantRuntime(sendMode: AgentSendMode) {
+export function useAgentPressAssistantRuntime(
+  sendMode: AgentSendMode,
+  context: {
+    readonly conversationId?: string;
+    readonly branchId?: string;
+    readonly userId?: string;
+  } = {},
+) {
+  const conversationId = context.conversationId ?? defaultConversationId;
+  const branchId = context.branchId ?? defaultBranchId;
+  const userId = context.userId ?? defaultUserId;
   const [messages, setMessages] = useState<readonly AgentMessage[]>(initialMessages);
   const [run, setRun] = useState(initialRunView);
   const [runId, setRunId] = useState<string>();
+  const [readiness, setReadiness] = useState<AgentRuntimeReadiness>({
+    status: 'checking',
+    missing: [],
+  });
   const streamRef = useRef<EventSource | undefined>(undefined);
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`${apiUrl}/health/agent-runtime`, { credentials: 'include' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Readiness request failed (${String(response.status)})`);
+        return (await response.json()) as { readonly ready?: unknown; readonly missing?: unknown };
+      })
+      .then((result) => {
+        if (!active) return;
+        const missing = Array.isArray(result.missing)
+          ? result.missing.filter((value): value is string => typeof value === 'string')
+          : [];
+        if (result.ready === true) {
+          setReadiness({ status: 'ready', missing });
+          setMessages([
+            {
+              id: 'workspace-ready',
+              role: 'assistant',
+              text: 'Agent 运行时已就绪。发送消息后将创建真实 Run，并通过 SSE 展示执行状态。',
+              status: 'complete',
+            },
+          ]);
+          return;
+        }
+        setReadiness({ status: 'unavailable', missing });
+        setRun((current) => ({ ...current, status: '未配置' }));
+        setMessages([
+          {
+            id: 'runtime-unavailable',
+            role: 'assistant',
+            text: `Agent 运行时不可用。缺少环境配置：${missing.join('、') || '未知配置'}。`,
+            status: 'error',
+          },
+        ]);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setReadiness({ status: 'unavailable', missing: [] });
+        setRun((current) => ({ ...current, status: '连接失败' }));
+        setMessages([
+          {
+            id: 'runtime-readiness-error',
+            role: 'assistant',
+            text: error instanceof Error ? error.message : '无法检查 Agent 运行时状态。',
+            status: 'error',
+          },
+        ]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const updateAssistant = useCallback((text: string, complete = false) => {
     setMessages((current) => {
@@ -143,35 +213,36 @@ export function useAgentPressAssistantRuntime(sendMode: AgentSendMode) {
         ...current,
         { id: crypto.randomUUID(), role: 'user', text: prompt },
       ]);
-      if (!conversationId || !branchId) {
+      try {
+        if (runId && run.status === '运行中') {
+          const endpoint = sendMode === 'steering' ? 'steering' : 'follow-ups';
+          await request(`${apiUrl}/runs/${runId}/${endpoint}`, { content: prompt });
+          return;
+        }
+        setRun((current) => ({ ...current, status: '排队中', tasks: [], tools: [] }));
+        const created = await request(
+          `${apiUrl}/conversations/${conversationId}/runs`,
+          { branchId, prompt },
+          true,
+        );
+        const nextRunId = stringValue(created.runId);
+        if (!nextRunId) throw new Error('Run creation response omitted runId');
+        setRunId(nextRunId);
+        setRun((current) => ({ ...current, runId: nextRunId }));
+      } catch (error) {
+        setRun((current) => ({ ...current, status: '失败' }));
         setMessages((current) => [
           ...current,
           {
             id: crypto.randomUUID(),
             role: 'assistant',
-            text: '当前工作区未连接真实运行会话，请先完成环境配置。',
+            text: error instanceof Error ? error.message : 'Agent Run 创建失败',
             status: 'error',
           },
         ]);
-        return;
       }
-      if (runId && run.status === '运行中') {
-        const endpoint = sendMode === 'steering' ? 'steering' : 'follow-ups';
-        await request(`${apiUrl}/runs/${runId}/${endpoint}`, { content: prompt });
-        return;
-      }
-      setRun((current) => ({ ...current, status: '排队中', tasks: [], tools: [] }));
-      const created = await request(
-        `${apiUrl}/conversations/${conversationId}/runs`,
-        { branchId, prompt },
-        true,
-      );
-      const nextRunId = stringValue(created.runId);
-      if (!nextRunId) throw new Error('Run creation response omitted runId');
-      setRunId(nextRunId);
-      setRun((current) => ({ ...current, runId: nextRunId }));
     },
-    [run.status, runId, sendMode],
+    [branchId, conversationId, run.status, runId, sendMode],
   );
 
   const onCancel = useCallback(async () => {
@@ -179,20 +250,23 @@ export function useAgentPressAssistantRuntime(sendMode: AgentSendMode) {
     await request(`${apiUrl}/runs/${runId}/cancel`, {});
   }, [runId]);
 
-  const decideTool = useCallback(async (toolCallId: string, decision: 'approved' | 'denied') => {
-    if (toolCallId.startsWith('tool-demo-') || !userId) return;
-    await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision, userId });
-  }, []);
+  const decideTool = useCallback(
+    async (toolCallId: string, decision: 'approved' | 'denied') => {
+      await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision, userId });
+    },
+    [userId],
+  );
 
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage,
     onNew,
     onCancel,
+    isSendDisabled: readiness.status !== 'ready',
     isRunning: run.status === '运行中' || run.status === '规划中' || run.status === '排队中',
   });
 
-  return { runtime, run, decideTool };
+  return { runtime, run, decideTool, readiness };
 }
 
 function convertMessage(message: AgentMessage): ThreadMessageLike {

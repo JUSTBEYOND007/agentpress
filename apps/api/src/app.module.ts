@@ -7,6 +7,7 @@ import { agentProviders } from './agent/agent.providers.js';
 import { EditorController } from './editor/editor.controller.js';
 import { MediaController } from './media/media.controller.js';
 import { PublicationController } from './publication/publication.controller.js';
+import { WorkspaceController } from './workspace/workspace.controller.js';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PublicationController } from './publication/publication.controller.js';
     EditorController,
     MediaController,
     PublicationController,
+    WorkspaceController,
   ],
   providers: [...agentProviders],
 })

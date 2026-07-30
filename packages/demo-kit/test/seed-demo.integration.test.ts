@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
-import { articles, connectDatabase, publications } from '@agentpress/database';
+import { articles, connectDatabase, conversations, publications } from '@agentpress/database';
 import { count, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -32,7 +32,15 @@ describeWithDatabase('demo seed', () => {
       .from(articles)
       .where(eq(articles.id, DEMO_IDS.article));
     const publicationCount = await connection.db.select({ value: count() }).from(publications);
+    const linkedConversation = await connection.db
+      .select({ articleId: conversations.articleId, title: conversations.title })
+      .from(conversations)
+      .where(eq(conversations.id, DEMO_IDS.conversation));
     expect(articleCount[0]?.value).toBe(1);
     expect(publicationCount[0]?.value).toBe(1);
+    expect(linkedConversation[0]).toEqual({
+      articleId: DEMO_IDS.article,
+      title: '长文研究与修改',
+    });
   });
 });

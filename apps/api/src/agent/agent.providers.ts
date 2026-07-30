@@ -32,7 +32,7 @@ const imageGenerator: ImageGenerator =
     : {
         generate: () => Promise.reject(new Error('ARK_API_KEY and ARK_IMAGE_MODEL are required')),
       };
-const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
+export const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
 
 class AgentResources implements OnApplicationShutdown {
   public async onApplicationShutdown(): Promise<void> {

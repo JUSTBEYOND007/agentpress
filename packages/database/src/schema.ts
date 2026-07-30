@@ -227,11 +227,17 @@ export const conversations = pgTable(
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
+    articleId: uuid('article_id').references((): AnyPgColumn => articles.id, {
+      onDelete: 'cascade',
+    }),
     title: varchar('title', { length: 300 }).notNull(),
     createdAt,
     updatedAt,
   },
-  (table) => [index('conversations_workspace_updated_idx').on(table.workspaceId, table.updatedAt)],
+  (table) => [
+    unique('conversations_article_unique').on(table.articleId),
+    index('conversations_workspace_updated_idx').on(table.workspaceId, table.updatedAt),
+  ],
 );
 
 export const conversationBranches = pgTable(

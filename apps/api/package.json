@@ -24,6 +24,7 @@
     "@nestjs/common": "catalog:",
     "@nestjs/core": "catalog:",
     "@nestjs/platform-fastify": "catalog:",
+    "drizzle-orm": "catalog:",
     "fastify": "catalog:",
     "ioredis": "catalog:",
     "nestjs-pino": "catalog:",

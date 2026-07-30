@@ -9,4 +9,15 @@ describe('HealthController', () => {
       status: 'ok',
     });
   });
+
+  it('reports Agent runtime readiness without exposing configuration values', () => {
+    expect(new HealthController({ ARK_API_KEY: 'secret' }).getAgentRuntime()).toEqual({
+      provider: 'ark',
+      ready: false,
+      missing: ['ARK_MODEL_PRO'],
+    });
+    expect(
+      new HealthController({ ARK_API_KEY: 'secret', ARK_MODEL_PRO: 'endpoint' }).getAgentRuntime(),
+    ).toEqual({ provider: 'ark', ready: true, missing: [] });
+  });
 });

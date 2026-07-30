@@ -11,16 +11,12 @@ import {
 import {
   ArrowDown,
   ArrowUp,
-  AtSign,
   Check,
   ChevronDown,
   CircleAlert,
   Coins,
   FileCheck2,
-  MoreHorizontal,
-  Paperclip,
   RotateCcw,
-  ShieldCheck,
   Sparkles,
   Square,
   Wrench,
@@ -28,18 +24,32 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import type { DiffEntry } from '@agentpress/editor-patch';
-
 import {
   useAgentPressAssistantRuntime,
   type AgentSendMode,
 } from '../lib/agentpress-assistant-runtime';
 import { initialRunView } from '../lib/run-event-reducer';
-import { ArticleDiff } from './article-diff';
 
-export function AgentWorkbench(): React.JSX.Element {
+export function AgentWorkbench({
+  conversationId,
+  branchId,
+  userId,
+}: {
+  readonly conversationId?: string;
+  readonly branchId?: string;
+  readonly userId?: string;
+}): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
-  const { runtime, run, decideTool } = useAgentPressAssistantRuntime(sendMode);
+  const { runtime, run, decideTool, readiness } = useAgentPressAssistantRuntime(
+    sendMode,
+    conversationId || branchId || userId
+      ? {
+          ...(conversationId ? { conversationId } : {}),
+          ...(branchId ? { branchId } : {}),
+          ...(userId ? { userId } : {}),
+        }
+      : {},
+  );
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -49,9 +59,6 @@ export function AgentWorkbench(): React.JSX.Element {
             <strong>写作助手</strong>
             <span className={`status-dot status-${statusTone(run.status)}`}>{run.status}</span>
           </div>
-          <button aria-label="Agent 菜单" className="icon-button" title="Agent 菜单" type="button">
-            <MoreHorizontal aria-hidden="true" size={18} />
-          </button>
         </header>
 
         <ThreadPrimitive.Root className="aui-thread">
@@ -59,7 +66,11 @@ export function AgentWorkbench(): React.JSX.Element {
             <ThreadPrimitive.Messages>
               {({ message }) => (message.role === 'user' ? <UserMessage /> : <AssistantMessage />)}
             </ThreadPrimitive.Messages>
-            <RunInspector onToolDecision={decideTool} run={run} />
+            {run.runId ? (
+              <RunInspector onToolDecision={decideTool} run={run} />
+            ) : (
+              <div className="run-empty">尚未创建 Agent Run</div>
+            )}
             <ThreadPrimitive.ViewportFooter className="thread-footer">
               <ThreadPrimitive.ScrollToBottom asChild>
                 <button
@@ -73,7 +84,7 @@ export function AgentWorkbench(): React.JSX.Element {
               </ThreadPrimitive.ScrollToBottom>
             </ThreadPrimitive.ViewportFooter>
           </ThreadPrimitive.Viewport>
-          <AgentComposer sendMode={sendMode} setSendMode={setSendMode} />
+          <AgentComposer readiness={readiness.status} sendMode={sendMode} setSendMode={setSendMode} />
         </ThreadPrimitive.Root>
       </aside>
     </AssistantRuntimeProvider>
@@ -104,61 +115,30 @@ function MessageText(): React.JSX.Element {
 }
 
 function AgentComposer({
+  readiness,
   sendMode,
   setSendMode,
 }: {
+  readonly readiness: 'checking' | 'ready' | 'unavailable';
   readonly sendMode: 'steering' | 'follow-up';
   readonly setSendMode: (mode: 'steering' | 'follow-up') => void;
 }): React.JSX.Element {
   const running = useAuiState((state) => state.thread.isRunning);
-  const [mentionActive, setMentionActive] = useState(true);
-  const [skillActive, setSkillActive] = useState(true);
   return (
     <ComposerPrimitive.Root className="agent-composer">
-      <div className="composer-context">
-        {mentionActive ? (
-          <span>
-            <AtSign aria-hidden="true" size={13} /> 当前文章 · rev-18
-          </span>
-        ) : null}
-        {skillActive ? (
-          <span>
-            <ShieldCheck aria-hidden="true" size={13} /> 事实核验
-          </span>
-        ) : null}
-      </div>
       <ComposerPrimitive.Input
         aria-label="发送消息给 Agent"
-        placeholder="向 Agent 发送消息..."
+        placeholder={
+          readiness === 'ready'
+            ? '向 Agent 发送消息...'
+            : readiness === 'checking'
+              ? '正在检查运行时...'
+              : '请先配置 Agent 运行时'
+        }
         rows={2}
       />
       <div className="composer-actions">
         <div>
-          <button aria-label="添加附件" className="icon-button" title="添加附件" type="button">
-            <Paperclip aria-hidden="true" size={17} />
-          </button>
-          <button
-            aria-label={mentionActive ? '移除 Mention' : '添加 Mention'}
-            className={mentionActive ? 'icon-button is-active' : 'icon-button'}
-            onClick={() => {
-              setMentionActive((value) => !value);
-            }}
-            title="Mention"
-            type="button"
-          >
-            <AtSign aria-hidden="true" size={17} />
-          </button>
-          <button
-            aria-label={skillActive ? '移除 Skill' : '添加 Skill'}
-            className={skillActive ? 'icon-button is-active' : 'icon-button'}
-            onClick={() => {
-              setSkillActive((value) => !value);
-            }}
-            title="Skill"
-            type="button"
-          >
-            <ShieldCheck aria-hidden="true" size={17} />
-          </button>
           <div className="send-mode" aria-label="消息模式" role="group">
             <button
               className={sendMode === 'steering' ? 'is-active' : ''}
@@ -207,7 +187,6 @@ function RunInspector({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(true);
   const [toolDecisions, setToolDecisions] = useState<Record<string, 'approved' | 'denied'>>({});
-  const [diffDecisions, setDiffDecisions] = useState<Record<string, 'accepted' | 'rejected'>>({});
   const approval = run.tools.find((tool) => tool.status === 'approval_requested');
   const groupedSpecialists = useMemo(
     () => [...new Set(run.tasks.map((task) => task.owner))],
@@ -318,19 +297,6 @@ function RunInspector({
             ))}
           </section>
 
-          <section className="inspector-section proposal-preview">
-            <h3>
-              <Sparkles aria-hidden="true" size={14} /> 文章修改提案
-            </h3>
-            <ArticleDiff
-              entries={sampleDiff}
-              decisions={diffDecisions}
-              onDecision={(id, decision) => {
-                setDiffDecisions((value) => ({ ...value, [id]: decision }));
-              }}
-            />
-          </section>
-
           <footer className="run-metadata">
             <span>
               <Coins aria-hidden="true" size={13} />{' '}
@@ -346,24 +312,6 @@ function RunInspector({
     </section>
   );
 }
-
-const sampleDiff: readonly DiffEntry[] = [
-  {
-    operationId: 'edit-intro',
-    kind: 'replace',
-    blockId: 'lead',
-    before: {
-      type: 'paragraph',
-      attrs: { blockId: 'lead' },
-      content: [{ type: 'text', text: '好的写作工具不应该替作者做决定。' }],
-    },
-    after: {
-      type: 'paragraph',
-      attrs: { blockId: 'lead' },
-      content: [{ type: 'text', text: '可靠的写作 Agent 让每一次研究、修改和引用都可追溯。' }],
-    },
-  },
-];
 
 function compactJson(value: Readonly<Record<string, unknown>>): string {
   const text = JSON.stringify(value);

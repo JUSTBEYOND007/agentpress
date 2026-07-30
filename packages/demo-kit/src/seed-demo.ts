@@ -88,9 +88,14 @@ export async function seedDemo(database: AgentPressDatabase): Promise<typeof DEM
       .values({
         id: DEMO_IDS.conversation,
         workspaceId: DEMO_IDS.workspace,
+        articleId: DEMO_IDS.article,
         title: '长文研究与修改',
       })
       .onConflictDoNothing();
+    await transaction
+      .update(conversations)
+      .set({ articleId: DEMO_IDS.article, title: '长文研究与修改' })
+      .where(eq(conversations.id, DEMO_IDS.conversation));
     await transaction
       .insert(conversationBranches)
       .values({ id: DEMO_IDS.branch, conversationId: DEMO_IDS.conversation })

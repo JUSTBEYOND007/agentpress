@@ -43,4 +43,24 @@ describe('EditorController', () => {
       controller.decide('proposal', { userId: 'user', decisions: { op: 'maybe' } }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('treats an existing lease owned by the same browser as acquired', async () => {
+    const leases = {
+      acquire: vi.fn(() => Promise.resolve(false)),
+      owns: vi.fn(() => Promise.resolve(true)),
+    } as unknown as RedisWriterLease;
+    const controller = new EditorController(
+      {} as AutosaveService,
+      {} as ProposalService,
+      leases,
+    );
+
+    await expect(
+      controller.writerLease('article', {
+        action: 'acquire',
+        userId: 'user',
+        leaseId: 'browser-session',
+      }),
+    ).resolves.toEqual({ articleId: 'article', leaseId: 'browser-session', owned: true });
+  });
 });
