@@ -29,7 +29,7 @@ export type RunEventPublisher = {
 };
 
 export type AgentRuntimeFactory = {
-  create(): AgentRuntime;
+  create(task?: string): AgentRuntime;
 };
 
 export type RuntimeToolFactory = {

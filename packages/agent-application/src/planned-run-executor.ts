@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { createPromptRevision } from '@agentpress/agent-context';
+import { createPromptRevision, runReviewGate } from '@agentpress/agent-context';
 import type {
   RuntimeAssistantMessage,
   RuntimeResult,
@@ -61,6 +61,7 @@ type PlannedRunExecutorOptions = {
   readonly publisher: RunEventPublisher;
   readonly systemPrompt: string;
   readonly runtimeToolFactory?: RuntimeToolFactory;
+  readonly reviewGate?: { readonly enabled: boolean; readonly maxRounds?: number };
   readonly now?: () => Date;
   readonly createId?: () => string;
 };
@@ -366,7 +367,7 @@ export class PlannedRunExecutor {
     if (synthesis.status !== 'completed') {
       return { result: synthesis, degraded: false };
     }
-    const assistant = findAssistant(synthesis);
+    let assistant = findAssistant(synthesis);
     if (!assistant) {
       return {
         degraded: false,
@@ -381,13 +382,56 @@ export class PlannedRunExecutor {
         },
       };
     }
+    let reviewUsage: RuntimeUsage[] = [];
+    let reviewAccepted = true;
+    if (this.options.reviewGate?.enabled) {
+      const review = await runReviewGate(
+        assistant.content,
+        async (draft, round) => {
+          const editor = await this.reviewDraft(
+            runId,
+            'editor',
+            activePrompt,
+            draft,
+            round,
+            signal,
+          );
+          const factChecker = await this.reviewDraft(
+            runId,
+            'fact_checker',
+            activePrompt,
+            editor.value,
+            round,
+            signal,
+          );
+          reviewUsage = [...reviewUsage, ...editor.usage, ...factChecker.usage];
+          return {
+            accepted: editor.accepted && factChecker.accepted,
+            revision: factChecker.value,
+          };
+        },
+        this.options.reviewGate.maxRounds ?? 2,
+      );
+      reviewAccepted = review.accepted;
+      assistant = { ...assistant, content: review.value };
+      const event = await this.options.database.transaction((transaction) =>
+        appendRunEvent(transaction, {
+          id: this.createId(),
+          runId,
+          eventType: 'review.completed',
+          payload: { rounds: review.rounds, accepted: review.accepted },
+        }),
+      );
+      await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+    }
     const aggregateUsage = sumUsage([
       ...settled.flatMap((task) => (task.usage ? [task.usage] : [])),
       assistant.usage,
+      ...reviewUsage,
     ]);
     const finalAssistant: RuntimeAssistantMessage = { ...assistant, usage: aggregateUsage };
     return {
-      degraded: settled.some((task) => task.status !== 'succeeded'),
+      degraded: settled.some((task) => task.status !== 'succeeded') || !reviewAccepted,
       result: { status: 'completed', messages: [finalAssistant] },
     };
   }
@@ -552,7 +596,7 @@ export class PlannedRunExecutor {
     });
     let result: RuntimeResult;
     try {
-      const runtime = this.options.runtimeFactory.create();
+      const runtime = this.options.runtimeFactory.create(task.owner);
       result = await runtime.execute(
         {
           runId: `${runId}:${task.id}`,
@@ -726,7 +770,7 @@ export class PlannedRunExecutor {
       .map((task) => `${task.owner}: ${task.output ?? ''}`)
       .join('\n\n');
     try {
-      return await this.options.runtimeFactory.create().execute(
+      return await this.options.runtimeFactory.create('synthesis').execute(
         {
           runId: `${runId}:synthesis`,
           systemPrompt: this.options.systemPrompt,
@@ -756,10 +800,66 @@ export class PlannedRunExecutor {
     }
   }
 
+  private async reviewDraft(
+    runId: string,
+    role: 'editor' | 'fact_checker',
+    rootPrompt: string,
+    draft: string,
+    round: number,
+    signal?: AbortSignal,
+  ): Promise<{
+    readonly accepted: boolean;
+    readonly value: string;
+    readonly usage: RuntimeUsage[];
+  }> {
+    const result = await this.options.runtimeFactory.create(role).execute(
+      {
+        runId: `${runId}:review:${role}:${String(round)}`,
+        systemPrompt: specialistSystemPrompt(role),
+        history: [],
+        prompt: [
+          'Review the draft against the request and acceptance criteria.',
+          'Return strict JSON only: {"accepted":boolean,"revision":string}.',
+          'When accepted, revision must equal the original draft.',
+          `Request: ${rootPrompt}`,
+          `Draft: ${draft}`,
+        ].join('\n\n'),
+      },
+      () => undefined,
+      signal,
+    );
+    const message = result.status === 'completed' ? findAssistant(result) : undefined;
+    if (!message) return { accepted: false, value: draft, usage: [] };
+    const parsed = parseReview(message.content);
+    return {
+      accepted: parsed?.accepted ?? false,
+      value: parsed?.revision ?? draft,
+      usage: [message.usage],
+    };
+  }
+
   private async publishAll(events: readonly DurableRunEvent[]): Promise<void> {
     for (const event of events) {
       await this.options.publisher.publish({ durable: true, event });
     }
+  }
+}
+
+function parseReview(
+  value: string,
+): { readonly accepted: boolean; readonly revision: string } | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'object' &&
+      parsed !== null &&
+      'accepted' in parsed &&
+      typeof parsed.accepted === 'boolean' &&
+      'revision' in parsed &&
+      typeof parsed.revision === 'string'
+      ? { accepted: parsed.accepted, revision: parsed.revision }
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 

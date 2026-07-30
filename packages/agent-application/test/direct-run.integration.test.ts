@@ -377,6 +377,102 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(events.some(({ eventType }) => eventType === 'steering.applied')).toBe(true);
   });
 
+  it('routes model-policy task labels and persists bounded Editor and Fact Checker review', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const selectedTasks: string[] = [];
+    let editorReview = 0;
+    let factReview = 0;
+    const reviewedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create(task = 'direct') {
+          selectedTasks.push(task);
+          return {
+            execute(request) {
+              const isReview = request.runId.includes(':review:');
+              if (isReview && task === 'editor') {
+                editorReview += 1;
+                return Promise.resolve({
+                  status: 'completed',
+                  messages: [
+                    assistantMessageWithContent(
+                      request.runId,
+                      JSON.stringify({
+                        accepted: editorReview === 2,
+                        revision: editorReview === 2 ? '编辑通过稿' : '编辑修订稿',
+                      }),
+                    ),
+                  ],
+                });
+              }
+              if (isReview && task === 'fact_checker') {
+                factReview += 1;
+                return Promise.resolve({
+                  status: 'completed',
+                  messages: [
+                    assistantMessageWithContent(
+                      request.runId,
+                      JSON.stringify({
+                        accepted: factReview === 2,
+                        revision: factReview === 2 ? '事实核查通过稿' : '事实修订稿',
+                      }),
+                    ),
+                  ],
+                });
+              }
+              return Promise.resolve({
+                status: 'completed',
+                messages: [
+                  assistantMessageWithContent(
+                    request.runId,
+                    task === 'synthesis' ? '综合初稿' : `${task}产物`,
+                  ),
+                ],
+              });
+            },
+          };
+        },
+      },
+      reviewGate: { enabled: true, maxRounds: 2 },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await reviewedService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '联网研究并写一篇文章',
+      idempotencyKey: randomUUID(),
+    });
+    await expect(reviewedService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    expect(selectedTasks).toEqual(
+      expect.arrayContaining(['researcher', 'writer', 'editor', 'fact_checker', 'synthesis']),
+    );
+    expect(editorReview).toBe(2);
+    expect(factReview).toBe(2);
+    const messages = await connection.db
+      .select({ content: conversationMessages.content })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.branchId, branchId));
+    expect(JSON.stringify(messages.at(-1)?.content)).toContain('事实核查通过稿');
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        eventType: 'review.completed',
+        payload: expect.objectContaining({ rounds: 2, accepted: true }),
+      }),
+    );
+  });
+
   it('rejects Steering for a Direct Run', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
@@ -638,9 +734,13 @@ describeWithDatabase('Direct Run application flow', () => {
 });
 
 function assistantMessage(seed: string) {
+  return assistantMessageWithContent(seed, `result:${seed}`);
+}
+
+function assistantMessageWithContent(seed: string, content: string) {
   return {
     role: 'assistant' as const,
-    content: `result:${seed}`,
+    content,
     provider: 'test',
     model: 'test',
     stopReason: 'stop' as const,

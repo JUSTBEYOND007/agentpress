@@ -144,6 +144,11 @@ describe('Agent context governance', () => {
       2,
     );
     expect(result).toEqual({ value: 'draft!!', rounds: 2, accepted: false });
+    await expect(
+      runReviewGate('draft', () =>
+        Promise.resolve({ accepted: true, revision: 'accepted revision' }),
+      ),
+    ).resolves.toEqual({ value: 'accepted revision', rounds: 1, accepted: true });
   });
 
   it('replays ordered trace state and rejects duplicate sequences', () => {

@@ -54,6 +54,7 @@ type DirectRunServiceOptions = {
   readonly publisher: RunEventPublisher;
   readonly systemPrompt: string;
   readonly runtimeToolFactory?: RuntimeToolFactory;
+  readonly reviewGate?: { readonly enabled: boolean; readonly maxRounds?: number };
   readonly now?: () => Date;
   readonly createId?: () => string;
 };
@@ -305,7 +306,7 @@ export class DirectRunService {
 
     let result: RuntimeResult;
     try {
-      const runtime = this.options.runtimeFactory.create();
+      const runtime = this.options.runtimeFactory.create('direct');
       result = await runtime.execute(
         {
           runId,

@@ -37,7 +37,7 @@ export async function runReviewGate<T>(
   let value = draft;
   for (let round = 1; round <= maxRounds; round += 1) {
     const result = await review(value, round);
-    if (result.accepted) return { value, rounds: round, accepted: true };
+    if (result.accepted) return { value: result.revision ?? value, rounds: round, accepted: true };
     if (result.revision !== undefined) value = result.revision;
   }
   return { value, rounds: maxRounds, accepted: false };

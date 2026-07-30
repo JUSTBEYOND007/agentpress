@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@agentpress/agent-application": "workspace:*",
+    "@agentpress/agent-context": "workspace:*",
     "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/config": "workspace:*",
     "@agentpress/database": "workspace:*",

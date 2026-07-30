@@ -185,6 +185,9 @@ importers:
       '@agentpress/agent-application':
         specifier: workspace:*
         version: link:../../packages/agent-application
+      '@agentpress/agent-context':
+        specifier: workspace:*
+        version: link:../../packages/agent-context
       '@agentpress/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ModelPolicyCatalog } from '@agentpress/agent-context';
 
 import {
   AGENT_RUN_CANCEL_CHANNEL,
@@ -77,17 +78,22 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     publisher: this.createEventPublisher(),
     runtimeToolFactory: this.builtInTools.bridge,
     runtimeFactory: {
-      create: () => {
+      create: (task = 'direct') => {
         if (!this.environment.arkModelPro) {
           throw new Error('ARK_MODEL_PRO is required to execute a real Agent Run');
         }
+        const proModel = this.environment.arkModelPro;
+        const selection = createModelPolicies(proModel, this.environment.arkModelTurbo).select(
+          task,
+        );
         return PiRuntimeAdapter.forArk({
-          modelId: this.environment.arkModelPro,
+          modelId: selection.model,
           baseUrl: this.environment.arkBaseUrl,
           ...(this.environment.arkApiKey ? { apiKey: this.environment.arkApiKey } : {}),
         });
       },
     },
+    reviewGate: { enabled: true, maxRounds: 2 },
     systemPrompt:
       'You are AgentPress, a precise long-form writing agent. Use available research tools when facts need evidence. Preserve citations and state uncertainty. For illustrated articles, generate an image first, then call article.propose_edits to insert an image block containing assetId, contentUrl as src, prompt, model and provenance. Never claim the article changed until the user accepts the proposal.',
   });
@@ -385,4 +391,25 @@ function parseIndexCommand(payload: string | undefined): IndexCommand | undefine
   } catch {
     return undefined;
   }
+}
+
+function createModelPolicies(proModel: string, turboModel?: string): ModelPolicyCatalog {
+  const fastModel = turboModel ?? proModel;
+  const policy = (task: string, primary: string, fallbacks: readonly string[]) => ({
+    task,
+    primary,
+    fallbacks,
+    embeddingModel: 'configured-by-rag-provider',
+    rerankModel: 'configured-by-rag-provider',
+    imageModel: 'configured-by-media-provider',
+  });
+  return new ModelPolicyCatalog([
+    policy('direct', fastModel, fastModel === proModel ? [] : [proModel]),
+    policy('researcher', fastModel, fastModel === proModel ? [] : [proModel]),
+    policy('fact_checker', fastModel, fastModel === proModel ? [] : [proModel]),
+    policy('writer', proModel, fastModel === proModel ? [] : [fastModel]),
+    policy('editor', proModel, fastModel === proModel ? [] : [fastModel]),
+    policy('illustrator', proModel, fastModel === proModel ? [] : [fastModel]),
+    policy('synthesis', proModel, fastModel === proModel ? [] : [fastModel]),
+  ]);
 }
