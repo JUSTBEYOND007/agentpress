@@ -1,8 +1,8 @@
 # AgentPress
 
-AgentPress 是一个由 Pi Agent 驱动的长文创作工作台：左侧内容树、中间 Tiptap 编辑器、右侧基于 `assistant-ui@0.15.1` 的 Agent 工作台。首要交付是可演示、可恢复、可评测的高级 Agent，而不是把平台功能堆在 Agent 之前。
+AgentPress 是一个由 Pi Agent 驱动的长文创作工作台：左侧内容树、中间 Tiptap 编辑器、右侧基于 `assistant-ui@0.15.1` 的 Agent 工作台。首要交付是可运行、可恢复、可评测的高级 Agent，而不是把平台功能堆在 Agent 之前。
 
-这是一个面试项目和本地演示，不宣称已经公网生产部署。首版只支持简体中文、桌面浅色模式和个人工作区；移动端、多人实时协作、评论、支付、内容审核、公开 SEO、自定义 Agent 与自定义 MCP 均未实现。
+当前交付是可完整本地部署的产品实现，不使用演示数据或 Fake Runtime 代替生产能力，但不宣称已经公网生产部署。首版只支持简体中文、桌面浅色模式和个人工作区；移动端、多人实时协作、评论、支付、内容审核、公开 SEO、自定义 Agent 与自定义 MCP 不属于首版范围。
 
 ## 快速开始
 
@@ -11,13 +11,13 @@ AgentPress 是一个由 Pi Agent 驱动的长文创作工作台：左侧内容�
 ```bash
 pnpm install
 pnpm infra:up
-pnpm demo:prepare
+pnpm local:prepare
 pnpm dev
 ```
 
 首次启动后在 Logto Console 创建 Single Page App，登记 `http://localhost:3000`（或实际 Web 端口）为 Redirect URI、Post sign-out redirect URI 和 CORS origin；再创建 API Resource `http://localhost:4000/api`。将 App ID 与 Resource 分别写入 `NEXT_PUBLIC_LOGTO_APP_ID` 和 `NEXT_PUBLIC_LOGTO_API_RESOURCE`，API 使用同一个 Resource 作为 `LOGTO_API_RESOURCE`。浏览器通过 Authorization Code + PKCE 登录，API 使用 Logto JWKS 校验 access token，不接受客户端提交的用户 ID。
 
-打开 [http://localhost:3000](http://localhost:3000)，API 健康检查为 [http://localhost:4000/v1/health](http://localhost:4000/v1/health)。`demo:prepare` 会在不存在时从 `.env.example` 创建 `.env`、启动本地依赖并执行迁移。真实 Agent Run、RAG 和图片生成需要填写 `ARK_API_KEY`、`ARK_MODEL_PRO`、`ARK_EMBEDDING_MODEL` 与 `ARK_IMAGE_MODEL`；没有真实方舟 Key 时 Agent composer 会明确禁用，不会用 Fake Runtime 或伪向量冒充真实执行。
+打开 [http://localhost:3000](http://localhost:3000)，API 健康检查为 [http://localhost:4000/v1/health](http://localhost:4000/v1/health)。`local:prepare` 会在不存在时从 `.env.example` 创建 `.env`、启动本地依赖并执行迁移。真实 Agent Run、RAG 和图片生成需要填写 `ARK_API_KEY`、`ARK_MODEL_PRO`、`ARK_EMBEDDING_MODEL` 与 `ARK_IMAGE_MODEL`；没有真实方舟 Key 时 Agent composer 会明确禁用，不会用 Fake Runtime 或伪向量冒充真实执行。
 
 常用命令：
 
@@ -46,7 +46,7 @@ Pi `@earendil-works/pi-agent-core@0.82.1` 是唯一 Agent Core，隐藏在 `PiRu
 
 - 100,000 字中文编辑器基准：约 300,085 bytes 文档，插入 `0.57 ms`，序列化 `0.17 ms`，Node 堆 `13.92 MB`。
 - 本地 Agent API/SSE 基准：100 个 Run、1000 个 SSE 客户端；Run 入队 p50/p95/p99 为 `262.74/355.13/355.57 ms`，SSE 建连 p50/p95/p99 为 `684.75/2138.26/2163.62 ms`。这是当前开发机实测，不是生产 SLO。
-- `pnpm demo:prepare` 已验证连续运行幂等；Redis/Kafka 停止、等待五秒、重新启动并通过 Compose healthcheck 的故障演练已验证。
+- `pnpm local:prepare` 已验证连续运行幂等；Redis/Kafka 停止、等待五秒、重新启动并通过 Compose healthcheck 的故障演练已验证。
 - `kubectl kustomize infra/production/kubernetes` 可生成生产形状清单；Dockerfile 提供 web/API/两个 Worker 四个 target。生产部署仍需自行提供数据库、Kafka、Redis、对象存储、OTLP Collector、Ingress TLS 和 Secret。
 
 ## 文档入口
@@ -54,7 +54,7 @@ Pi `@earendil-works/pi-agent-core@0.82.1` 是唯一 Agent Core，隐藏在 `PiRu
 - [PLAN.md](./PLAN.md)：产品范围、里程碑和验收门禁。
 - [docs/agent-runtime-spec.md](./docs/agent-runtime-spec.md)：Agent 状态、计划、工具、恢复和上下文契约。
 - [docs/performance.md](./docs/performance.md)：基准方法、原始指标和解释。
-- [docs/operations.md](./docs/operations.md)：本地演示、观测、故障恢复和生产清单。
+- [docs/operations.md](./docs/operations.md)：本地部署、观测、故障恢复和生产清单。
 - [infra/production/README.md](./infra/production/README.md)：容器与 Kubernetes 使用边界。
 
 ## 许可证与边界

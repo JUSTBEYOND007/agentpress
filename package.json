@@ -28,6 +28,7 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "demo": "node scripts/demo.mjs",
     "demo:prepare": "node scripts/demo.mjs --prepare-only",
+    "local:prepare": "node scripts/demo.mjs --prepare-only",
     "dev": "turbo run dev --parallel",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
