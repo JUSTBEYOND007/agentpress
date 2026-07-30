@@ -34,6 +34,7 @@ async function bootstrap(): Promise<void> {
       .map((origin) => origin.trim())
       .filter(Boolean),
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   app.enableShutdownHooks();
   const shutdownTelemetry = (): void => {
