@@ -57,10 +57,7 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
         <div className="auth-panel">
           <h1>AgentPress</h1>
           <p>登录后进入你的写作工作区。</p>
-          <button
-            type="button"
-            onClick={() => void signIn({ redirectUri: window.location.origin })}
-          >
+          <button type="button" onClick={() => void signIn({ redirectUri: rootUrl() })}>
             <LogIn aria-hidden="true" size={16} /> 登录
           </button>
         </div>
@@ -75,10 +72,14 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
         className="auth-sign-out"
         type="button"
         title="退出登录"
-        onClick={() => void signOut(window.location.origin)}
+        onClick={() => void signOut(rootUrl())}
       >
         退出
       </button>
     </>
   );
+}
+
+function rootUrl(): string {
+  return new URL('/', window.location.origin).toString();
 }
