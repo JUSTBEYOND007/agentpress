@@ -53,7 +53,8 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
     };
   }, [isAuthenticated]);
 
-  if (isLoading) return <main className="auth-screen">正在验证身份...</main>;
+  if (isLoading && !tokenProviderReady)
+    return <main className="auth-screen">正在验证身份...</main>;
   if (error) return <main className="auth-screen">身份验证失败：{error.message}</main>;
   if (!isAuthenticated) {
     return (
