@@ -171,6 +171,49 @@ button {
   color: #353632;
 }
 
+.tree-chevron-open {
+  transform: rotate(90deg);
+}
+
+.revision-modal {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 48px));
+  overflow: auto;
+}
+
+.export-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.export-actions button,
+.revision-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #dededb;
+  border-radius: 5px;
+  background: #fff;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.revision-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.revision-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #eeeeec;
+  padding: 9px 0;
+  color: #565752;
+  font-size: 13px;
+}
+
 .workspace-list-view input:focus,
 .modal input:focus {
   border-color: #5085bd;

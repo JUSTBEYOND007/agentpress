@@ -3,7 +3,11 @@
 import {
   Bot,
   ChevronDown,
+  ChevronRight,
+  Download,
   FileText,
+  Folder,
+  FolderPlus,
   History,
   MoreHorizontal,
   PanelRight,
@@ -11,6 +15,8 @@ import {
   Search,
   Settings2,
   Sparkles,
+  Trash2,
+  RotateCcw,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
@@ -24,6 +30,7 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 
 type WorkspaceArticle = {
   readonly id: string;
+  readonly folderId?: string | null;
   readonly title: string;
   readonly revisionId: string;
   readonly document: Readonly<Record<string, unknown>>;
@@ -32,7 +39,22 @@ type WorkspaceArticle = {
   readonly branchId?: string;
 };
 
-type View = 'workspace' | 'search' | 'recent';
+type ContentFolder = {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly name: string;
+  readonly position: number;
+};
+
+type ArticleRevision = {
+  readonly id: string;
+  readonly revisionNumber: number;
+  readonly source: string;
+  readonly documentHash: string;
+  readonly createdAt: string;
+};
+
+type View = 'workspace' | 'search' | 'recent' | 'trash';
 
 export default function AuthenticatedWorkspacePage(): React.JSX.Element {
   return (
@@ -44,6 +66,8 @@ export default function AuthenticatedWorkspacePage(): React.JSX.Element {
 
 function WorkspacePage(): React.JSX.Element {
   const [articles, setArticles] = useState<readonly WorkspaceArticle[]>([]);
+  const [folders, setFolders] = useState<readonly ContentFolder[]>([]);
+  const [trashArticles, setTrashArticles] = useState<readonly WorkspaceArticle[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [activeArticleId, setActiveArticleId] = useState<string>();
   const [view, setView] = useState<View>('workspace');
@@ -51,6 +75,12 @@ function WorkspacePage(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [newArticleOpen, setNewArticleOpen] = useState(false);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderParentId, setNewFolderParentId] = useState('');
+  const [newArticleFolderId, setNewArticleFolderId] = useState('');
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const [revisions, setRevisions] = useState<readonly ArticleRevision[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -63,10 +93,19 @@ function WorkspacePage(): React.JSX.Element {
   const [error, setError] = useState<string>();
 
   const loadArticles = useCallback(async (id: string): Promise<void> => {
-    const response = await authenticatedFetch(`${apiUrl}/workspaces/${id}/articles`);
-    if (!response.ok) throw new Error(`文章列表加载失败 (${String(response.status)})`);
-    const items = (await response.json()) as WorkspaceArticle[];
+    const [articleResponse, folderResponse, trashResponse] = await Promise.all([
+      authenticatedFetch(`${apiUrl}/workspaces/${id}/articles`),
+      authenticatedFetch(`${apiUrl}/workspaces/${id}/folders`),
+      authenticatedFetch(`${apiUrl}/workspaces/${id}/articles?trash=true`),
+    ]);
+    if (!articleResponse.ok)
+      throw new Error(`文章列表加载失败 (${String(articleResponse.status)})`);
+    if (!folderResponse.ok) throw new Error(`目录加载失败 (${String(folderResponse.status)})`);
+    if (!trashResponse.ok) throw new Error(`回收站加载失败 (${String(trashResponse.status)})`);
+    const items = (await articleResponse.json()) as WorkspaceArticle[];
     setArticles(items);
+    setFolders((await folderResponse.json()) as ContentFolder[]);
+    setTrashArticles((await trashResponse.json()) as WorkspaceArticle[]);
     setActiveArticleId((current) =>
       current && items.some((item) => item.id === current) ? current : items[0]?.id,
     );
@@ -119,18 +158,99 @@ function WorkspacePage(): React.JSX.Element {
       const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/articles`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: newTitle }),
+        body: JSON.stringify({ title: newTitle, folderId: newArticleFolderId || null }),
       });
       if (!response.ok) throw new Error(`创建文章失败 (${String(response.status)})`);
       const article = (await response.json()) as WorkspaceArticle;
       setArticles((current) => [article, ...current]);
       setActiveArticleId(article.id);
       setNewTitle('');
+      setNewArticleFolderId('');
       setNewArticleOpen(false);
       setView('workspace');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建文章失败');
     }
+  }
+
+  async function createFolder(event: SyntheticEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!workspaceId) return;
+    const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/folders`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: newFolderName, parentId: newFolderParentId || null }),
+    });
+    if (!response.ok) {
+      setError(await response.text());
+      return;
+    }
+    setNewFolderName('');
+    setNewFolderParentId('');
+    setNewFolderOpen(false);
+    await reloadArticles();
+  }
+
+  async function moveArticle(folderId: string): Promise<void> {
+    if (!activeArticle) return;
+    const response = await authenticatedFetch(`${apiUrl}/articles/${activeArticle.id}/location`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ folderId: folderId || null }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    await reloadArticles();
+  }
+
+  async function trashArticle(): Promise<void> {
+    if (!activeArticle) return;
+    const response = await authenticatedFetch(`${apiUrl}/articles/${activeArticle.id}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error(await response.text());
+    setMenuOpen(false);
+    await reloadArticles();
+  }
+
+  async function restoreArticle(articleId: string): Promise<void> {
+    const response = await authenticatedFetch(`${apiUrl}/articles/${articleId}/restore`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error(await response.text());
+    await reloadArticles();
+  }
+
+  async function openRevisions(): Promise<void> {
+    if (!activeArticle) return;
+    const response = await authenticatedFetch(`${apiUrl}/articles/${activeArticle.id}/revisions`);
+    if (!response.ok) throw new Error(await response.text());
+    setRevisions((await response.json()) as ArticleRevision[]);
+    setRevisionsOpen(true);
+    setMenuOpen(false);
+  }
+
+  async function downloadArticle(
+    format: 'markdown' | 'html' | 'json',
+    revisionId?: string,
+  ): Promise<void> {
+    if (!activeArticle) return;
+    const query = new URLSearchParams({ format });
+    if (revisionId) query.set('revisionId', revisionId);
+    const response = await authenticatedFetch(
+      `${apiUrl}/articles/${activeArticle.id}/export?${query.toString()}`,
+    );
+    if (!response.ok) throw new Error(await response.text());
+    const result = (await response.json()) as {
+      filename: string;
+      mimeType: string;
+      content: string;
+    };
+    const url = URL.createObjectURL(new Blob([result.content], { type: result.mimeType }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function selectArticle(articleId: string): void {
@@ -218,11 +338,31 @@ function WorkspacePage(): React.JSX.Element {
           >
             <History aria-hidden="true" size={17} /> 最近
           </button>
+          <button
+            className={view === 'trash' ? 'nav-item is-active' : 'nav-item'}
+            onClick={() => {
+              openView('trash');
+            }}
+            type="button"
+          >
+            <Trash2 aria-hidden="true" size={17} /> 回收站
+          </button>
         </nav>
 
         <section className="sidebar-section">
           <div className="section-heading">
             <span>内容</span>
+            <button
+              aria-label="新建目录"
+              className="icon-button"
+              onClick={() => {
+                setNewFolderOpen(true);
+              }}
+              title="新建目录"
+              type="button"
+            >
+              <FolderPlus aria-hidden="true" size={15} />
+            </button>
             <button
               aria-label="新建内容"
               className="icon-button"
@@ -235,19 +375,12 @@ function WorkspacePage(): React.JSX.Element {
               <Plus aria-hidden="true" size={15} />
             </button>
           </div>
-          {articles.map((article) => (
-            <button
-              className={article.id === activeArticle?.id ? 'tree-item is-selected' : 'tree-item'}
-              key={article.id}
-              onClick={() => {
-                selectArticle(article.id);
-              }}
-              type="button"
-            >
-              <FileText aria-hidden="true" size={16} />
-              <span>{article.title}</span>
-            </button>
-          ))}
+          <ContentTree
+            {...(activeArticle?.id ? { activeArticleId: activeArticle.id } : {})}
+            articles={articles}
+            folders={folders}
+            onSelectArticle={selectArticle}
+          />
         </section>
 
         <section className="sidebar-section">
@@ -270,7 +403,15 @@ function WorkspacePage(): React.JSX.Element {
       <section className="document-pane">
         <header className="document-toolbar">
           <div className="breadcrumb">
-            <span>{view === 'search' ? '搜索' : view === 'recent' ? '最近' : '写作素材'}</span>
+            <span>
+              {view === 'search'
+                ? '搜索'
+                : view === 'recent'
+                  ? '最近'
+                  : view === 'trash'
+                    ? '回收站'
+                    : '写作素材'}
+            </span>
             {activeArticle && view === 'workspace' ? (
               <>
                 <span>/</span>
@@ -336,6 +477,26 @@ function WorkspacePage(): React.JSX.Element {
               <button onClick={() => void openPublish()} type="button">
                 发布当前修订
               </button>
+              <button
+                onClick={() =>
+                  void openRevisions().catch((reason: unknown) => {
+                    setError(reason instanceof Error ? reason.message : '版本加载失败');
+                  })
+                }
+                type="button"
+              >
+                版本记录与导出
+              </button>
+              <button
+                onClick={() =>
+                  void trashArticle().catch((reason: unknown) => {
+                    setError(reason instanceof Error ? reason.message : '移入回收站失败');
+                  })
+                }
+                type="button"
+              >
+                移入回收站
+              </button>
               <a href="/trending">打开热榜</a>
             </div>
           ) : null}
@@ -350,7 +511,7 @@ function WorkspacePage(): React.JSX.Element {
           />
         ) : (
           <section className="workspace-list-view">
-            <h1>{view === 'search' ? '搜索文章' : '最近编辑'}</h1>
+            <h1>{view === 'search' ? '搜索文章' : view === 'trash' ? '回收站' : '最近编辑'}</h1>
             {view === 'search' ? (
               <input
                 aria-label="搜索文章"
@@ -363,19 +524,23 @@ function WorkspacePage(): React.JSX.Element {
               />
             ) : null}
             <div className="workspace-results">
-              {listedArticles.map((article) => (
+              {(view === 'trash' ? trashArticles : listedArticles).map((article) => (
                 <button
                   key={article.id}
                   onClick={() => {
-                    selectArticle(article.id);
+                    if (view === 'trash')
+                      void restoreArticle(article.id).catch((reason: unknown) => {
+                        setError(reason instanceof Error ? reason.message : '恢复失败');
+                      });
+                    else selectArticle(article.id);
                   }}
                   type="button"
                 >
-                  <FileText size={17} />
+                  {view === 'trash' ? <RotateCcw size={17} /> : <FileText size={17} />}
                   <span>{article.title}</span>
                 </button>
               ))}
-              {listedArticles.length === 0 ? (
+              {(view === 'trash' ? trashArticles : listedArticles).length === 0 ? (
                 <p className="workspace-empty">没有匹配的文章</p>
               ) : null}
             </div>
@@ -437,10 +602,132 @@ function WorkspacePage(): React.JSX.Element {
               required
               value={newTitle}
             />
+            <label htmlFor="new-article-folder">目录</label>
+            <select
+              id="new-article-folder"
+              value={newArticleFolderId}
+              onChange={(event) => {
+                setNewArticleFolderId(event.target.value);
+              }}
+            >
+              <option value="">根目录</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
             <button className="primary-action" type="submit">
               创建文章
             </button>
           </form>
+        </div>
+      ) : null}
+      {newFolderOpen ? (
+        <div className="modal-backdrop">
+          <form className="modal" onSubmit={(event) => void createFolder(event)}>
+            <div className="modal-heading">
+              <strong>新建目录</strong>
+              <button
+                aria-label="关闭"
+                onClick={() => {
+                  setNewFolderOpen(false);
+                }}
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <label htmlFor="new-folder-name">名称</label>
+            <input
+              id="new-folder-name"
+              required
+              maxLength={180}
+              value={newFolderName}
+              onChange={(event) => {
+                setNewFolderName(event.target.value);
+              }}
+            />
+            <label htmlFor="new-folder-parent">父目录</label>
+            <select
+              id="new-folder-parent"
+              value={newFolderParentId}
+              onChange={(event) => {
+                setNewFolderParentId(event.target.value);
+              }}
+            >
+              <option value="">根目录</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+            <button className="primary-action" type="submit">
+              创建目录
+            </button>
+          </form>
+        </div>
+      ) : null}
+      {revisionsOpen && activeArticle ? (
+        <div className="modal-backdrop">
+          <section className="modal revision-modal" aria-label="版本记录">
+            <div className="modal-heading">
+              <strong>版本记录</strong>
+              <button
+                aria-label="关闭"
+                onClick={() => {
+                  setRevisionsOpen(false);
+                }}
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <label htmlFor="article-folder">所在目录</label>
+            <select
+              id="article-folder"
+              value={activeArticle.folderId ?? ''}
+              onChange={(event) => {
+                void moveArticle(event.target.value).catch((reason: unknown) => {
+                  setError(reason instanceof Error ? reason.message : '移动失败');
+                });
+              }}
+            >
+              <option value="">根目录</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+            <div className="export-actions">
+              <button type="button" onClick={() => void downloadArticle('markdown')}>
+                <Download size={14} /> Markdown
+              </button>
+              <button type="button" onClick={() => void downloadArticle('html')}>
+                <Download size={14} /> HTML
+              </button>
+              <button type="button" onClick={() => void downloadArticle('json')}>
+                <Download size={14} /> JSON
+              </button>
+            </div>
+            <div className="revision-list">
+              {revisions.map((revision) => (
+                <div key={revision.id}>
+                  <span>
+                    版本 {revision.revisionNumber} · {revision.source}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void downloadArticle('markdown', revision.id)}
+                  >
+                    <Download size={14} /> 导出
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       ) : null}
       {publishOpen ? (
@@ -498,6 +785,104 @@ function WorkspacePage(): React.JSX.Element {
         </div>
       ) : null}
     </main>
+  );
+}
+
+function ContentTree({
+  activeArticleId,
+  articles,
+  folders,
+  onSelectArticle,
+}: {
+  readonly activeArticleId?: string;
+  readonly articles: readonly WorkspaceArticle[];
+  readonly folders: readonly ContentFolder[];
+  readonly onSelectArticle: (articleId: string) => void;
+}): React.JSX.Element {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const renderFolder = (folder: ContentFolder, depth: number): React.JSX.Element => {
+    const isCollapsed = collapsed.has(folder.id);
+    const children = folders.filter((item) => item.parentId === folder.id);
+    const contained = articles.filter((article) => article.folderId === folder.id);
+    return (
+      <div key={folder.id}>
+        <button
+          className="tree-item"
+          style={{ paddingLeft: 8 + depth * 14 }}
+          onClick={() => {
+            setCollapsed((current) => {
+              const next = new Set(current);
+              if (next.has(folder.id)) next.delete(folder.id);
+              else next.add(folder.id);
+              return next;
+            });
+          }}
+          type="button"
+        >
+          <ChevronRight className={isCollapsed ? '' : 'tree-chevron-open'} size={13} />
+          <Folder size={15} />
+          <span>{folder.name}</span>
+        </button>
+        {!isCollapsed ? (
+          <>
+            {children.map((child) => renderFolder(child, depth + 1))}
+            {contained.map((article) => (
+              <ArticleTreeItem
+                active={article.id === activeArticleId}
+                article={article}
+                depth={depth + 1}
+                key={article.id}
+                onSelect={onSelectArticle}
+              />
+            ))}
+          </>
+        ) : null}
+      </div>
+    );
+  };
+  return (
+    <>
+      {folders
+        .filter((folder) => folder.parentId === null)
+        .map((folder) => renderFolder(folder, 0))}
+      {articles
+        .filter((article) => !article.folderId)
+        .map((article) => (
+          <ArticleTreeItem
+            active={article.id === activeArticleId}
+            article={article}
+            depth={0}
+            key={article.id}
+            onSelect={onSelectArticle}
+          />
+        ))}
+    </>
+  );
+}
+
+function ArticleTreeItem({
+  active,
+  article,
+  depth,
+  onSelect,
+}: {
+  readonly active: boolean;
+  readonly article: WorkspaceArticle;
+  readonly depth: number;
+  readonly onSelect: (id: string) => void;
+}): React.JSX.Element {
+  return (
+    <button
+      className={active ? 'tree-item is-selected' : 'tree-item'}
+      style={{ paddingLeft: 8 + depth * 14 }}
+      onClick={() => {
+        onSelect(article.id);
+      }}
+      type="button"
+    >
+      <FileText size={15} />
+      <span>{article.title}</span>
+    </button>
   );
 }
 

@@ -719,6 +719,29 @@ export const runDirectives = pgTable(
   ],
 );
 
+export const contentFolders = pgTable(
+  'content_folders',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    parentId: uuid('parent_id').references((): AnyPgColumn => contentFolders.id, {
+      onDelete: 'cascade',
+    }),
+    name: varchar('name', { length: 180 }).notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt,
+    updatedAt,
+    deletedAt: timestamp('deleted_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    unique('content_folders_parent_name_unique').on(table.workspaceId, table.parentId, table.name),
+    index('content_folders_workspace_parent_idx').on(table.workspaceId, table.parentId),
+    check('content_folders_position_check', sql`${table.position} >= 0`),
+  ],
+);
+
 export const articles = pgTable(
   'articles',
   {
@@ -726,6 +749,7 @@ export const articles = pgTable(
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
+    folderId: uuid('folder_id').references(() => contentFolders.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     currentRevisionId: uuid('current_revision_id').references(
       (): AnyPgColumn => articleRevisions.id,
@@ -734,8 +758,12 @@ export const articles = pgTable(
     version: integer('version').notNull().default(1),
     createdAt,
     updatedAt,
+    deletedAt: timestamp('deleted_at', { withTimezone: true, precision: 3 }),
   },
-  (table) => [index('articles_workspace_updated_idx').on(table.workspaceId, table.updatedAt)],
+  (table) => [
+    index('articles_workspace_updated_idx').on(table.workspaceId, table.updatedAt),
+    index('articles_folder_updated_idx').on(table.folderId, table.updatedAt),
+  ],
 );
 
 export const articleRevisions = pgTable(

@@ -66,3 +66,16 @@ pnpm check
 ```
 
 当前仓库没有公网生产部署、内容审核、备案或业务连续性承诺。
+
+## 内容管理验收
+
+应用数据库迁移并启动本地服务后，使用真实 Logto 测试账号完成以下路径：新建父目录与子目录、在指定目录创建文章、移动文章、查看版本、分别下载 Markdown/HTML/JSON、移入回收站并恢复。自动检查命令：
+
+```bash
+pnpm --filter @agentpress/database db:migrate
+pnpm --filter @agentpress/api test
+pnpm --filter @agentpress/web test
+pnpm check
+```
+
+HTML 导出测试必须覆盖文本和属性转义、危险链接过滤；浏览器验收必须读取实际下载文件并确认标题存在，不能只检查按钮可见。

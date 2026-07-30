@@ -1,0 +1,23 @@
+# AgentPress 完成证据矩阵
+
+本文件将 `PLAN.md` 的承诺映射到可复核证据。只有同时具备产品入口、持久化/执行路径、自动测试和运行验证的能力才标记为完成；仅有类型、表结构、测试 Fake 或设计文档不算完成。
+
+| 能力                           | 产品入口                 | 持久化/执行                                                | 自动测试                  | 运行验证                          | 状态       |
+| ------------------------------ | ------------------------ | ---------------------------------------------------------- | ------------------------- | --------------------------------- | ---------- |
+| Logto PKCE 与工作区隔离        | Web 登录、受保护 API     | Logto JWKS、workspace membership                           | API auth tests            | 真实账号登录/刷新                 | 完成       |
+| 文章创建与 Tiptap 编辑         | Web 工作台               | PostgreSQL revision、Redis 写租约、IndexedDB pending queue | editor unit/integration   | 创建、编辑、跨 TTL 续租、刷新恢复 | 完成       |
+| 多轮会话恢复                   | assistant-ui thread      | PostgreSQL stable messages                                 | API controller tests      | 待真实 Agent 凭据复核内容恢复     | 部分完成   |
+| Pi Direct/Planned Run          | Agent composer           | Pi adapter、Kafka command、PostgreSQL state                | runtime/application tests | 缺少 Ark 凭据                     | 待在线验证 |
+| 多 Agent、Steering、Follow-up  | Run inspector/composer   | Plan/Task/Directive/Checkpoint                             | application tests         | 缺少 Ark 凭据                     | 待在线验证 |
+| 工具审批与文章 diff            | Agent workbench          | Tool ledger、Approval、EditProposal                        | tool/editor tests         | 缺少 Ark 凭据                     | 待在线验证 |
+| MCP、联网研究、RAG             | Pi tools                 | MCP manager、SSRF guard、pgvector/FTS                      | package/integration tests | 缺少 Ark 凭据                     | 待在线验证 |
+| Mention、Skill、记忆           | Agent context controls   | pinned bindings、memory candidates                         | context/API tests         | Skill/记忆需继续浏览器复核        | 部分完成   |
+| 图文生成                       | Pi image tool            | Ark image、MinIO provenance                                | media tests               | 缺少 Ark 凭据                     | 待在线验证 |
+| 不可变发布与热榜 SSR           | 发布弹窗、公开页、热榜   | Edition、Kafka ranking projection                          | publication integration   | 发布及两个 SSR 路由 200           | 完成       |
+| 多级文件夹、回收站、版本、导出 | 内容树、回收站、版本弹窗 | PostgreSQL 目录/软删除/修订、Markdown/HTML/JSON 导出       | API/Web tests             | 登录后黄金路径与下载验证          | 完成       |
+| 完整编辑器工具                 | 基础编辑器               | 部分 Tiptap schema                                         | 基础 autosave tests       | 尚未覆盖表格/任务/目录/命令       | 未完成     |
+| 公开页赞踩、阅读、撤回         | API 部分存在             | reaction/view 存在，撤回缺失                               | publication tests         | Web 无入口                        | 未完成     |
+| 在线 Agent Eval                | 无命令                   | 确定性 eval only                                           | 48 场景                   | 未运行真实模型                    | 未完成     |
+| 可观测性、IaC、性能与故障演练  | 运维命令                 | OTel、Kubernetes manifests                                 | quality gate              | 部分本机报告                      | 部分完成   |
+
+后续提交必须同步更新本矩阵，并在 `docs/operations.md` 记录可重复验证命令。
