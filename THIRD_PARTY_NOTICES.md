@@ -11,11 +11,15 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - NestJS and Fastify — MIT
 - Drizzle ORM — Apache-2.0
 - KafkaJS 2.2.4 — MIT; patched locally to clamp empty request-queue timers for Node 24 compatibility
+- OpenTelemetry JS Node SDK, OTLP HTTP exporters, Node auto-instrumentations and semantic conventions — Apache-2.0
 - ioredis — MIT
 - Tiptap and ProseMirror — MIT
 - assistant-ui — MIT
 - Model Context Protocol TypeScript SDK — MIT
 - YAML — ISC
+
+OpenTelemetry packages are used directly from their published npm releases; no source files
+are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm-lock.yaml`.
 
 ## Vendored Or Adapted Sources
 

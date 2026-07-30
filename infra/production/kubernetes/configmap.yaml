@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentpress-config
+data:
+  NODE_ENV: production
+  LOG_LEVEL: info
+  API_PORT: '4000'
+  API_ORIGIN: http://agentpress-api:4000
+  WEB_ORIGIN: https://agentpress.example
+  OTEL_SDK_DISABLED: 'false'
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability:4318

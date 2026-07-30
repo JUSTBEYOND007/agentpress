@@ -18,6 +18,7 @@
     "@agentpress/database": "workspace:*",
     "@agentpress/editor-application": "workspace:*",
     "@agentpress/media-application": "workspace:*",
+    "@agentpress/observability": "workspace:*",
     "@agentpress/publication-application": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
     "@nestjs/common": "catalog:",

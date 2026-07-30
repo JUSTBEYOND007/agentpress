@@ -1,0 +1,74 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentpress-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: agentpress-api }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentpress-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: agentpress-web }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agentpress-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agentpress-api
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-web
+spec:
+  podSelector:
+    matchLabels: { app: agentpress-web }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports: [{ protocol: TCP, port: 3000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-api
+spec:
+  podSelector:
+    matchLabels: { app: agentpress-api }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: agentpress-web }
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports: [{ protocol: TCP, port: 4000 }]

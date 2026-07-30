@@ -3,9 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "benchmark:editor": "tsx scripts/editor-benchmark.ts",
     "build": "next build",
     "dev": "next dev --port 3000",
-    "lint": "eslint src",
+    "lint": "eslint src scripts",
     "start": "next start --port 3000",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@types/react": "catalog:types",
-    "@types/react-dom": "catalog:types"
+    "@types/react-dom": "catalog:types",
+    "tsx": "catalog:"
   }
 }
