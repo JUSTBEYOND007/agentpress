@@ -54,6 +54,14 @@ type ArticleRevision = {
   readonly createdAt: string;
 };
 
+type ArticlePublication = {
+  readonly id: string;
+  readonly slug: string;
+  readonly status: 'published' | 'unpublished';
+  readonly editionNumber: number;
+  readonly publishedAt: string;
+};
+
 type View = 'workspace' | 'search' | 'recent' | 'trash';
 
 export default function AuthenticatedWorkspacePage(): React.JSX.Element {
@@ -90,6 +98,7 @@ function WorkspacePage(): React.JSX.Element {
     readonly { id: string; prompt?: string; attribution?: string }[]
   >([]);
   const [publishedSlug, setPublishedSlug] = useState<string>();
+  const [publicationHistory, setPublicationHistory] = useState<readonly ArticlePublication[]>([]);
   const [error, setError] = useState<string>();
 
   const loadArticles = useCallback(async (id: string): Promise<void> => {
@@ -269,11 +278,20 @@ function WorkspacePage(): React.JSX.Element {
     if (!workspaceId || !activeArticle) return;
     setPublishSlug(slugify(activeArticle.title));
     setPublishedSlug(undefined);
-    const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/media`);
-    if (response.ok)
+    const [mediaResponse, historyResponse] = await Promise.all([
+      authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/media`),
+      authenticatedFetch(`${apiUrl}/articles/${activeArticle.id}/publications`),
+    ]);
+    if (mediaResponse.ok)
       setMediaAssets(
-        (await response.json()) as readonly { id: string; prompt?: string; attribution?: string }[],
+        (await mediaResponse.json()) as readonly {
+          id: string;
+          prompt?: string;
+          attribution?: string;
+        }[],
       );
+    if (historyResponse.ok)
+      setPublicationHistory((await historyResponse.json()) as ArticlePublication[]);
     setPublishOpen(true);
     setMenuOpen(false);
   }
@@ -299,6 +317,23 @@ function WorkspacePage(): React.JSX.Element {
     }
     const result = (await response.json()) as { slug: string };
     setPublishedSlug(result.slug);
+    await loadPublicationHistory(activeArticle.id);
+  }
+
+  async function loadPublicationHistory(articleId: string): Promise<void> {
+    const response = await authenticatedFetch(`${apiUrl}/articles/${articleId}/publications`);
+    if (!response.ok) throw new Error(await response.text());
+    setPublicationHistory((await response.json()) as ArticlePublication[]);
+  }
+
+  async function unpublish(publicationId: string): Promise<void> {
+    if (!activeArticle) return;
+    const response = await authenticatedFetch(
+      `${apiUrl}/articles/${activeArticle.id}/publications/${publicationId}`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok) throw new Error(await response.text());
+    await loadPublicationHistory(activeArticle.id);
   }
 
   return (
@@ -781,6 +816,32 @@ function WorkspacePage(): React.JSX.Element {
                 </button>
               </>
             )}
+            {publicationHistory.length > 0 ? (
+              <div className="publication-history">
+                <span>发布记录</span>
+                {publicationHistory.map((publication) => (
+                  <div key={publication.id}>
+                    <a href={`/p/${publication.slug}`}>
+                      Edition {publication.editionNumber} · {publication.slug}
+                    </a>
+                    {publication.status === 'published' ? (
+                      <button
+                        onClick={() =>
+                          void unpublish(publication.id).catch((reason: unknown) => {
+                            setError(reason instanceof Error ? reason.message : '撤回失败');
+                          })
+                        }
+                        type="button"
+                      >
+                        撤回
+                      </button>
+                    ) : (
+                      <small>已撤回</small>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </form>
         </div>
       ) : null}

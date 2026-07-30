@@ -16,7 +16,7 @@
 | 不可变发布与热榜 SSR           | 发布弹窗、公开页、热榜   | Edition、Kafka ranking projection                          | publication integration   | 发布及两个 SSR 路由 200           | 完成       |
 | 多级文件夹、回收站、版本、导出 | 内容树、回收站、版本弹窗 | PostgreSQL 目录/软删除/修订、Markdown/HTML/JSON 导出       | API/Web tests             | 登录后黄金路径与下载验证          | 完成       |
 | 完整编辑器工具                 | 工具栏、命令菜单、目录   | 前后端共享 Tiptap schema、自动保存                         | 高级节点 step replay      | 表格/任务插入后刷新恢复           | 完成       |
-| 公开页赞踩、阅读、撤回         | API 部分存在             | reaction/view 存在，撤回缺失                               | publication tests         | Web 无入口                        | 未完成     |
+| 公开页赞踩、阅读、撤回         | 公开页、发布记录弹窗     | reaction/view/outbox、幂等撤回                             | API/DB integration        | 赞同/阅读/撤回后 SSR 404          | 完成       |
 | 在线 Agent Eval                | 无命令                   | 确定性 eval only                                           | 48 场景                   | 未运行真实模型                    | 未完成     |
 | 可观测性、IaC、性能与故障演练  | 运维命令                 | OTel、Kubernetes manifests                                 | quality gate              | 部分本机报告                      | 部分完成   |
 

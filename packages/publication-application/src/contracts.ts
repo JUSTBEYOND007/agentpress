@@ -11,9 +11,22 @@ export type PublishArticleInput = {
 
 export type PublicationEvent = {
   readonly messageId: string;
-  readonly type: 'publication.published' | 'publication.reacted' | 'publication.viewed';
+  readonly type:
+    | 'publication.published'
+    | 'publication.reacted'
+    | 'publication.viewed'
+    | 'publication.unpublished';
   readonly publicationId: string;
   readonly occurredAt: string;
+};
+
+export type ArticlePublication = {
+  readonly id: string;
+  readonly slug: string;
+  readonly status: 'published' | 'unpublished';
+  readonly editionNumber: number;
+  readonly publishedAt: Date;
+  readonly updatedAt: Date;
 };
 
 export type PublicArticle = {

@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -49,6 +50,29 @@ export class PublicationController {
         slug: body.slug,
         ...(body.coverAssetId ? { coverAssetId: body.coverAssetId } : {}),
       });
+    } catch (error) {
+      throw mapPublicationError(error);
+    }
+  }
+
+  @Get('articles/:articleId/publications')
+  public async listArticlePublications(
+    @Param('articleId') articleId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertArticleAccess(articleId, user.id);
+    return this.publications.listForArticle(articleId);
+  }
+
+  @Delete('articles/:articleId/publications/:publicationId')
+  public async unpublish(
+    @Param('articleId') articleId: string,
+    @Param('publicationId') publicationId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertArticleAccess(articleId, user.id);
+    try {
+      return await this.publications.unpublish(articleId, publicationId);
     } catch (error) {
       throw mapPublicationError(error);
     }

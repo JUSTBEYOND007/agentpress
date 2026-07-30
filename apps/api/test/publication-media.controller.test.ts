@@ -40,6 +40,20 @@ describe('PublicationController', () => {
     });
   });
 
+  it('checks article access before unpublishing', async () => {
+    const unpublish = vi.fn(() => Promise.resolve({ status: 'unpublished' }));
+    const assertArticleAccess = vi.fn(() => Promise.resolve());
+    const controller = new PublicationController(
+      { unpublish } as unknown as PublicationService,
+      { assertArticleAccess } as unknown as AuthorizationService,
+    );
+
+    await controller.unpublish('article-1', 'publication-1', user);
+
+    expect(assertArticleAccess).toHaveBeenCalledWith('article-1', 'user-1');
+    expect(unpublish).toHaveBeenCalledWith('article-1', 'publication-1');
+  });
+
   it('rejects invalid ranking limits before querying storage', async () => {
     const trending = vi.fn();
     const controller = new PublicationController(

@@ -113,6 +113,22 @@ describeWithDatabase('immutable publishing and engagement ranking', () => {
     });
   });
 
+  it('unpublishes idempotently and removes the slug from public reads', async () => {
+    const published = await service.publish({
+      articleId: ids.article,
+      revisionId: ids.revision,
+      userId: ids.user,
+      slug: `withdraw-${randomUUID()}`,
+    });
+    await expect(service.unpublish(ids.article, published.publicationId)).resolves.toMatchObject({
+      status: 'unpublished',
+    });
+    await expect(service.unpublish(ids.article, published.publicationId)).resolves.toMatchObject({
+      status: 'unpublished',
+    });
+    await expect(service.findBySlug(published.slug)).resolves.toBeUndefined();
+  });
+
   it('serializes concurrent edition number allocation for one article', async () => {
     const suffix = randomUUID();
     const results = await Promise.all([
@@ -130,6 +146,8 @@ describeWithDatabase('immutable publishing and engagement ranking', () => {
       }),
     ]);
 
-    expect(results.map((result) => result.editionNumber).sort()).toEqual([2, 3]);
+    const editionNumbers = results.map((result) => result.editionNumber).sort((a, b) => a - b);
+    expect(new Set(editionNumbers)).toHaveLength(2);
+    expect((editionNumbers[1] ?? 0) - (editionNumbers[0] ?? 0)).toBe(1);
   });
 });

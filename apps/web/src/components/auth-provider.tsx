@@ -2,7 +2,7 @@
 
 import { LogtoProvider, useHandleSignInCallback, useLogto, type LogtoConfig } from '@logto/react';
 import { LogIn } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { bindAccessTokenProvider } from '../lib/authenticated-fetch';
 
@@ -11,6 +11,20 @@ const appId = process.env.NEXT_PUBLIC_LOGTO_APP_ID;
 const resource = process.env.NEXT_PUBLIC_LOGTO_API_RESOURCE ?? 'http://localhost:4000/api';
 const logtoConfig: LogtoConfig | undefined =
   endpoint && appId ? { endpoint, appId, resources: [resource] } : undefined;
+
+type PublicAuthState = {
+  readonly configured: boolean;
+  readonly authenticated: boolean;
+  readonly loading: boolean;
+  readonly signIn: () => Promise<void>;
+};
+
+const PublicAuthContext = createContext<PublicAuthState>({
+  configured: false,
+  authenticated: false,
+  loading: false,
+  signIn: () => Promise.resolve(),
+});
 
 export function AuthProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   if (!logtoConfig) {
@@ -31,6 +45,56 @@ export function AuthProvider({ children }: { readonly children: ReactNode }): Re
   );
 }
 
+export function PublicAuthProvider({
+  children,
+}: {
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  if (!logtoConfig) return <>{children}</>;
+  return (
+    <LogtoProvider config={logtoConfig}>
+      <PublicTokenBinding>{children}</PublicTokenBinding>
+    </LogtoProvider>
+  );
+}
+
+export function usePublicAuth(): PublicAuthState {
+  return useContext(PublicAuthContext);
+}
+
+function PublicTokenBinding({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  const { getAccessToken, isAuthenticated, isLoading, signIn } = useLogto();
+  const getAccessTokenRef = useRef(getAccessToken);
+  getAccessTokenRef.current = getAccessToken;
+  useEffect(() => {
+    bindAccessTokenProvider(
+      isAuthenticated ? () => getAccessTokenRef.current(resource) : undefined,
+    );
+    return () => {
+      bindAccessTokenProvider(undefined);
+    };
+  }, [isAuthenticated]);
+  return (
+    <PublicAuthContext.Provider
+      value={{
+        configured: true,
+        authenticated: isAuthenticated,
+        loading: isLoading,
+        signIn: async () => {
+          window.sessionStorage.setItem(
+            'agentpress:return-after-login',
+            `${window.location.pathname}${window.location.search}`,
+          );
+          await signIn({ redirectUri: rootUrl() });
+        },
+      }}
+    >
+      {children}
+    </PublicAuthContext.Provider>
+  );
+}
+
 function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const callbackPending = hasSignInCallbackParameters();
   return (
@@ -43,7 +107,9 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
 
 function SignInCallback(): null {
   useHandleSignInCallback(() => {
-    window.history.replaceState({}, '', '/');
+    const returnPath = window.sessionStorage.getItem('agentpress:return-after-login');
+    window.sessionStorage.removeItem('agentpress:return-after-login');
+    window.location.replace(returnPath?.startsWith('/') ? returnPath : '/');
   });
   return null;
 }

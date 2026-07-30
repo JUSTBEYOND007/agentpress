@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { PublicArticle } from '../../../components/public-article';
+import { PublicAuthProvider } from '../../../components/auth-provider';
 import { fetchPublication } from '../../../lib/publications';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,9 @@ export default async function PublicationPage({
         <Link href="/">AgentPress</Link>
         <Link href="/trending">热榜</Link>
       </header>
-      <PublicArticle article={article} />
+      <PublicAuthProvider>
+        <PublicArticle article={article} />
+      </PublicAuthProvider>
     </main>
   );
 }

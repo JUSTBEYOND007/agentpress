@@ -26,7 +26,7 @@ export async function fetchTrending(): Promise<readonly PublicArticleDto[]> {
 
 export async function fetchPublication(slug: string): Promise<PublicArticleDto | undefined> {
   const response = await fetch(`${apiOrigin}/v1/publications/${encodeURIComponent(slug)}`, {
-    next: { revalidate: 60, tags: [`publication:${slug}`] },
+    cache: 'no-store',
   });
   if (response.status === 404) return undefined;
   if (!response.ok) throw new Error(`Publication API failed with ${String(response.status)}`);

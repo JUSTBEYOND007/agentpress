@@ -137,7 +137,59 @@ export class PublicationService {
           set: { reaction, updatedAt: this.now() },
         });
       await this.enqueueEvent(transaction, this.event('publication.reacted', publicationId));
-      return { publicationId, reaction };
+      const totals = await transaction
+        .select({
+          upvotes: sql<number>`count(*) filter (where ${publicationReactions.reaction} = 'up')::int`,
+          downvotes: sql<number>`count(*) filter (where ${publicationReactions.reaction} = 'down')::int`,
+        })
+        .from(publicationReactions)
+        .where(eq(publicationReactions.publicationId, publicationId));
+      return {
+        publicationId,
+        reaction,
+        upvotes: totals[0]?.upvotes ?? 0,
+        downvotes: totals[0]?.downvotes ?? 0,
+      };
+    });
+  }
+
+  public async listForArticle(articleId: string) {
+    return this.database
+      .select({
+        id: publications.id,
+        slug: publications.slug,
+        status: publications.status,
+        editionNumber: publicationEditions.editionNumber,
+        publishedAt: publications.publishedAt,
+        updatedAt: publications.updatedAt,
+      })
+      .from(publications)
+      .innerJoin(publicationEditions, eq(publicationEditions.id, publications.editionId))
+      .where(eq(publicationEditions.articleId, articleId))
+      .orderBy(desc(publications.publishedAt));
+  }
+
+  public async unpublish(articleId: string, publicationId: string) {
+    return this.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .select({ id: publications.id, status: publications.status, slug: publications.slug })
+        .from(publications)
+        .innerJoin(publicationEditions, eq(publicationEditions.id, publications.editionId))
+        .where(
+          and(eq(publications.id, publicationId), eq(publicationEditions.articleId, articleId)),
+        )
+        .limit(1)
+        .for('update');
+      const publication = rows[0];
+      if (!publication) throw new PublicationError('not_found', 'Publication not found');
+      if (publication.status === 'unpublished')
+        return { publicationId, slug: publication.slug, status: 'unpublished' as const };
+      await transaction
+        .update(publications)
+        .set({ status: 'unpublished', updatedAt: this.now() })
+        .where(eq(publications.id, publicationId));
+      await this.enqueueEvent(transaction, this.event('publication.unpublished', publicationId));
+      return { publicationId, slug: publication.slug, status: 'unpublished' as const };
     });
   }
 
