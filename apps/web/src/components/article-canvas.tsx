@@ -2,11 +2,16 @@
 
 import UniqueID from '@tiptap/extension-unique-id';
 import Image from '@tiptap/extension-image';
+import Placeholder from '@tiptap/extension-placeholder';
+import { TableKit } from '@tiptap/extension-table';
+import TaskItem from '@tiptap/extension-task-item';
+import TaskList from '@tiptap/extension-task-list';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useRef, useState } from 'react';
 import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../lib/autosave-queue';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
+import { EditorToolbar, slashCommands } from './editor-toolbar';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 const AgentPressImage = Image.extend({
@@ -45,6 +50,8 @@ export function ArticleCanvas({
   const [saveState, setSaveState] = useState<'connecting' | 'saved' | 'saving' | 'offline'>(
     'connecting',
   );
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [editorVersion, setEditorVersion] = useState(0);
   const leaseId = useRef(leaseIdFor(articleId));
   const leaseOwned = useRef(false);
   const chain = useRef(Promise.resolve());
@@ -59,6 +66,10 @@ export function ArticleCanvas({
       editable: false,
       extensions: [
         StarterKit,
+        TableKit.configure({ table: { resizable: true } }),
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        Placeholder.configure({ placeholder: '输入 / 打开命令，或直接开始写作' }),
         AgentPressImage.configure({ allowBase64: false, inline: false }),
         UniqueID.configure({
           attributeName: 'blockId',
@@ -70,10 +81,27 @@ export function ArticleCanvas({
             'orderedList',
             'listItem',
             'codeBlock',
+            'taskList',
+            'taskItem',
+            'table',
+            'tableRow',
+            'tableHeader',
+            'tableCell',
           ],
         }),
       ],
       content: initialDocument,
+      editorProps: {
+        handleKeyDown: (_view, event) => {
+          if (event.key === '/' && editor?.state.selection.$from.parent.textContent.length === 0)
+            setSlashOpen(true);
+          if (event.key === 'Escape') setSlashOpen(false);
+          return false;
+        },
+      },
+      onSelectionUpdate: () => {
+        setEditorVersion((value) => value + 1);
+      },
       onTransaction: ({ transaction }) => {
         if (!transaction.docChanged || isRecovering.current) return;
         const steps = transaction.steps.map((step): unknown => step.toJSON() as unknown);
@@ -190,6 +218,7 @@ export function ArticleCanvas({
 
   return (
     <section className="article-editor-shell">
+      {editor ? <EditorToolbar editor={editor} key={editorVersion} /> : null}
       <div className={`save-state save-${saveState}`} aria-live="polite">
         {saveState === 'connecting'
           ? '正在恢复'
@@ -200,6 +229,25 @@ export function ArticleCanvas({
               : '本地草稿'}
       </div>
       <EditorContent className="article-canvas" editor={editor} />
+      {editor && slashOpen ? (
+        <div className="slash-menu" role="menu" aria-label="块命令">
+          {slashCommands.map((item) => (
+            <button
+              key={item.label}
+              onClick={() => {
+                item.run(editor);
+                setSlashOpen(false);
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <strong>{item.label}</strong>
+              <span>{item.keywords}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {editor ? <DocumentOutline editor={editor} version={editorVersion} /> : null}
     </section>
   );
 
@@ -230,6 +278,49 @@ export function ArticleCanvas({
         });
     }, 1_200);
   }
+}
+
+function DocumentOutline({
+  editor,
+  version: _version,
+}: {
+  readonly editor: NonNullable<ReturnType<typeof useEditor>>;
+  readonly version: number;
+}): React.JSX.Element | null {
+  const headings: { level: number; text: string; position: number }[] = [];
+  editor.state.doc.descendants((node, position) => {
+    if (node.type.name === 'heading')
+      headings.push({
+        level: Number(node.attrs.level),
+        text: node.textContent || '无标题',
+        position,
+      });
+  });
+  if (headings.length < 2) return null;
+  return (
+    <details className="document-outline">
+      <summary>目录</summary>
+      <nav aria-label="文章目录">
+        {headings.map((heading, index) => (
+          <button
+            key={`${String(heading.position)}-${String(index)}`}
+            onClick={() => {
+              editor
+                .chain()
+                .focus()
+                .setTextSelection(heading.position + 1)
+                .scrollIntoView()
+                .run();
+            }}
+            style={{ paddingLeft: 8 + (heading.level - 1) * 10 }}
+            type="button"
+          >
+            {heading.text}
+          </button>
+        ))}
+      </nav>
+    </details>
+  );
 }
 
 function writerLeaseRequest(articleId: string, leaseId: string, action: string): Promise<Response> {

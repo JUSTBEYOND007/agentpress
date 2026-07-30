@@ -22,6 +22,10 @@
   },
   "dependencies": {
     "@tiptap/core": "catalog:",
+    "@tiptap/extension-image": "catalog:",
+    "@tiptap/extension-table": "3.29.2",
+    "@tiptap/extension-task-item": "3.29.2",
+    "@tiptap/extension-task-list": "3.29.2",
     "@tiptap/extension-unique-id": "catalog:",
     "@tiptap/pm": "catalog:",
     "@tiptap/starter-kit": "catalog:"

@@ -79,3 +79,5 @@ pnpm check
 ```
 
 HTML 导出测试必须覆盖文本和属性转义、危险链接过滤；浏览器验收必须读取实际下载文件并确认标题存在，不能只检查按钮可见。
+
+高级编辑器验收必须在真实登录后的新文章中插入任务清单和表格，等待“已保存”，刷新页面后再次断言 `taskList` 和 `table` 节点存在。共享 schema 的自动测试位于 `packages/editor-patch/test/autosave.test.ts`，新增客户端节点时必须先同步该 schema。
