@@ -56,6 +56,26 @@ describe('EditorController', () => {
       controller.decide('proposal', { decisions: { op: 'maybe' } }, user),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+  it('commits the exact acknowledged server draft sequence', async () => {
+    const commit = vi.fn((input: unknown) => Promise.resolve(input));
+    const controller = new EditorController(
+      { commit } as unknown as AutosaveService,
+      {} as ProposalService,
+      {} as RedisWriterLease,
+      authorization,
+    );
+    await controller.commitDraft(
+      'article',
+      { writerLeaseId: 'lease', expectedServerSequence: 7 },
+      user,
+    );
+    expect(commit).toHaveBeenCalledWith({
+      articleId: 'article',
+      userId: 'user',
+      writerLeaseId: 'lease',
+      expectedServerSequence: 7,
+    });
+  });
 
   it('treats an existing lease owned by the same browser as acquired', async () => {
     const leases = {

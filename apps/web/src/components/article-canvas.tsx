@@ -49,6 +49,8 @@ export function ArticleCanvas({
   const leaseOwned = useRef(false);
   const chain = useRef(Promise.resolve());
   const clientSequence = useRef(0);
+  const revisionId = useRef(baseRevisionId);
+  const commitTimer = useRef<number | undefined>(undefined);
   const isRecovering = useRef(false);
   const editor = useEditor(
     {
@@ -91,7 +93,7 @@ export function ArticleCanvas({
               setSaveState('offline');
               return;
             }
-            const response = await sendAutosave(articleId, baseRevisionId, leaseId.current, {
+            const response = await sendAutosave(articleId, revisionId.current, leaseId.current, {
               updateId,
               steps,
             });
@@ -99,8 +101,10 @@ export function ArticleCanvas({
               setSaveState('offline');
               return;
             }
+            const acknowledgement = (await response.json()) as { readonly serverSequence: number };
             await acknowledgeAutosave(updateId);
             setSaveState('saved');
+            scheduleDraftCommit(acknowledgement.serverSequence);
           })
           .catch(() => {
             setSaveState('offline');
@@ -122,7 +126,7 @@ export function ArticleCanvas({
 
       const pending = await listPendingAutosaves(articleId);
       for (const batch of pending) {
-        const response = await sendAutosave(articleId, baseRevisionId, leaseId.current, batch);
+        const response = await sendAutosave(articleId, revisionId.current, leaseId.current, batch);
         if (!response.ok) throw new Error(await response.text());
         await acknowledgeAutosave(batch.updateId);
       }
@@ -155,10 +159,11 @@ export function ArticleCanvas({
     });
     return () => {
       active = false;
+      if (commitTimer.current) window.clearTimeout(commitTimer.current);
       leaseOwned.current = false;
       editor.setEditable(false);
     };
-  }, [articleId, baseRevisionId, editor]);
+  }, [articleId, editor]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!leaseOwned.current) return;
@@ -191,6 +196,32 @@ export function ArticleCanvas({
       <EditorContent className="article-canvas" editor={editor} />
     </section>
   );
+
+  function scheduleDraftCommit(serverSequence: number): void {
+    if (commitTimer.current) window.clearTimeout(commitTimer.current);
+    commitTimer.current = window.setTimeout(() => {
+      chain.current = chain.current
+        .then(async () => {
+          if (!leaseOwned.current) return;
+          const response = await authenticatedFetch(
+            `${apiUrl}/articles/${articleId}/draft/commit`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                writerLeaseId: leaseId.current,
+                expectedServerSequence: serverSequence,
+              }),
+            },
+          );
+          if (!response.ok) throw new Error(await response.text());
+          const committed = (await response.json()) as { readonly revisionId: string };
+          revisionId.current = committed.revisionId;
+          setSaveState('saved');
+        })
+        .catch(() => setSaveState('offline'));
+    }, 1_200);
+  }
 }
 
 function writerLeaseRequest(articleId: string, leaseId: string, action: string): Promise<Response> {

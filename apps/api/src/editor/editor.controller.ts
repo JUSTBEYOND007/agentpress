@@ -31,6 +31,10 @@ type AutosaveBody = {
   readonly steps?: unknown;
 };
 type ProposalBody = { readonly decisions?: unknown };
+type CommitDraftBody = {
+  readonly writerLeaseId?: unknown;
+  readonly expectedServerSequence?: unknown;
+};
 
 @Controller()
 export class EditorController {
@@ -101,6 +105,32 @@ export class EditorController {
     const draft = await this.autosave.recover(articleId, user.id);
     if (!draft) throw new NotFoundException('Draft does not exist');
     return draft;
+  }
+  @Post('articles/:articleId/draft/commit')
+  @HttpCode(200)
+  public async commitDraft(
+    @Param('articleId') articleId: string,
+    @Body() body: CommitDraftBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (
+      typeof body.writerLeaseId !== 'string' ||
+      typeof body.expectedServerSequence !== 'number' ||
+      !Number.isSafeInteger(body.expectedServerSequence) ||
+      body.expectedServerSequence < 1
+    )
+      throw new BadRequestException('Invalid draft commit request');
+    await this.authorization.assertArticleAccess(articleId, user.id);
+    try {
+      return await this.autosave.commit({
+        articleId,
+        userId: user.id,
+        writerLeaseId: body.writerLeaseId,
+        expectedServerSequence: body.expectedServerSequence,
+      });
+    } catch (error) {
+      throw mapEditorError(error);
+    }
   }
   @Post('edit-proposals/:proposalId/decisions')
   @HttpCode(200)

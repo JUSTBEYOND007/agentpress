@@ -16,6 +16,7 @@ import {
   conversationMessages,
   conversations,
   editProposals,
+  outboxMessages,
   rootRequests,
   workspaces,
 } from '@agentpress/database';
@@ -246,5 +247,69 @@ describeWithInfra('editor persistence and recovery', () => {
       .where(eq(articleRevisions.articleId, ids.article));
     expect(revisions).toHaveLength(2);
     expect(revisions[1]?.source).toBe('proposal');
+  });
+
+  it('atomically promotes an acknowledged draft and schedules its index update', async () => {
+    const articleId = randomUUID();
+    const revisionId = randomUUID();
+    const leaseId = randomUUID();
+    await connection.db.insert(articles).values({
+      id: articleId,
+      workspaceId: ids.workspace,
+      title: 'Autosave promotion',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: revisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash: hashDocument(document),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: revisionId })
+      .where(eq(articles.id, articleId));
+    const leases = new RedisWriterLease(redis, 10_000);
+    expect(await leases.acquire(articleId, ids.user, leaseId)).toBe(true);
+    const service = new AutosaveService(connection.db, leases);
+    const acknowledgement = await service.save({
+      updateId: randomUUID(),
+      articleId,
+      userId: ids.user,
+      writerLeaseId: leaseId,
+      baseRevisionId: revisionId,
+      schemaVersion: 1,
+      steps: [
+        {
+          stepType: 'replace',
+          from: 1,
+          to: 4,
+          slice: { content: [{ type: 'text', text: 'Committed' }] },
+        },
+      ],
+    });
+    const committed = await service.commit({
+      articleId,
+      userId: ids.user,
+      writerLeaseId: leaseId,
+      expectedServerSequence: acknowledgement.serverSequence,
+    });
+    expect(committed).toMatchObject({
+      articleId,
+      revisionNumber: 2,
+      documentHash: acknowledgement.documentHash,
+      committedServerSequence: acknowledgement.serverSequence,
+    });
+    expect(await service.recover(articleId, ids.user)).toBeUndefined();
+    const [article] = await connection.db.select().from(articles).where(eq(articles.id, articleId));
+    expect(article).toMatchObject({ currentRevisionId: committed.revisionId, version: 2 });
+    const indexed = await connection.db
+      .select()
+      .from(outboxMessages)
+      .where(eq(outboxMessages.aggregateId, committed.revisionId));
+    expect(indexed[0]?.topic).toBe('knowledge.article.index.commands');
   });
 });

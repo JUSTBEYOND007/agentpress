@@ -3,11 +3,20 @@ import { applyAutosaveSteps, hashDocument, type ArticleDocument } from '@agentpr
 import {
   articleDrafts,
   articleRevisions,
+  articles,
   autosaveBatches,
+  enqueueOutboxMessage,
   type AgentPressDatabase,
 } from '@agentpress/database';
+import { ARTICLE_INDEX_COMMAND_TOPIC } from '@agentpress/knowledge-retrieval';
 import { and, eq } from 'drizzle-orm';
-import type { AutosaveAck, AutosaveBatch, WriterLease } from './contracts.js';
+import type {
+  AutosaveAck,
+  AutosaveBatch,
+  CommitDraftInput,
+  CommitDraftResult,
+  WriterLease,
+} from './contracts.js';
 import { EditorApplicationError } from './contracts.js';
 
 export class AutosaveService {
@@ -120,6 +129,74 @@ export class AutosaveService {
   }
   public async recover(articleId: string, userId: string) {
     return findDraft(this.database, articleId, userId);
+  }
+
+  public async commit(input: CommitDraftInput): Promise<CommitDraftResult> {
+    if (!(await this.lease.owns(input.articleId, input.userId, input.writerLeaseId)))
+      throw new EditorApplicationError(
+        'lease_lost',
+        'Writer lease is no longer owned by this client',
+      );
+    return this.database.transaction(async (transaction) => {
+      const articleRows = await transaction
+        .select()
+        .from(articles)
+        .where(eq(articles.id, input.articleId))
+        .limit(1)
+        .for('update');
+      const article = articleRows[0];
+      if (!article?.currentRevisionId)
+        throw new EditorApplicationError('article_not_found', 'Article does not exist');
+      const draft = await findDraft(transaction, input.articleId, input.userId, true);
+      if (!draft) throw new EditorApplicationError('draft_not_found', 'Draft does not exist');
+      if (draft.writerLeaseId !== input.writerLeaseId)
+        throw new EditorApplicationError('lease_lost', 'Draft belongs to another writer lease');
+      if (draft.serverSequence !== input.expectedServerSequence)
+        throw new EditorApplicationError(
+          'draft_sequence_mismatch',
+          'Draft changed before it could be committed',
+        );
+      if (draft.baseRevisionId !== article.currentRevisionId)
+        throw new EditorApplicationError(
+          'base_revision_mismatch',
+          'Article changed after this draft was created',
+        );
+
+      const revisionId = this.createId();
+      const revisionNumber = article.version + 1;
+      await transaction.insert(articleRevisions).values({
+        id: revisionId,
+        articleId: input.articleId,
+        revisionNumber,
+        schemaVersion: draft.schemaVersion,
+        document: draft.document,
+        documentHash: draft.documentHash,
+        source: 'autosave',
+        createdByUserId: input.userId,
+      });
+      await transaction
+        .update(articles)
+        .set({ currentRevisionId: revisionId, version: revisionNumber, updatedAt: new Date() })
+        .where(eq(articles.id, input.articleId));
+      await transaction.delete(articleDrafts).where(eq(articleDrafts.id, draft.id));
+      const indexMessageId = this.createId();
+      await enqueueOutboxMessage(transaction, {
+        id: indexMessageId,
+        aggregateType: 'ArticleRevision',
+        aggregateId: revisionId,
+        topic: ARTICLE_INDEX_COMMAND_TOPIC,
+        messageKey: input.articleId,
+        payload: { command: 'article.index', messageId: indexMessageId, revisionId },
+        occurredAt: new Date(),
+      });
+      return {
+        articleId: input.articleId,
+        revisionId,
+        revisionNumber,
+        documentHash: draft.documentHash,
+        committedServerSequence: draft.serverSequence,
+      };
+    });
   }
 }
 
