@@ -26,6 +26,7 @@ import { RedisRunEventBus } from './redis-run-event-bus.js';
 
 type CreateRunBody = {
   readonly branchId?: unknown;
+  readonly userId?: unknown;
   readonly prompt?: unknown;
 };
 
@@ -68,14 +69,19 @@ export class AgentController {
     if (!idempotencyKey || idempotencyKey.length > 160) {
       throw new BadRequestException('A valid Idempotency-Key header is required');
     }
-    if (typeof body.branchId !== 'string' || typeof body.prompt !== 'string') {
-      throw new BadRequestException('branchId and prompt must be strings');
+    if (
+      typeof body.branchId !== 'string' ||
+      typeof body.userId !== 'string' ||
+      typeof body.prompt !== 'string'
+    ) {
+      throw new BadRequestException('branchId, userId and prompt must be strings');
     }
 
     try {
       return await this.runs.create({
         conversationId,
         branchId: body.branchId,
+        userId: body.userId,
         prompt: body.prompt,
         idempotencyKey,
       });

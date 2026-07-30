@@ -20,6 +20,7 @@ import {
   runDirectives,
   runEvents,
   toolCalls,
+  workspaceMembers,
 } from '@agentpress/database';
 import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
@@ -34,6 +35,7 @@ import {
   type EnqueueRunDirectiveResult,
   type RequestRunCancellationResult,
   type RunEventPublisher,
+  type RuntimeToolFactory,
 } from './contracts.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import { classifyRun } from './run-classifier.js';
@@ -50,6 +52,7 @@ type DirectRunServiceOptions = {
   readonly runtimeFactory: AgentRuntimeFactory;
   readonly publisher: RunEventPublisher;
   readonly systemPrompt: string;
+  readonly runtimeToolFactory?: RuntimeToolFactory;
   readonly now?: () => Date;
   readonly createId?: () => string;
 };
@@ -130,6 +133,22 @@ export class DirectRunService {
           'Conversation does not own the requested branch',
         );
       }
+      const membership = await transaction
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(
+          and(
+            eq(workspaceMembers.workspaceId, branch.workspaceId),
+            eq(workspaceMembers.userId, input.userId),
+          ),
+        )
+        .limit(1);
+      if (!membership[0]) {
+        throw new AgentApplicationError(
+          'unauthorized_user',
+          'User is not a member of the conversation workspace',
+        );
+      }
 
       await transaction.execute(
         sql`select id from ${conversationBranches} where id = ${input.branchId} for update`,
@@ -164,6 +183,7 @@ export class DirectRunService {
         id: rootRequestId,
         branchId: input.branchId,
         messageId,
+        requestedByUserId: input.userId,
         idempotencyKey: input.idempotencyKey,
         createdAt: now,
       });
@@ -270,6 +290,9 @@ export class DirectRunService {
           systemPrompt: this.options.systemPrompt,
           history: context.history,
           prompt: context.prompt,
+          ...(this.options.runtimeToolFactory
+            ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
+            : {}),
         },
         (event) => this.publishRuntimeEvent(runId, event),
         signal,
@@ -733,9 +756,11 @@ export class DirectRunService {
           content: runDirectives.content,
           branchId: agentRuns.branchId,
           conversationId: conversations.id,
+          requestedByUserId: sql<string | null>`${rootRequests.requestedByUserId}`,
         })
         .from(runDirectives)
         .innerJoin(agentRuns, eq(agentRuns.id, runDirectives.runId))
+        .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
         .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
         .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
         .where(
@@ -761,10 +786,17 @@ export class DirectRunService {
     if (!claimed) {
       return;
     }
+    if (!claimed.requestedByUserId) {
+      throw new AgentApplicationError(
+        'unauthorized_user',
+        'Follow-up Run does not have a bound requesting user',
+      );
+    }
     try {
       await this.create({
         conversationId: claimed.conversationId,
         branchId: claimed.branchId,
+        userId: claimed.requestedByUserId,
         prompt: claimed.content,
         idempotencyKey: `follow-up:${claimed.id}`,
       });

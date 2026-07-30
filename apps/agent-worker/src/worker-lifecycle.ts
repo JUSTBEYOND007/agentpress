@@ -23,6 +23,7 @@ import { Redis } from 'ioredis';
 import { Kafka, Partitioners } from 'kafkajs';
 
 import { RedisRunLeaseManager } from './redis-run-lease.js';
+import { createBuiltInToolRuntime } from './built-in-tool-runtime.js';
 
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
 const CONSUMER_GROUP = 'agentpress-agent-worker-v1';
@@ -60,9 +61,14 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
   });
   private readonly activeRuns = new Map<string, AbortController>();
   private readonly runLeases = new RedisRunLeaseManager(this.redisPublisher);
+  private readonly builtInTools = createBuiltInToolRuntime(
+    this.database.db,
+    this.createEventPublisher(),
+  );
   private readonly runService = new DirectRunService({
     database: this.database.db,
     publisher: this.createEventPublisher(),
+    runtimeToolFactory: this.builtInTools.bridge,
     runtimeFactory: {
       create: () => {
         if (!this.environment.arkModelPro) {
@@ -76,7 +82,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       },
     },
     systemPrompt:
-      'You are AgentPress, a precise long-form writing agent. Preserve evidence and state uncertainty.',
+      'You are AgentPress, a precise long-form writing agent. Use available research tools when facts need evidence. Preserve citations and state uncertainty.',
   });
   private outboxTimer: NodeJS.Timeout | undefined;
   private dispatching = false;
@@ -144,6 +150,9 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       this.consumer.disconnect(),
       this.producer.disconnect(),
       this.redisSubscriber.unsubscribe(AGENT_RUN_CANCEL_CHANNEL),
+      ...(['web_research', 'workspace_knowledge', 'licensed_media'] as const).map((serverId) =>
+        this.builtInTools.manager.stop(serverId),
+      ),
     ]);
     this.redisSubscriber.disconnect();
     if (this.redisPublisher.status === 'wait') {

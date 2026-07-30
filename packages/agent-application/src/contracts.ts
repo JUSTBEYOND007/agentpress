@@ -1,4 +1,4 @@
-import type { AgentRuntime, RuntimeEvent } from '@agentpress/agent-runtime';
+import type { AgentRuntime, RuntimeEvent, RuntimeTool } from '@agentpress/agent-runtime';
 
 export const AGENT_RUN_COMMAND_TOPIC = 'agent.run.commands';
 export const AGENT_RUN_CANCEL_CHANNEL = 'agentpress:run:cancel';
@@ -32,9 +32,14 @@ export type AgentRuntimeFactory = {
   create(): AgentRuntime;
 };
 
+export type RuntimeToolFactory = {
+  createForRun(runId: string): Promise<readonly RuntimeTool[]>;
+};
+
 export type CreateDirectRunInput = {
   readonly conversationId: string;
   readonly branchId: string;
+  readonly userId: string;
   readonly prompt: string;
   readonly idempotencyKey: string;
 };
@@ -65,6 +70,7 @@ export class AgentApplicationError extends Error {
       | 'branch_not_found'
       | 'invalid_prompt'
       | 'invalid_directive'
+      | 'unauthorized_user'
       | 'run_not_found',
     message: string,
   ) {

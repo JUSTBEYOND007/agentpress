@@ -1,3 +1,5 @@
+import type { TSchema } from 'typebox';
+
 export type RuntimeUsage = {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -49,6 +51,23 @@ export type RuntimeRequest = {
   readonly systemPrompt: string;
   readonly history: readonly RuntimeMessage[];
   readonly prompt: string;
+  readonly tools?: readonly RuntimeTool[];
+};
+
+export type RuntimeTool = {
+  readonly name: string;
+  readonly label: string;
+  readonly description: string;
+  readonly parameters: TSchema;
+  readonly executionMode?: 'sequential' | 'parallel';
+  readonly execute: (
+    arguments_: Readonly<Record<string, unknown>>,
+    context: {
+      readonly runId: string;
+      readonly providerToolCallId: string;
+      readonly signal?: AbortSignal;
+    },
+  ) => Promise<unknown>;
 };
 
 export type RuntimeResult =

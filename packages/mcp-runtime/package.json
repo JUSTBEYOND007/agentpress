@@ -23,6 +23,7 @@
   "dependencies": {
     "@agentpress/tool-runtime": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",
-    "@sinclair/typebox": "catalog:"
+    "@sinclair/typebox": "catalog:",
+    "zod": "catalog:"
   }
 }

@@ -1,0 +1,2 @@
+ALTER TABLE "root_requests" ADD COLUMN "requested_by_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "root_requests" ADD CONSTRAINT "root_requests_requested_by_user_id_app_users_id_fk" FOREIGN KEY ("requested_by_user_id") REFERENCES "public"."app_users"("id") ON DELETE restrict ON UPDATE no action;

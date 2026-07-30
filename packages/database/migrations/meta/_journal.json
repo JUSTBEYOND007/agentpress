@@ -50,6 +50,13 @@
       "when": 1785412988518,
       "tag": "0006_windy_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785414902229,
+      "tag": "0007_nasty_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

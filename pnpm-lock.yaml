@@ -117,6 +117,9 @@ catalogs:
     yaml:
       specifier: 2.8.2
       version: 2.8.2
+    zod:
+      specifier: 4.4.3
+      version: 4.4.3
   types:
     '@types/pg':
       specifier: 8.15.6
@@ -179,15 +182,24 @@ importers:
       '@agentpress/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@agentpress/mcp-runtime':
+        specifier: workspace:*
+        version: link:../../packages/mcp-runtime
       '@agentpress/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@agentpress/tool-runtime':
+        specifier: workspace:*
+        version: link:../../packages/tool-runtime
       '@nestjs/common':
         specifier: 'catalog:'
         version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core':
         specifier: 'catalog:'
         version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)
       ioredis:
         specifier: 'catalog:'
         version: 5.8.2
@@ -218,6 +230,9 @@ importers:
       '@agentpress/editor-application':
         specifier: workspace:*
         version: link:../../packages/editor-application
+      '@agentpress/mcp-runtime':
+        specifier: workspace:*
+        version: link:../../packages/mcp-runtime
       '@agentpress/media-application':
         specifier: workspace:*
         version: link:../../packages/media-application
@@ -378,6 +393,9 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 0.82.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.1)(zod@4.4.3)
+      typebox:
+        specifier: 1.1.38
+        version: 1.1.38
 
   packages/config:
     dependencies:
@@ -478,6 +496,9 @@ importers:
       '@sinclair/typebox':
         specifier: 'catalog:'
         version: 0.34.41
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   packages/media-application:
     dependencies:

@@ -295,6 +295,9 @@ export const rootRequests = pgTable(
     messageId: uuid('message_id')
       .notNull()
       .references(() => conversationMessages.id, { onDelete: 'restrict' }),
+    requestedByUserId: uuid('requested_by_user_id').references(() => appUsers.id, {
+      onDelete: 'restrict',
+    }),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
     createdAt,
   },

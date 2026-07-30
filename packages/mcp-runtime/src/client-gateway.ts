@@ -8,11 +8,18 @@ export class McpClientGateway implements BuiltInMcpGateway {
     const client = await this.manager.getClient(input.serverId);
     try {
       // Tool calls are never replayed here: the durable AgentPress ToolCall ledger owns retries.
-      return await client.callTool(
-        { name: input.toolName, arguments: input.arguments },
+      const result = await client.callTool(
+        {
+          name: input.toolName,
+          arguments: { ...input.arguments, _agentpressRunId: input.context.runId },
+        },
         undefined,
         { signal: input.context.signal },
       );
+      const structured = result.structuredContent;
+      return typeof structured === 'object' && structured !== null && 'value' in structured
+        ? structured.value
+        : result;
     } catch (error) {
       if (isConnectionFailure(error)) await this.manager.markDegraded(input.serverId);
       throw error;

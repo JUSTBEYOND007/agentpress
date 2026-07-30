@@ -11,6 +11,39 @@ import { AgentController } from '../src/agent/agent.controller.js';
 import type { RedisRunEventBus } from '../src/agent/redis-run-event-bus.js';
 
 describe('AgentController SSE replay', () => {
+  it('requires caller identity and delegates Run creation exactly', async () => {
+    const created: unknown[] = [];
+    const runs = {
+      create(input: unknown) {
+        created.push(input);
+        return Promise.resolve({ runId: 'run-1', status: 'queued' });
+      },
+    } as unknown as DirectRunService;
+    const controller = new AgentController(runs, {} as RedisRunEventBus);
+    await expect(
+      controller.createRun('conversation-1', 'request-1', {
+        branchId: 'branch-1',
+        userId: 'user-1',
+        prompt: '研究 Kafka',
+      }),
+    ).resolves.toMatchObject({ status: 'queued' });
+    expect(created).toEqual([
+      {
+        conversationId: 'conversation-1',
+        branchId: 'branch-1',
+        userId: 'user-1',
+        prompt: '研究 Kafka',
+        idempotencyKey: 'request-1',
+      },
+    ]);
+    await expect(
+      controller.createRun('conversation-1', 'request-2', {
+        branchId: 'branch-1',
+        prompt: 'missing identity',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('buffers live events until durable replay is emitted in sequence order', async () => {
     const replay = [durableEvent(1), durableEvent(2)];
     const live = durableEvent(3);

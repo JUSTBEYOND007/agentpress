@@ -12,6 +12,7 @@ import {
   conversations,
   rootRequests,
   toolCalls,
+  workspaceMembers,
   workspaces,
 } from '@agentpress/database';
 import { ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
@@ -20,7 +21,12 @@ import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DirectRunService, ToolCallService, type LiveRunEvent } from '../src/index.js';
+import {
+  DirectRunService,
+  PersistentToolBridge,
+  ToolCallService,
+  type LiveRunEvent,
+} from '../src/index.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -87,6 +93,7 @@ describeWithDatabase('Tool Call application flow', () => {
       displayName: 'Tool User',
     });
     await connection.db.insert(workspaces).values({ id: workspaceId, name: 'Tool Workspace' });
+    await connection.db.insert(workspaceMembers).values({ workspaceId, userId, role: 'owner' });
     await connection.db.insert(conversations).values({
       id: conversationId,
       workspaceId,
@@ -121,6 +128,25 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(checkpoints)
       .where(eq(checkpoints.runId, runId));
     expect(saved).toEqual([{ reason: 'tool_settled' }]);
+  });
+
+  it('bridges a Pi Runtime tool through the persistent ledger', async () => {
+    const runId = await createRunningRun();
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    });
+    const tools = await bridge.createForRun(runId);
+    const search = tools.find((tool) => tool.label === 'workspace.search');
+    await expect(
+      search?.execute({ query: 'durable tool' }, { runId, providerToolCallId: randomUUID() }),
+    ).resolves.toEqual({ result: 'durable tool' });
+    const rows = await connection.db
+      .select({ status: toolCalls.status })
+      .from(toolCalls)
+      .where(eq(toolCalls.runId, runId));
+    expect(rows).toEqual([{ status: 'succeeded' }]);
   });
 
   it('rejects approval if exact persisted arguments no longer match', async () => {
@@ -253,6 +279,7 @@ describeWithDatabase('Tool Call application flow', () => {
       id: requestId,
       branchId,
       messageId,
+      requestedByUserId: userId,
       idempotencyKey: randomUUID(),
     });
     await connection.db.insert(agentRuns).values({

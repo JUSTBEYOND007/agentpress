@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 
 import { createArkBackend, PiRuntimeAdapter, type RuntimeEvent } from '../src/index.js';
 
@@ -73,5 +75,52 @@ describe('PiRuntimeAdapter', () => {
     );
 
     await expect(execution).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
+  it('bridges AgentPress RuntimeTool definitions into the official Pi tool loop', async () => {
+    const calls: {
+      readonly arguments_: Readonly<Record<string, unknown>>;
+      readonly context: {
+        readonly runId: string;
+        readonly providerToolCallId: string;
+        readonly signal?: AbortSignal;
+      };
+    }[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('workspace_search', { query: 'Kafka' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxText('已找到工作区证据。')]),
+      ],
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'run-tool',
+        systemPrompt: 'Use tools when evidence is required.',
+        history: [],
+        prompt: '查找 Kafka 资料',
+        tools: [
+          {
+            name: 'workspace_search',
+            label: 'Workspace Search',
+            description: 'Search workspace evidence',
+            parameters: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+            execute: (arguments_, context) => {
+              calls.push({ arguments_, context });
+              return Promise.resolve({ evidence: ['Kafka architecture'] });
+            },
+          },
+        ],
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.messages.at(-1)).toMatchObject({ content: '已找到工作区证据。' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.arguments_).toEqual({ query: 'Kafka' });
+    expect(calls[0]?.context.runId).toBe('run-tool');
+    expect(typeof calls[0]?.context.providerToolCallId).toBe('string');
   });
 });

@@ -23,6 +23,7 @@ export class ToolCallApplicationError extends Error {
       | 'approval_not_found'
       | 'approval_expired'
       | 'approval_mismatch'
+      | 'approval_denied'
       | 'invalid_tool_state'
       | 'unauthorized_tool',
     message: string,
@@ -376,6 +377,107 @@ export class ToolCallService {
     await this.options.publisher.publish({ durable: true, event: settled });
     return { toolCallId, status, ...(status === 'succeeded' ? { output } : {}) };
   }
+
+  public async waitUntilExecutable(
+    toolCallId: string,
+    signal?: AbortSignal,
+    pollIntervalMs = 200,
+  ): Promise<'approved' | 'denied' | 'expired'> {
+    if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 25 || pollIntervalMs > 5_000) {
+      throw new RangeError('Tool approval poll interval must be between 25 and 5000 ms');
+    }
+    for (;;) {
+      if (signal?.aborted) throw signal.reason ?? new Error('Tool approval wait was aborted');
+      const rows = await this.options.database
+        .select({ status: toolCalls.status, expiresAt: approvals.expiresAt })
+        .from(toolCalls)
+        .leftJoin(approvals, eq(approvals.toolCallId, toolCalls.id))
+        .where(eq(toolCalls.id, toolCallId))
+        .limit(1);
+      const call = rows[0];
+      if (!call) {
+        throw new ToolCallApplicationError(
+          'tool_call_not_found',
+          `Tool Call ${toolCallId} not found`,
+        );
+      }
+      if (call.status === 'approved' || call.status === 'proposed') return 'approved';
+      if (call.status === 'denied') return 'denied';
+      if (call.status === 'expired') return 'expired';
+      if (call.status !== 'awaiting_approval') {
+        throw new ToolCallApplicationError('invalid_tool_state', `Tool Call is ${call.status}`);
+      }
+      if (call.expiresAt && call.expiresAt.getTime() <= this.now().getTime()) {
+        await this.expirePendingApproval(toolCallId);
+        return 'expired';
+      }
+      await abortableDelay(pollIntervalMs, signal);
+    }
+  }
+
+  private async expirePendingApproval(toolCallId: string): Promise<void> {
+    const persisted = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select id from ${toolCalls} where id = ${toolCallId} for update`,
+      );
+      const rows = await transaction
+        .select({ runId: toolCalls.runId, status: toolCalls.status, approvalId: approvals.id })
+        .from(toolCalls)
+        .innerJoin(approvals, eq(approvals.toolCallId, toolCalls.id))
+        .where(eq(toolCalls.id, toolCallId))
+        .limit(1);
+      const call = rows[0];
+      if (call?.status !== 'awaiting_approval') return undefined;
+      const now = this.now();
+      await transaction
+        .update(approvals)
+        .set({ decision: 'expired', decidedAt: now })
+        .where(eq(approvals.id, call.approvalId));
+      await transaction
+        .update(toolCalls)
+        .set({
+          status: 'expired',
+          settledAt: now,
+          updatedAt: now,
+          version: sql`${toolCalls.version} + 1`,
+        })
+        .where(eq(toolCalls.id, toolCallId));
+      await transaction
+        .update(agentRuns)
+        .set({ status: 'running', updatedAt: now, version: sql`${agentRuns.version} + 1` })
+        .where(and(eq(agentRuns.id, call.runId), eq(agentRuns.status, 'waiting_for_approval')));
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId: call.runId,
+        eventType: 'tool.expired',
+        payload: { toolCallId, approvalId: call.approvalId },
+      });
+      return toDurableEvent(event);
+    });
+    if (persisted) await this.options.publisher.publish({ durable: true, event: persisted });
+  }
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal.reason));
+      return;
+    }
+    const timer = setTimeout(resolve, milliseconds);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(abortError(signal.reason));
+      },
+      { once: true },
+    );
+  });
+}
+
+function abortError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error('Operation aborted', { cause: reason });
 }
 
 function toDurableEvent(event: {

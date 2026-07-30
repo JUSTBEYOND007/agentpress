@@ -10,6 +10,7 @@ import {
   type ImageGenerator,
 } from '@agentpress/media-application';
 import { PublicationService } from '@agentpress/publication-application';
+import { registerBuiltInMcpTools } from '@agentpress/mcp-runtime';
 import type { OnApplicationShutdown, Provider } from '@nestjs/common';
 import { ToolRegistry } from '@agentpress/tool-runtime';
 import { Redis } from 'ioredis';
@@ -32,6 +33,10 @@ const imageGenerator: ImageGenerator =
     : {
         generate: () => Promise.reject(new Error('ARK_API_KEY and ARK_IMAGE_MODEL are required')),
       };
+const toolRegistry = new ToolRegistry();
+registerBuiltInMcpTools(toolRegistry, {
+  call: () => Promise.reject(new Error('Tool execution belongs to the Agent Worker')),
+});
 export const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
 
 class AgentResources implements OnApplicationShutdown {
@@ -45,7 +50,7 @@ class AgentResources implements OnApplicationShutdown {
 export const agentProviders: Provider[] = [
   {
     provide: ToolRegistry,
-    useValue: new ToolRegistry(),
+    useValue: toolRegistry,
   },
   {
     provide: DATABASE_CONNECTION,

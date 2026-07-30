@@ -222,7 +222,7 @@ export function useAgentPressAssistantRuntime(
         setRun((current) => ({ ...current, status: '排队中', tasks: [], tools: [] }));
         const created = await request(
           `${apiUrl}/conversations/${conversationId}/runs`,
-          { branchId, prompt },
+          { branchId, userId, prompt },
           true,
         );
         const nextRunId = stringValue(created.runId);
@@ -242,7 +242,7 @@ export function useAgentPressAssistantRuntime(
         ]);
       }
     },
-    [branchId, conversationId, run.status, runId, sendMode],
+    [branchId, conversationId, run.status, runId, sendMode, userId],
   );
 
   const onCancel = useCallback(async () => {

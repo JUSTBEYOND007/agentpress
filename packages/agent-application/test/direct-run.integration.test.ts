@@ -17,6 +17,7 @@ import {
   runDirectives,
   runEvents,
   taskResults,
+  workspaceMembers,
   workspaces,
 } from '@agentpress/database';
 import { eq, inArray } from 'drizzle-orm';
@@ -66,6 +67,11 @@ describeWithDatabase('Direct Run application flow', () => {
       id: ids.workspace,
       name: 'Direct Run Workspace',
     });
+    await connection.db.insert(workspaceMembers).values({
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      role: 'owner',
+    });
     await connection.db.insert(conversations).values({
       id: ids.conversation,
       workspaceId: ids.workspace,
@@ -84,6 +90,7 @@ describeWithDatabase('Direct Run application flow', () => {
   it('deduplicates creation and restores stable history for the next turn', async () => {
     const firstInput = {
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId: ids.branch,
       prompt: '第一问',
       idempotencyKey: randomUUID(),
@@ -97,6 +104,7 @@ describeWithDatabase('Direct Run application flow', () => {
 
     const second = await service.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId: ids.branch,
       prompt: '第二问',
       idempotencyKey: randomUUID(),
@@ -151,6 +159,7 @@ describeWithDatabase('Direct Run application flow', () => {
     serviceReference.current = cancellationService;
     const run = await cancellationService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId: cancellationBranch,
       prompt: '开始取消测试',
       idempotencyKey: randomUUID(),
@@ -195,6 +204,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const run = await plannedService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId: plannedBranch,
       prompt: '联网搜索最新资料并写一篇图文文章',
       idempotencyKey: randomUUID(),
@@ -252,6 +262,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const run = await service.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId,
       prompt: '你好',
       idempotencyKey: randomUUID(),
@@ -291,6 +302,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const run = await requiredFailureService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId,
       prompt: '联网搜索资料并写一篇文章',
       idempotencyKey: randomUUID(),
@@ -330,6 +342,7 @@ describeWithDatabase('Direct Run application flow', () => {
     serviceReference.current = cancellationService;
     const run = await cancellationService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId,
       prompt: '联网搜索资料并写一篇图文文章',
       idempotencyKey: randomUUID(),
@@ -365,6 +378,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const run = await recoveryService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId,
       prompt: '联网搜索资料并写一篇图文文章',
       idempotencyKey: randomUUID(),
@@ -428,6 +442,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const run = await degradedService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId,
       prompt: '写一篇带配图的文章',
       idempotencyKey: randomUUID(),
@@ -465,6 +480,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const run = await followUpService.create({
       conversationId: ids.conversation,
+      userId: ids.user,
       branchId,
       prompt: '你好',
       idempotencyKey: randomUUID(),

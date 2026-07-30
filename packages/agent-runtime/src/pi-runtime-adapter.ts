@@ -1,4 +1,9 @@
-import { Agent, type AgentEvent, type AgentMessage } from '@earendil-works/pi-agent-core';
+import {
+  Agent,
+  type AgentEvent,
+  type AgentMessage,
+  type AgentTool,
+} from '@earendil-works/pi-agent-core';
 import {
   contentText,
   createModels,
@@ -22,6 +27,7 @@ import type {
   RuntimeMessage,
   RuntimeRequest,
   RuntimeResult,
+  RuntimeTool,
   RuntimeUsage,
 } from './contracts.js';
 
@@ -48,7 +54,7 @@ class ExecutionState {
 }
 
 export type FauxRuntimeConfig = {
-  readonly responses: readonly string[];
+  readonly responses: readonly (string | AssistantMessage)[];
   readonly tokensPerSecond?: number;
 };
 
@@ -63,7 +69,11 @@ export class PiRuntimeAdapter implements AgentRuntime {
     const faux = fauxProvider({
       ...(config.tokensPerSecond === undefined ? {} : { tokensPerSecond: config.tokensPerSecond }),
     });
-    faux.setResponses(config.responses.map((response) => fauxAssistantMessage(response)));
+    faux.setResponses(
+      config.responses.map((response) =>
+        typeof response === 'string' ? fauxAssistantMessage(response) : response,
+      ),
+    );
     const models = createModels();
     models.setProvider(faux.provider);
 
@@ -81,7 +91,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
         systemPrompt: request.systemPrompt,
         model: this.backend.model,
         messages: request.history.map(toPiMessage),
-        tools: [],
+        tools: request.tools?.map((tool) => toPiTool(tool, request.runId)) ?? [],
         thinkingLevel: 'off',
       },
       streamFn: this.backend.models.streamSimple.bind(this.backend.models),
@@ -153,6 +163,33 @@ export class PiRuntimeAdapter implements AgentRuntime {
       unsubscribe();
     }
   }
+}
+
+function toPiTool(tool: RuntimeTool, runId: string): AgentTool {
+  return {
+    name: tool.name,
+    label: tool.label,
+    description: tool.description,
+    parameters: tool.parameters,
+    ...(tool.executionMode ? { executionMode: tool.executionMode } : {}),
+    execute: async (providerToolCallId, parameters, signal) => {
+      const output = await tool.execute(parameters as Readonly<Record<string, unknown>>, {
+        runId,
+        providerToolCallId,
+        ...(signal ? { signal } : {}),
+      });
+      return {
+        content: [{ type: 'text', text: serializeToolOutput(output) }],
+        details: output,
+      };
+    },
+  };
+}
+
+function serializeToolOutput(output: unknown): string {
+  if (typeof output === 'string') return output;
+  if (output === undefined) return 'null';
+  return JSON.stringify(output);
 }
 
 function normalizeEvent(event: AgentEvent): readonly RuntimeEvent[] {

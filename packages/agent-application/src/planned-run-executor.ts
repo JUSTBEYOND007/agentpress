@@ -23,7 +23,12 @@ import {
 } from '@agentpress/database';
 import { and, eq, inArray, max, sql } from 'drizzle-orm';
 
-import type { AgentRuntimeFactory, DurableRunEvent, RunEventPublisher } from './contracts.js';
+import type {
+  AgentRuntimeFactory,
+  DurableRunEvent,
+  RunEventPublisher,
+  RuntimeToolFactory,
+} from './contracts.js';
 import { classifyRun } from './run-classifier.js';
 
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
@@ -55,6 +60,7 @@ type PlannedRunExecutorOptions = {
   readonly runtimeFactory: AgentRuntimeFactory;
   readonly publisher: RunEventPublisher;
   readonly systemPrompt: string;
+  readonly runtimeToolFactory?: RuntimeToolFactory;
   readonly now?: () => Date;
   readonly createId?: () => string;
 };
@@ -560,6 +566,9 @@ export class PlannedRunExecutor {
               ? [`Upstream accepted artifacts:\n${upstream.join('\n')}`]
               : []),
           ].join('\n\n'),
+          ...(this.options.runtimeToolFactory
+            ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
+            : {}),
         },
         () => undefined,
         signal,
@@ -723,6 +732,9 @@ export class PlannedRunExecutor {
           systemPrompt: this.options.systemPrompt,
           history: [],
           prompt: `Synthesize the final answer for this request:\n${prompt}\n\nAccepted specialist artifacts:\n${artifacts}`,
+          ...(this.options.runtimeToolFactory
+            ? { tools: await this.options.runtimeToolFactory.createForRun(runId) }
+            : {}),
         },
         async (event) => {
           if (event.type === 'content.delta' || event.type === 'message.started') {
