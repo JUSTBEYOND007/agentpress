@@ -2,7 +2,7 @@
 
 import { LogtoProvider, useHandleSignInCallback, useLogto, type LogtoConfig } from '@logto/react';
 import { LogIn } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { bindAccessTokenProvider } from '../lib/authenticated-fetch';
 
@@ -39,15 +39,19 @@ function AuthGate({ children }: { readonly children: ReactNode }): React.JSX.Ele
   // eslint-disable-next-line @typescript-eslint/no-deprecated
   const { isAuthenticated, isLoading, error, signIn, signOut, getAccessToken } = useLogto();
   const [tokenProviderReady, setTokenProviderReady] = useState(false);
+  const getAccessTokenRef = useRef(getAccessToken);
+  getAccessTokenRef.current = getAccessToken;
 
   useEffect(() => {
-    bindAccessTokenProvider(isAuthenticated ? () => getAccessToken(resource) : undefined);
+    bindAccessTokenProvider(
+      isAuthenticated ? () => getAccessTokenRef.current(resource) : undefined,
+    );
     setTokenProviderReady(isAuthenticated);
     return () => {
       bindAccessTokenProvider(undefined);
       setTokenProviderReady(false);
     };
-  }, [getAccessToken, isAuthenticated]);
+  }, [isAuthenticated]);
 
   if (isLoading) return <main className="auth-screen">正在验证身份...</main>;
   if (error) return <main className="auth-screen">身份验证失败：{error.message}</main>;
