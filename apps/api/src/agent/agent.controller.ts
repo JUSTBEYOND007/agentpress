@@ -10,6 +10,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Headers,
   HttpCode,
   Inject,
@@ -62,6 +63,15 @@ export class AgentController {
     @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
     @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
   ) {}
+
+  @Get('conversations/:conversationId/branches/:branchId/messages')
+  public async listMessages(
+    @Param('conversationId') conversationId: string,
+    @Param('branchId') branchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.runs.listMessages(conversationId, branchId, user.id);
+  }
 
   @Post('conversations/:conversationId/runs')
   @HttpCode(202)

@@ -14,6 +14,22 @@ import type { AuthenticatedUser } from '../src/auth/auth.service.js';
 const user: AuthenticatedUser = { id: 'user-1', subject: 'logto-user', displayName: 'User' };
 
 describe('AgentController SSE replay', () => {
+  it('loads stable conversation history for the authenticated member', async () => {
+    const calls: unknown[] = [];
+    const runs = {
+      listMessages(...arguments_: unknown[]) {
+        calls.push(arguments_);
+        return Promise.resolve([{ id: 'message-1', role: 'user', content: '继续写' }]);
+      },
+    } as unknown as DirectRunService;
+    const controller = new AgentController(runs, {} as RedisRunEventBus);
+
+    await expect(controller.listMessages('conversation-1', 'branch-1', user)).resolves.toEqual([
+      { id: 'message-1', role: 'user', content: '继续写' },
+    ]);
+    expect(calls).toEqual([['conversation-1', 'branch-1', 'user-1']]);
+  });
+
   it('requires caller identity and delegates Run creation exactly', async () => {
     const created: unknown[] = [];
     const runs = {

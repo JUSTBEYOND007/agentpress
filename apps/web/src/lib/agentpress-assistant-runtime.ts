@@ -59,6 +59,49 @@ export function useAgentPressAssistantRuntime(
   const streamRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
+    if (!conversationId || !branchId) return;
+    let active = true;
+    void authenticatedFetch(
+      `${apiUrl}/conversations/${conversationId}/branches/${branchId}/messages`,
+    )
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error(`Conversation history failed (${String(response.status)})`);
+        return (await response.json()) as readonly {
+          readonly id: string;
+          readonly role: 'user' | 'assistant';
+          readonly content: string;
+        }[];
+      })
+      .then((history) => {
+        if (!active || history.length === 0) return;
+        setMessages(
+          history.map((message) => ({
+            id: message.id,
+            role: message.role,
+            text: message.content,
+            status: 'complete' as const,
+          })),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setMessages((current) => [
+          ...current,
+          {
+            id: 'history-load-error',
+            role: 'assistant',
+            text: error instanceof Error ? error.message : 'Conversation history failed',
+            status: 'error',
+          },
+        ]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [branchId, conversationId]);
+
+  useEffect(() => {
     let active = true;
     void fetch(`${apiUrl}/health/agent-runtime`, { credentials: 'include' })
       .then(async (response) => {
@@ -72,39 +115,51 @@ export function useAgentPressAssistantRuntime(
           : [];
         if (result.ready === true) {
           setReadiness({ status: 'ready', missing });
-          setMessages([
-            {
-              id: 'workspace-ready',
-              role: 'assistant',
-              text: 'Agent 运行时已就绪。发送消息后将创建真实 Run，并通过 SSE 展示执行状态。',
-              status: 'complete',
-            },
-          ]);
+          setMessages((current) =>
+            current.length > 1
+              ? current
+              : [
+                  {
+                    id: 'workspace-ready',
+                    role: 'assistant',
+                    text: 'Agent 运行时已就绪。发送消息后将创建真实 Run，并通过 SSE 展示执行状态。',
+                    status: 'complete',
+                  },
+                ],
+          );
           return;
         }
         setReadiness({ status: 'unavailable', missing });
         setRun((current) => ({ ...current, status: '未配置' }));
-        setMessages([
-          {
-            id: 'runtime-unavailable',
-            role: 'assistant',
-            text: `Agent 运行时不可用。缺少环境配置：${missing.join('、') || '未知配置'}。`,
-            status: 'error',
-          },
-        ]);
+        setMessages((current) =>
+          current.length > 1
+            ? current
+            : [
+                {
+                  id: 'runtime-unavailable',
+                  role: 'assistant',
+                  text: `Agent 运行时不可用。缺少环境配置：${missing.join('、') || '未知配置'}。`,
+                  status: 'error',
+                },
+              ],
+        );
       })
       .catch((error: unknown) => {
         if (!active) return;
         setReadiness({ status: 'unavailable', missing: [] });
         setRun((current) => ({ ...current, status: '连接失败' }));
-        setMessages([
-          {
-            id: 'runtime-readiness-error',
-            role: 'assistant',
-            text: error instanceof Error ? error.message : '无法检查 Agent 运行时状态。',
-            status: 'error',
-          },
-        ]);
+        setMessages((current) =>
+          current.length > 1
+            ? current
+            : [
+                {
+                  id: 'runtime-readiness-error',
+                  role: 'assistant',
+                  text: error instanceof Error ? error.message : '无法检查 Agent 运行时状态。',
+                  status: 'error',
+                },
+              ],
+        );
       });
     return () => {
       active = false;

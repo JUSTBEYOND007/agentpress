@@ -77,6 +77,42 @@ export class DirectRunService {
     );
   }
 
+  public async listMessages(
+    conversationId: string,
+    branchId: string,
+    userId: string,
+  ): Promise<readonly { id: string; role: 'user' | 'assistant'; content: string }[]> {
+    const rows = await this.options.database
+      .select({
+        id: conversationMessages.id,
+        role: conversationMessages.role,
+        content: conversationMessages.content,
+      })
+      .from(conversationMessages)
+      .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+      .innerJoin(
+        workspaceMembers,
+        and(
+          eq(workspaceMembers.workspaceId, conversations.workspaceId),
+          eq(workspaceMembers.userId, userId),
+        ),
+      )
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversationBranches.id, branchId),
+          eq(conversationMessages.stable, true),
+          inArray(conversationMessages.role, ['user', 'assistant']),
+        ),
+      )
+      .orderBy(asc(conversationMessages.sequence));
+    return rows.flatMap((row) => {
+      const message = decodeRuntimeMessage(row.content);
+      return message ? [{ id: row.id, role: message.role, content: message.content }] : [];
+    });
+  }
+
   public async create(input: CreateDirectRunInput): Promise<CreateDirectRunResult> {
     const prompt = input.prompt.trim();
     if (prompt.length === 0 || prompt.length > 100_000) {
