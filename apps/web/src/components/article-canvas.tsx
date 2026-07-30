@@ -219,7 +219,9 @@ export function ArticleCanvas({
           revisionId.current = committed.revisionId;
           setSaveState('saved');
         })
-        .catch(() => setSaveState('offline'));
+        .catch(() => {
+          setSaveState('offline');
+        });
     }, 1_200);
   }
 }

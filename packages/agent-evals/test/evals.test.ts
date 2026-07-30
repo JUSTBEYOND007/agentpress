@@ -41,8 +41,8 @@ describe('Agent eval suite', () => {
       citationPrecision: 1,
       faithfulness: 0.9,
     });
-    expect(() =>
-      assertEvalGates(scoreEvals(runDeterministicEvals(evalScenarios)), rag),
-    ).not.toThrow();
+    expect(() => {
+      assertEvalGates(scoreEvals(runDeterministicEvals(evalScenarios)), rag);
+    }).not.toThrow();
   });
 });

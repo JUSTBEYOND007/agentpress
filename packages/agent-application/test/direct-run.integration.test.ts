@@ -465,12 +465,8 @@ describeWithDatabase('Direct Run application flow', () => {
       .select({ eventType: runEvents.eventType, payload: runEvents.payload })
       .from(runEvents)
       .where(eq(runEvents.runId, run.runId));
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        eventType: 'review.completed',
-        payload: expect.objectContaining({ rounds: 2, accepted: true }),
-      }),
-    );
+    const reviewEvent = events.find(({ eventType }) => eventType === 'review.completed');
+    expect(reviewEvent?.payload).toMatchObject({ rounds: 2, accepted: true });
   });
 
   it('rejects Steering for a Direct Run', async () => {
