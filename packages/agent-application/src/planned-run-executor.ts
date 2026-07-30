@@ -863,6 +863,24 @@ function parseReview(
   }
 }
 
+export function previewPlan(prompt: string): readonly {
+  readonly owner: SpecialistRole;
+  readonly criticality: TaskCriticality;
+  readonly dependencyCount: number;
+}[] {
+  return buildPlan(
+    prompt,
+    (() => {
+      let sequence = 0;
+      return () => `eval-task-${String(++sequence)}`;
+    })(),
+  ).map((task) => ({
+    owner: task.owner,
+    criticality: task.criticality,
+    dependencyCount: task.dependencyIds.length,
+  }));
+}
+
 function buildPlan(prompt: string, createId: () => string): readonly PlannedTaskSpec[] {
   const classification = classifyRun(prompt);
   const wantsResearch =

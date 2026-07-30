@@ -427,7 +427,11 @@ importers:
         specifier: 'catalog:'
         version: 2.8.2
 
-  packages/agent-evals: {}
+  packages/agent-evals:
+    dependencies:
+      '@agentpress/agent-application':
+        specifier: workspace:*
+        version: link:../agent-application
 
   packages/agent-runtime:
     dependencies:

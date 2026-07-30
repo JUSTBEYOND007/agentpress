@@ -6,7 +6,8 @@ export type RunClassification = {
 const PLANNED_SIGNALS: readonly { readonly reason: string; readonly pattern: RegExp }[] = [
   {
     reason: 'retrieval',
-    pattern: /联网|搜索|检索|查找|最新|实时|资料|来源|引用|research|search|rag/i,
+    pattern:
+      /联网|搜索|检索|查找|最新|实时|资料|来源|引用|研究|核查|证据|声明|research|search|rag/i,
   },
   { reason: 'article_change', pattern: /修改|改写|润色|编辑|重构|文章|长文|write|edit|rewrite/i },
   { reason: 'media', pattern: /图片|配图|插图|图文|封面|image|illustrat/i },
@@ -14,7 +15,7 @@ const PLANNED_SIGNALS: readonly { readonly reason: string; readonly pattern: Reg
   {
     reason: 'delegation',
     pattern:
-      /@(researcher|writer|editor|fact[_ -]?checker|illustrator)|@(研究员|写作者|编辑|事实核查|插画师)/i,
+      /并行|同时|@(researcher|writer|editor|fact[_ -]?checker|illustrator)|@(研究员|写作者|编辑|事实核查|插画师)/i,
   },
 ];
 

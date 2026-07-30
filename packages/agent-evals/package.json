@@ -14,6 +14,9 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@agentpress/agent-application": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint src test",
