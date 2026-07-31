@@ -28,6 +28,7 @@ import type {
   RuntimeRequest,
   RuntimeResult,
   RuntimeTool,
+  RuntimeToolResultMessage,
   RuntimeUsage,
 } from './contracts.js';
 
@@ -171,16 +172,22 @@ function toPiTool(tool: RuntimeTool, runId: string): AgentTool {
     label: tool.label,
     description: tool.description,
     parameters: tool.parameters,
+    ...(tool.constrainedSampling ? { constrainedSampling: tool.constrainedSampling } : {}),
     ...(tool.executionMode ? { executionMode: tool.executionMode } : {}),
-    execute: async (providerToolCallId, parameters, signal) => {
+    execute: async (providerToolCallId, parameters, signal, onUpdate) => {
       const output = await tool.execute(parameters as Readonly<Record<string, unknown>>, {
         runId,
         providerToolCallId,
         ...(signal ? { signal } : {}),
+        ...(onUpdate ? { onUpdate: (details: unknown) => onUpdate({
+          content: [{ type: 'text', text: serializeToolOutput(details) }],
+          details,
+        }) } : {}),
       });
       return {
         content: [{ type: 'text', text: serializeToolOutput(output) }],
         details: output,
+        ...(tool.terminateOnSuccess ? { terminate: true } : {}),
       };
     },
   };
@@ -218,11 +225,42 @@ function normalizeEvent(event: AgentEvent): readonly RuntimeEvent[] {
           ]
         : [{ type: 'message.completed', message }];
     }
+    case 'tool_execution_start':
+      return [
+        {
+          type: 'tool.started',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          arguments: event.args as Readonly<Record<string, unknown>>,
+        },
+      ];
+    case 'tool_execution_update':
+      return [
+        {
+          type: 'tool.updated',
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          details: event.partialResult,
+        },
+      ];
+    case 'tool_execution_end': {
+      const result = event.result as {
+        readonly content?: readonly { readonly type: 'text'; readonly text: string }[];
+        readonly details?: unknown;
+      };
+      const toolResult: RuntimeToolResultMessage = {
+        role: 'tool',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        content: result.content?.map(({ text }) => text).join('') ?? '',
+        ...(result.details === undefined ? {} : { details: result.details }),
+        isError: event.isError,
+        timestamp: Date.now(),
+      };
+      return [{ type: 'tool.completed', result: toolResult }];
+    }
     case 'agent_end':
     case 'turn_end':
-    case 'tool_execution_start':
-    case 'tool_execution_update':
-    case 'tool_execution_end':
       return [];
   }
 }
@@ -254,6 +292,18 @@ function toRuntimeMessage(message: AgentMessage): RuntimeMessage | undefined {
   return {
     role: 'assistant',
     content: contentText(message.content),
+    parts: message.content.flatMap((part) =>
+      part.type === 'toolCall'
+        ? [
+            {
+              type: 'tool_call' as const,
+              id: part.id,
+              name: part.name,
+              arguments: part.arguments as Readonly<Record<string, unknown>>,
+            },
+          ]
+        : [],
+    ),
     provider: message.provider,
     model: message.model,
     ...(message.responseId ? { responseId: message.responseId } : {}),

@@ -15,9 +15,27 @@ export type RuntimeUserMessage = {
   readonly timestamp: number;
 };
 
+export type RuntimeToolCall = {
+  readonly type: 'tool_call';
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: Readonly<Record<string, unknown>>;
+};
+
+export type RuntimeToolResultMessage = {
+  readonly role: 'tool';
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly content: string;
+  readonly details?: unknown;
+  readonly isError: boolean;
+  readonly timestamp: number;
+};
+
 export type RuntimeAssistantMessage = {
   readonly role: 'assistant';
   readonly content: string;
+  readonly parts?: readonly RuntimeToolCall[];
   readonly provider: string;
   readonly model: string;
   readonly responseId?: string;
@@ -28,6 +46,7 @@ export type RuntimeAssistantMessage = {
 };
 
 export type RuntimeMessage = RuntimeUserMessage | RuntimeAssistantMessage;
+export type RuntimeTranscriptMessage = RuntimeMessage | RuntimeToolResultMessage;
 
 export type RuntimeEvent =
   | { readonly type: 'run.started' }
@@ -35,13 +54,30 @@ export type RuntimeEvent =
   | { readonly type: 'message.started'; readonly role: RuntimeMessage['role'] }
   | { readonly type: 'content.delta'; readonly delta: string }
   | { readonly type: 'message.completed'; readonly message: RuntimeMessage }
+  | {
+      readonly type: 'tool.started';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly arguments: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly type: 'tool.updated';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly details?: unknown;
+    }
+  | { readonly type: 'tool.completed'; readonly result: RuntimeToolResultMessage }
   | { readonly type: 'usage.updated'; readonly usage: RuntimeUsage }
   | { readonly type: 'run.completed'; readonly messages: readonly RuntimeMessage[] }
   | { readonly type: 'run.cancelled' }
   | { readonly type: 'run.failed'; readonly error: RuntimeFailure };
 
 export type RuntimeFailure = {
-  readonly code: 'provider_error' | 'invalid_history' | 'runtime_error';
+  readonly code:
+    | 'provider_error'
+    | 'invalid_history'
+    | 'protocol_error'
+    | 'runtime_error';
   readonly message: string;
   readonly retryable: boolean;
 };
@@ -59,13 +95,20 @@ export type RuntimeTool = {
   readonly label: string;
   readonly description: string;
   readonly parameters: TSchema;
+  readonly constrainedSampling?: false | {
+    readonly type: 'json_schema';
+    readonly strict: 'prefer' | 'require';
+  };
   readonly executionMode?: 'sequential' | 'parallel';
+  readonly output?: 'json' | 'text';
+  readonly terminateOnSuccess?: boolean;
   readonly execute: (
     arguments_: Readonly<Record<string, unknown>>,
     context: {
       readonly runId: string;
       readonly providerToolCallId: string;
       readonly signal?: AbortSignal;
+      readonly onUpdate?: (details: unknown) => void;
     },
   ) => Promise<unknown>;
 };
