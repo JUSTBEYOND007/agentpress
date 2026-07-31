@@ -35,5 +35,12 @@ describe('ArkImageGenerator', () => {
       'https://ark.example/v3/images/generations',
       expect.objectContaining({ method: 'POST' }),
     );
+    const requestBody = parseRequestBody(request.mock.calls[0]?.[1]?.body);
+    expect(requestBody).toMatchObject({ size: '2K', stream: false, watermark: false });
   });
 });
+
+function parseRequestBody(body: BodyInit | null | undefined): Record<string, unknown> {
+  if (typeof body !== 'string') throw new TypeError('Expected a JSON request body');
+  return JSON.parse(body) as Record<string, unknown>;
+}

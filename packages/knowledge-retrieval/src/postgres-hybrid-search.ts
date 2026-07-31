@@ -1,4 +1,4 @@
-import type { AgentPressDatabase } from '@agentpress/database';
+import { KNOWLEDGE_EMBEDDING_DIMENSIONS, type AgentPressDatabase } from '@agentpress/database';
 import { sql } from 'drizzle-orm';
 
 import type { Evidence } from './hybrid-search.js';
@@ -39,8 +39,10 @@ export class PostgresHybridSearch {
   public async search(request: PostgresSearchRequest): Promise<readonly Evidence[]> {
     const limit = request.limit ?? 8;
     if (request.principals.length === 0) return [];
-    if (request.embedding.length !== 1536)
-      throw new RangeError('Embedding must contain 1536 dimensions');
+    if (request.embedding.length !== KNOWLEDGE_EMBEDDING_DIMENSIONS)
+      throw new RangeError(
+        `Embedding must contain ${String(KNOWLEDGE_EMBEDDING_DIMENSIONS)} dimensions`,
+      );
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
       throw new RangeError('Search limit must be between 1 and 50');
     const candidateLimit = Math.min(limit * 4, 200);

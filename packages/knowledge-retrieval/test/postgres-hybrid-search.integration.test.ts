@@ -7,6 +7,7 @@ import {
   articles,
   knowledgeChunks,
   knowledgeDocuments,
+  KNOWLEDGE_EMBEDDING_DIMENSIONS,
   workspaces,
 } from '@agentpress/database';
 import { describe, expect, it } from 'vitest';
@@ -55,7 +56,9 @@ describeWithDatabase('PostgreSQL hybrid retrieval', () => {
       .update(articles)
       .set({ currentRevisionId: revisionId })
       .where(eq(articles.id, articleId));
-    const vector = Array.from({ length: 1536 }, (_, index) => (index === 0 ? 1 : 0));
+    const vector = Array.from({ length: KNOWLEDGE_EMBEDDING_DIMENSIONS }, (_, index) =>
+      index === 0 ? 1 : 0,
+    );
     const indexer = new ArticleKnowledgeIndexer(connection.db, {
       embed: (texts) => Promise.resolve(texts.map(() => vector)),
     });
@@ -109,7 +112,9 @@ describeWithDatabase('PostgreSQL hybrid retrieval', () => {
       },
     ];
     await connection.db.insert(knowledgeDocuments).values(documents);
-    const embedding = Array.from({ length: 1536 }, (_, index) => (index === 0 ? 1 : 0));
+    const embedding = Array.from({ length: KNOWLEDGE_EMBEDDING_DIMENSIONS }, (_, index) =>
+      index === 0 ? 1 : 0,
+    );
     await connection.db.insert(knowledgeChunks).values(
       documents.map((document, index) => ({
         id: randomUUID(),

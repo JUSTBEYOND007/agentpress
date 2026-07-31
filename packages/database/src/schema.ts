@@ -1063,6 +1063,8 @@ export const knowledgeDocuments = pgTable(
   ],
 );
 
+export const KNOWLEDGE_EMBEDDING_DIMENSIONS = 1024;
+
 export const knowledgeChunks = pgTable(
   'knowledge_chunks',
   {
@@ -1073,7 +1075,7 @@ export const knowledgeChunks = pgTable(
     ordinal: integer('ordinal').notNull(),
     content: text('content').notNull(),
     contentHash: varchar('content_hash', { length: 80 }).notNull(),
-    embedding: vector('embedding', { dimensions: 1536 }).notNull(),
+    embedding: vector('embedding', { dimensions: KNOWLEDGE_EMBEDDING_DIMENSIONS }).notNull(),
     tokenCount: integer('token_count').notNull(),
     createdAt,
   },
