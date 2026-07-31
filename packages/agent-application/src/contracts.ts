@@ -100,3 +100,37 @@ export type EnqueueRunDirectiveResult = {
   readonly sequence: number;
   readonly status: 'pending';
 };
+
+export type RunPart = {
+  readonly id: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly type:
+    | 'text'
+    | 'plan'
+    | 'activity'
+    | 'tool-approval'
+    | 'ask-user'
+    | 'evidence'
+    | 'article-change'
+    | 'artifact'
+    | 'warning'
+    | 'recovery'
+    | 'usage';
+  readonly status: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+};
+
+export type RunProjection = {
+  readonly runId: string;
+  readonly rootMessageId: string;
+  readonly status: string;
+  readonly mode: 'direct' | 'planned';
+  readonly activePlanRevision?: number;
+  readonly parts: readonly RunPart[];
+  readonly artifacts: readonly Readonly<Record<string, unknown>>[];
+  readonly pendingInteraction?: Readonly<Record<string, unknown>>;
+  readonly lastEventId: number;
+  readonly createdAt: string;
+  readonly completedAt?: string;
+};

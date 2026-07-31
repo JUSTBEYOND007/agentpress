@@ -105,6 +105,47 @@ export class AgentController {
     }
   }
 
+  @Get('conversations/:conversationId/branches/:branchId/runs')
+  public async listRuns(
+    @Param('conversationId') conversationId: string,
+    @Param('branchId') branchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.runs.listRuns(conversationId, branchId, user.id);
+  }
+
+  @Get('runs/:runId')
+  public async getRun(
+    @Param('runId') runId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization?.assertRunAccess(runId, user.id);
+    const projection = await this.runs.getProjection(runId);
+    if (!projection) throw new NotFoundException(`Agent Run ${runId} does not exist`);
+    const { parts: _parts, artifacts: _artifacts, ...summary } = projection;
+    return summary;
+  }
+
+  @Get('runs/:runId/projection')
+  public async getProjection(
+    @Param('runId') runId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization?.assertRunAccess(runId, user.id);
+    const projection = await this.runs.getProjection(runId);
+    if (!projection) throw new NotFoundException(`Agent Run ${runId} does not exist`);
+    return projection;
+  }
+
+  @Get('runs/:runId/artifacts')
+  public async getArtifacts(
+    @Param('runId') runId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const projection = await this.getProjection(runId, user);
+    return projection.artifacts;
+  }
+
   @Sse('runs/:runId/events')
   public streamEvents(
     @Param('runId') runId: string,
@@ -224,6 +265,19 @@ export class AgentController {
     } catch (error) {
       throw mapApplicationError(error);
     }
+  }
+
+  @Post('runs/:runId/questions/:questionId/answer')
+  @HttpCode(202)
+  public async answerQuestion(
+    @Param('runId') runId: string,
+    @Param('questionId') questionId: string,
+    @Body() body: RunDirectiveBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (typeof body.content !== 'string') throw new BadRequestException('content must be a string');
+    await this.authorization?.assertRunAccess(runId, user.id);
+    return this.runs.answerQuestion(runId, questionId, body.content, user.id);
   }
 
   @Post('tool-calls/:toolCallId/approval')

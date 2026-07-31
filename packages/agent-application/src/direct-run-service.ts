@@ -9,6 +9,9 @@ import type {
 import {
   agentRuns,
   agentTasks,
+  approvals,
+  artifacts,
+  artifactVersions,
   appendCheckpoint,
   appendRunEvent,
   type AgentPressDatabase,
@@ -17,12 +20,14 @@ import {
   conversations,
   enqueueOutboxMessage,
   rootRequests,
+  planRevisions,
+  runQuestions,
   runDirectives,
   runEvents,
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -34,6 +39,7 @@ import {
   type ExecuteDirectRunResult,
   type EnqueueRunDirectiveResult,
   type RequestRunCancellationResult,
+  type RunProjection,
   type RunEventPublisher,
   type RuntimeToolFactory,
 } from './contracts.js';
@@ -468,6 +474,139 @@ export class DirectRunService {
     return events.map(toDurableEvent);
   }
 
+  public async getProjection(runId: string): Promise<RunProjection | undefined> {
+    const runRows = await this.options.database
+      .select({
+        runId: agentRuns.id,
+        rootMessageId: rootRequests.messageId,
+        status: agentRuns.status,
+        mode: agentRuns.mode,
+        revisionNumber: planRevisions.revisionNumber,
+        createdAt: agentRuns.createdAt,
+        completedAt: agentRuns.completedAt,
+      })
+      .from(agentRuns)
+      .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
+      .leftJoin(planRevisions, eq(planRevisions.id, agentRuns.activePlanRevisionId))
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+    const run = runRows[0];
+    if (!run) return undefined;
+    const [events, artifactRows, questionRows, approvalRows] = await Promise.all([
+      this.listEvents(runId),
+      this.options.database
+        .select({
+          id: artifacts.id,
+          type: artifacts.type,
+          title: artifacts.title,
+          version: artifactVersions.version,
+          summary: artifactVersions.summary,
+          content: artifactVersions.content,
+        })
+        .from(artifacts)
+        .innerJoin(
+          artifactVersions,
+          and(
+            eq(artifactVersions.artifactId, artifacts.id),
+            eq(artifactVersions.version, artifacts.currentVersion),
+          ),
+        )
+        .where(eq(artifacts.runId, runId)),
+      this.options.database
+        .select()
+        .from(runQuestions)
+        .where(and(eq(runQuestions.runId, runId), eq(runQuestions.status, 'pending')))
+        .limit(1),
+      this.options.database
+        .select({
+          id: approvals.id,
+          toolCallId: approvals.toolCallId,
+          sideEffect: approvals.displayedSideEffect,
+          estimatedCost: approvals.estimatedCost,
+          expiresAt: approvals.expiresAt,
+        })
+        .from(approvals)
+        .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
+        .where(and(eq(toolCalls.runId, runId), eq(approvals.decision, 'pending')))
+        .orderBy(asc(approvals.createdAt)),
+    ]);
+    const question = questionRows[0];
+    const pendingInteraction = question
+      ? { type: 'ask-user', id: question.id, question: question.prompt, options: question.options }
+      : approvalRows.length > 0
+        ? { type: 'tool-approval', approvals: approvalRows }
+        : undefined;
+    return {
+      runId,
+      rootMessageId: run.rootMessageId,
+      status: run.status,
+      mode: run.mode,
+      ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
+      parts: events.flatMap(toRunParts),
+      artifacts: artifactRows,
+      ...(pendingInteraction ? { pendingInteraction } : {}),
+      lastEventId: events.at(-1)?.sequence ?? 0,
+      createdAt: run.createdAt.toISOString(),
+      ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),
+    };
+  }
+
+  public async listRuns(conversationId: string, branchId: string, userId: string) {
+    const messages = await this.listMessages(conversationId, branchId, userId);
+    if (messages.length === 0) return [];
+    const rows = await this.options.database
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.branchId, branchId))
+      .orderBy(asc(agentRuns.createdAt));
+    const projections = await Promise.all(rows.map(({ id }) => this.getProjection(id)));
+    return projections.filter((projection): projection is RunProjection => Boolean(projection));
+  }
+
+  public async answerQuestion(runId: string, questionId: string, answer: string, userId: string) {
+    const value = answer.trim();
+    if (!value || value.length > 100_000)
+      throw new AgentApplicationError('invalid_directive', 'Answer must contain 1-100000 characters');
+    const persisted = await this.options.database.transaction(async (transaction) => {
+      const now = this.now();
+      const rows = await transaction
+        .update(runQuestions)
+        .set({ status: 'answered', answer: value, answeredByUserId: userId, answeredAt: now })
+        .where(
+          and(
+            eq(runQuestions.id, questionId),
+            eq(runQuestions.runId, runId),
+            eq(runQuestions.status, 'pending'),
+          ),
+        )
+        .returning({ id: runQuestions.id });
+      if (rows.length === 0) throw new AgentApplicationError('invalid_directive', 'Question is no longer pending');
+      await transaction
+        .update(agentRuns)
+        .set({ status: 'recovering', updatedAt: now, version: sql`${agentRuns.version} + 1` })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'waiting_for_user')));
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'user.input_received',
+        payload: { questionId },
+      });
+      const outboxId = this.createId();
+      await enqueueOutboxMessage(transaction, {
+        id: outboxId,
+        aggregateType: 'AgentRun',
+        aggregateId: runId,
+        topic: AGENT_RUN_COMMAND_TOPIC,
+        messageKey: runId,
+        payload: { command: 'run.execute', messageId: outboxId, runId },
+        occurredAt: now,
+      });
+      return toDurableEvent(event);
+    });
+    await this.options.publisher.publish({ durable: true, event: persisted });
+    return { questionId, runId, status: 'answered' as const };
+  }
+
   private async loadExecutionContext(runId: string): Promise<
     | {
         readonly branchId: string;
@@ -518,10 +657,20 @@ export class DirectRunService {
     });
     const contextPack = await this.contexts.load(runId);
     if (!contextPack) throw new Error(`Agent Run ${runId} has no persisted Context Pack`);
+    const answeredQuestions = await this.options.database
+      .select({ prompt: runQuestions.prompt, answer: runQuestions.answer })
+      .from(runQuestions)
+      .where(and(eq(runQuestions.runId, runId), eq(runQuestions.status, 'answered')))
+      .orderBy(asc(runQuestions.createdAt));
+    const promptWithAnswers = answeredQuestions.reduce(
+      (current, question) =>
+        `${current}\n\n<user-answer question=${JSON.stringify(question.prompt)}>${question.answer ?? ''}</user-answer>`,
+      rootMessage.content,
+    );
 
     return {
       branchId: run.branchId,
-      prompt: rootMessage.content,
+      prompt: promptWithAnswers,
       history,
       status: run.status,
       mode: run.mode,
@@ -875,4 +1024,40 @@ function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {
     payload: event.payload,
     createdAt: event.createdAt,
   };
+}
+
+function toRunParts(event: DurableRunEvent): readonly import('./contracts.js').RunPart[] {
+  const type = event.eventType;
+  const partType =
+    type === 'message.completed'
+      ? 'text'
+      : type.startsWith('plan.')
+        ? 'plan'
+        : type === 'tool.approval_requested'
+          ? 'tool-approval'
+          : type === 'user.input_requested'
+            ? 'ask-user'
+            : type.includes('artifact')
+              ? 'artifact'
+              : type.startsWith('run.recover')
+                ? 'recovery'
+                : type === 'run.completed_with_degradation' || type === 'run.failed'
+                  ? 'warning'
+                  : type.startsWith('tool.') || type.startsWith('task.')
+                    ? 'activity'
+                    : type.startsWith('run.completed')
+                      ? 'usage'
+                      : undefined;
+  return partType
+    ? [
+        {
+          id: event.id,
+          runId: event.runId,
+          sequence: event.sequence,
+          type: partType,
+          status: type,
+          payload: event.payload,
+        },
+      ]
+    : [];
 }

@@ -40,6 +40,7 @@ type CreateArticleBody = {
 };
 type FolderBody = { readonly name?: unknown; readonly parentId?: unknown };
 type MoveArticleBody = { readonly folderId?: unknown };
+type ConversationBody = { readonly title?: unknown };
 
 const emptyDocument = {
   type: 'doc',
@@ -283,6 +284,7 @@ export class WorkspaceController {
         workspaceId,
         articleId,
         title,
+        isDefault: true,
       });
       await transaction.insert(conversationBranches).values({ id: branchId, conversationId });
       const indexMessageId = randomUUID();
@@ -307,6 +309,73 @@ export class WorkspaceController {
       branchId,
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  @Get('articles/:articleId/conversations')
+  public async listConversations(
+    @Param('articleId') articleId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertArticleAccess(articleId, user.id);
+    return this.connection.db
+      .select({
+        id: conversations.id,
+        title: conversations.title,
+        isDefault: conversations.isDefault,
+        archivedAt: conversations.archivedAt,
+        branchId: conversationBranches.id,
+        updatedAt: conversations.updatedAt,
+      })
+      .from(conversations)
+      .innerJoin(conversationBranches, eq(conversationBranches.conversationId, conversations.id))
+      .where(eq(conversations.articleId, articleId))
+      .orderBy(desc(conversations.updatedAt));
+  }
+
+  @Post('articles/:articleId/conversations')
+  public async createConversation(
+    @Param('articleId') articleId: string,
+    @Body() body: ConversationBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const workspaceId = await this.articleWorkspace(articleId);
+    await this.authorization.assertWorkspaceEditor(workspaceId, user.id);
+    const title =
+      typeof body.title === 'string' && body.title.trim()
+        ? body.title.trim().slice(0, 300)
+        : '新对话';
+    const id = randomUUID();
+    const branchId = randomUUID();
+    await this.connection.db.transaction(async (transaction) => {
+      await transaction.insert(conversations).values({ id, workspaceId, articleId, title });
+      await transaction.insert(conversationBranches).values({ id: branchId, conversationId: id });
+    });
+    return { id, articleId, title, branchId, isDefault: false };
+  }
+
+  @Patch('conversations/:conversationId')
+  public async updateConversation(
+    @Param('conversationId') conversationId: string,
+    @Body() body: ConversationBody & { readonly archived?: unknown },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const rows = await this.connection.db
+      .select({ workspaceId: conversations.workspaceId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (!rows[0]) throw new NotFoundException('Conversation does not exist');
+    await this.authorization.assertWorkspaceEditor(rows[0].workspaceId, user.id);
+    const title = body.title === undefined ? undefined : validName(body.title, 'Conversation title');
+    const archivedAt = body.archived === undefined ? undefined : body.archived === true ? new Date() : null;
+    if (title === undefined && archivedAt === undefined)
+      throw new BadRequestException('title or archived is required');
+    const updated = await this.connection.db
+      .update(conversations)
+      .set({ ...(title ? { title } : {}), ...(archivedAt !== undefined ? { archivedAt } : {}), updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId))
+      .returning();
+    return updated[0];
   }
 
   @Patch('articles/:articleId/location')
