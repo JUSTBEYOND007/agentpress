@@ -1,5 +1,6 @@
 'use client';
 
+import type { DiffEntry, EditOperation } from '@agentpress/editor-patch';
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -9,30 +10,58 @@ import {
   useAuiState,
 } from '@assistant-ui/react';
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   Check,
   ChevronDown,
   CircleAlert,
+  Clock3,
   Coins,
   FileCheck2,
+  FileText,
+  MoreHorizontal,
+  Paperclip,
+  Plus,
   RotateCcw,
   Sparkles,
   Square,
   Wrench,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import { ArticleDiff } from './article-diff';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
+  numberValue,
+  recordValue,
+  stringValue,
   useAgentPressAssistantRuntime,
   type AgentSendMode,
+  type RunPart,
 } from '../lib/agentpress-assistant-runtime';
-import { initialRunView } from '../lib/run-event-reducer';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
+
+type RunActions = {
+  readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
+  readonly answerQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
+  readonly decideProposal: (
+    proposalId: string,
+    decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
+  ) => Promise<Readonly<Record<string, unknown>>>;
+  readonly onArticleUpdated?: () => Promise<void>;
+};
+
+const RunActionsContext = createContext<RunActions | undefined>(undefined);
 
 export function AgentWorkbench({
   conversationId,
@@ -55,6 +84,12 @@ export function AgentWorkbench({
   const [mentionActiveArticle, setMentionActiveArticle] = useState(true);
   const [memories, setMemories] = useState<readonly MemoryView[]>([]);
   const [contextError, setContextError] = useState<string>();
+  const [conversations, setConversations] = useState<readonly ConversationView[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<ConversationView | undefined>(
+    conversationId && branchId
+      ? { id: conversationId, branchId, title: '写作助手', isDefault: true }
+      : undefined,
+  );
   const selectedSkills = useMemo(
     () =>
       skills
@@ -66,17 +101,35 @@ export function AgentWorkbench({
     () => (mentionActiveArticle && activeArticleId ? [activeArticleId] : []),
     [activeArticleId, mentionActiveArticle],
   );
-  const { runtime, run, decideTool, decideProposal, readiness } = useAgentPressAssistantRuntime(
+  const {
+    runtime,
+    activeProjection,
+    decideTool,
+    answerQuestion,
+    decideProposal,
+    readiness,
+    panelError,
+    isRunning,
+  } = useAgentPressAssistantRuntime(
     sendMode,
-    conversationId || branchId
+    selectedConversation
       ? {
-          ...(conversationId ? { conversationId } : {}),
-          ...(branchId ? { branchId } : {}),
+          conversationId: selectedConversation.id,
+          branchId: selectedConversation.branchId,
           ...(mentionTargetIds.length > 0 ? { mentionTargetIds } : {}),
           ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
         }
       : {},
   );
+
+  useEffect(() => {
+    if (!conversationId || !branchId) return;
+    setSelectedConversation((current) =>
+      current?.id === conversationId
+        ? current
+        : { id: conversationId, branchId, title: '写作助手', isDefault: true },
+    );
+  }, [branchId, conversationId]);
 
   const loadContext = useCallback(async (): Promise<void> => {
     if (!workspaceId) return;
@@ -94,14 +147,52 @@ export function AgentWorkbench({
     }
   }, [workspaceId]);
 
-  useEffect(() => {
-    void loadContext();
-  }, [loadContext]);
+  const loadConversations = useCallback(async (): Promise<void> => {
+    if (!activeArticleId) return;
+    const response = await authenticatedFetch(`${apiUrl}/articles/${activeArticleId}/conversations`);
+    if (!response.ok) throw new Error('对话列表加载失败');
+    const items = (await response.json()) as readonly ConversationView[];
+    setConversations(items);
+    setSelectedConversation((current) =>
+      items.find(({ id }) => id === current?.id) ??
+      items.find(({ id }) => id === conversationId) ??
+      items.find(({ isDefault }) => isDefault) ??
+      items[0],
+    );
+  }, [activeArticleId, conversationId]);
 
   useEffect(() => {
-    if (run.tools.some((tool) => tool.name === 'memory.propose' && tool.status === 'succeeded'))
-      void loadContext();
-  }, [loadContext, run.tools]);
+    void loadContext();
+    void loadConversations().catch((error: unknown) => {
+      setContextError(error instanceof Error ? error.message : '对话列表加载失败');
+    });
+  }, [loadContext, loadConversations]);
+
+  const createConversation = async (): Promise<void> => {
+    if (!activeArticleId) return;
+    const response = await authenticatedFetch(`${apiUrl}/articles/${activeArticleId}/conversations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '新对话' }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const created = (await response.json()) as ConversationView;
+    setConversations((current) => [created, ...current]);
+    setSelectedConversation(created);
+  };
+
+  const updateConversation = async (
+    target: ConversationView,
+    update: { readonly title?: string; readonly archived?: boolean },
+  ): Promise<void> => {
+    const response = await authenticatedFetch(`${apiUrl}/conversations/${target.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    await loadConversations();
+  };
 
   const decideMemory = async (candidateId: string, decision: 'accepted' | 'rejected') => {
     if (!workspaceId) return;
@@ -113,229 +204,142 @@ export function AgentWorkbench({
         body: JSON.stringify({ decision }),
       },
     );
-    if (!response.ok) {
-      setContextError(await response.text());
-      return;
-    }
+    if (!response.ok) throw new Error(await response.text());
     await loadContext();
   };
 
-  const createSkill = async (markdown: string): Promise<boolean> => {
-    if (!workspaceId) return false;
-    const response = await authenticatedFetch(`${apiUrl}/workspaces/${workspaceId}/skills`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ markdown }),
-    });
-    if (!response.ok) {
-      setContextError(await response.text());
-      return false;
-    }
-    await loadContext();
-    return true;
-  };
+  const actions = useMemo<RunActions>(
+    () => ({ decideTool, answerQuestion, decideProposal, ...(onArticleUpdated ? { onArticleUpdated } : {}) }),
+    [answerQuestion, decideProposal, decideTool, onArticleUpdated],
+  );
+  const status = activeProjection?.status ?? (readiness.status === 'ready' ? 'ready' : readiness.status);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <aside className="agent-panel" aria-label="Agent 工作台">
-        <header className="agent-header">
-          <div>
-            <strong>写作助手</strong>
-            <span className={`status-dot status-${statusTone(run.status)}`}>{run.status}</span>
-          </div>
-        </header>
-
-        <ThreadPrimitive.Root className="aui-thread">
-          <ThreadPrimitive.Viewport className="agent-thread">
-            <ThreadPrimitive.Messages>
-              {({ message }) => (message.role === 'user' ? <UserMessage /> : <AssistantMessage />)}
-            </ThreadPrimitive.Messages>
-            {run.runId ? (
-              <RunInspector
-                {...(onArticleUpdated ? { onArticleUpdated } : {})}
-                onProposalDecision={decideProposal}
-                onToolDecision={decideTool}
-                run={run}
-              />
-            ) : (
-              <div className="run-empty">尚未创建 Agent Run</div>
-            )}
-            <ContextControls
+      <RunActionsContext.Provider value={actions}>
+        <aside className="agent-panel" aria-label="Agent 工作台">
+          <ConversationHeader
+            conversations={conversations}
+            onCreate={() => void createConversation().catch(showContextError(setContextError))}
+            onSelect={setSelectedConversation}
+            onUpdate={(target, update) =>
+              void updateConversation(target, update).catch(showContextError(setContextError))
+            }
+            {...(selectedConversation ? { selected: selectedConversation } : {})}
+            status={status}
+          />
+          {panelError || contextError ? (
+            <div className="agent-status-banner" role="status">
+              {panelError ?? contextError}
+            </div>
+          ) : null}
+          <ThreadPrimitive.Root className="aui-thread">
+            <ThreadPrimitive.Viewport className="agent-thread">
+              <ThreadPrimitive.Messages>
+                {({ message }) => (message.role === 'user' ? <UserMessage /> : <AssistantMessage />)}
+              </ThreadPrimitive.Messages>
+              <MemoryCandidates memories={memories} onDecision={decideMemory} />
+              <ThreadPrimitive.ViewportFooter className="thread-footer">
+                <ThreadPrimitive.ScrollToBottom asChild>
+                  <button className="scroll-button" aria-label="滚动到底部" type="button">
+                    <ArrowDown aria-hidden="true" size={15} />
+                  </button>
+                </ThreadPrimitive.ScrollToBottom>
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+            <AgentComposer
               {...(activeArticleTitle ? { activeArticleTitle } : {})}
-              {...(contextError ? { contextError } : {})}
-              memories={memories}
               mentionActiveArticle={mentionActiveArticle}
-              onMemoryDecision={decideMemory}
               onMentionChange={setMentionActiveArticle}
-              onSkillCreate={createSkill}
               onSkillChange={setSelectedSkillKeys}
+              readiness={readiness.status}
+              running={isRunning}
               selectedSkillKeys={selectedSkillKeys}
+              sendMode={sendMode}
+              setSendMode={setSendMode}
               skills={skills}
             />
-            <ThreadPrimitive.ViewportFooter className="thread-footer">
-              <ThreadPrimitive.ScrollToBottom asChild>
-                <button
-                  className="scroll-button"
-                  aria-label="滚动到底部"
-                  title="滚动到底部"
-                  type="button"
-                >
-                  <ArrowDown aria-hidden="true" size={15} />
-                </button>
-              </ThreadPrimitive.ScrollToBottom>
-            </ThreadPrimitive.ViewportFooter>
-          </ThreadPrimitive.Viewport>
-          <AgentComposer
-            readiness={readiness.status}
-            sendMode={sendMode}
-            setSendMode={setSendMode}
-          />
-        </ThreadPrimitive.Root>
-      </aside>
+          </ThreadPrimitive.Root>
+        </aside>
+      </RunActionsContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
 
-type SkillView = {
-  readonly skillId: string;
-  readonly version: string;
-  readonly description: string;
-};
+type SkillView = { readonly skillId: string; readonly version: string; readonly description: string };
 type MemoryView = {
   readonly id: string;
   readonly subject: string;
   readonly value: string;
   readonly status: 'pending' | 'accepted' | 'rejected' | 'superseded';
 };
+type ConversationView = {
+  readonly id: string;
+  readonly branchId: string;
+  readonly title: string;
+  readonly isDefault: boolean;
+  readonly archivedAt?: string | null;
+};
 
-function ContextControls({
-  activeArticleTitle,
-  contextError,
-  memories,
-  mentionActiveArticle,
-  onMemoryDecision,
-  onMentionChange,
-  onSkillCreate,
-  onSkillChange,
-  selectedSkillKeys,
-  skills,
-}: {
-  readonly activeArticleTitle?: string;
-  readonly contextError?: string;
-  readonly memories: readonly MemoryView[];
-  readonly mentionActiveArticle: boolean;
-  readonly onMemoryDecision: (id: string, decision: 'accepted' | 'rejected') => Promise<void>;
-  readonly onMentionChange: (value: boolean) => void;
-  readonly onSkillCreate: (markdown: string) => Promise<boolean>;
-  readonly onSkillChange: (keys: readonly string[]) => void;
-  readonly selectedSkillKeys: readonly string[];
-  readonly skills: readonly SkillView[];
+function ConversationHeader({ conversations, onCreate, onSelect, onUpdate, selected, status }: {
+  readonly conversations: readonly ConversationView[];
+  readonly onCreate: () => void;
+  readonly onSelect: (conversation: ConversationView) => void;
+  readonly onUpdate: (conversation: ConversationView, update: { title?: string; archived?: boolean }) => void;
+  readonly selected?: ConversationView;
+  readonly status: string;
 }): React.JSX.Element {
-  const pending = memories.filter(({ status }) => status === 'pending');
-  const [skillEditorOpen, setSkillEditorOpen] = useState(false);
-  const [skillMarkdown, setSkillMarkdown] = useState('');
+  const [open, setOpen] = useState(false);
+  const rename = (): void => {
+    if (!selected) return;
+    const title = window.prompt('重命名对话', selected.title)?.trim();
+    if (title) onUpdate(selected, { title });
+  };
   return (
-    <section className="context-controls" aria-label="Agent 上下文">
-      <strong>上下文</strong>
-      {activeArticleTitle ? (
-        <label>
-          <input
-            checked={mentionActiveArticle}
-            onChange={(event) => {
-              onMentionChange(event.target.checked);
-            }}
-            type="checkbox"
-          />
-          @{activeArticleTitle}
-        </label>
-      ) : null}
-      {skills.map((skill) => {
-        const key = `${skill.skillId}@${skill.version}`;
-        return (
-          <label key={key} title={skill.description}>
-            <input
-              checked={selectedSkillKeys.includes(key)}
-              onChange={(event) => {
-                onSkillChange(
-                  event.target.checked
-                    ? [...selectedSkillKeys, key]
-                    : selectedSkillKeys.filter((item) => item !== key),
-                );
-              }}
-              type="checkbox"
-            />
-            /{skill.skillId} · {skill.version}
-          </label>
-        );
-      })}
-      <button
-        className="context-secondary-action"
-        onClick={() => {
-          setSkillEditorOpen((current) => !current);
-        }}
-        type="button"
-      >
-        {skillEditorOpen ? '取消新建 Skill' : '新建 Skill'}
+    <header className="agent-header">
+      <div className="conversation-picker">
+        <button aria-expanded={open} onClick={() => { setOpen((value) => !value); }} type="button">
+          <strong>{selected?.title ?? '写作助手'}</strong>
+          <ChevronDown aria-hidden="true" size={14} />
+        </button>
+        {open ? (
+          <div className="conversation-menu">
+            {conversations.filter(({ archivedAt }) => !archivedAt).map((conversation) => (
+              <button key={conversation.id} onClick={() => { onSelect(conversation); setOpen(false); }} type="button">
+                <span>{conversation.title}</span>
+                {conversation.isDefault ? <small>默认</small> : null}
+              </button>
+            ))}
+            <button className="conversation-new" onClick={() => { onCreate(); setOpen(false); }} type="button">
+              <Plus size={13} /> 新对话
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <span className={`status-dot status-${statusTone(status)}`}>{statusLabel(status)}</span>
+      <button aria-label="重命名对话" className="header-icon-button" onClick={rename} type="button">
+        <MoreHorizontal size={15} />
       </button>
-      {skillEditorOpen ? (
-        <div className="skill-editor">
-          <textarea
-            aria-label="Skill Markdown"
-            onChange={(event) => {
-              setSkillMarkdown(event.target.value);
-            }}
-            placeholder="---&#10;id: news&#10;version: 1.0.0&#10;description: 新闻写作&#10;allowedTools: []&#10;---&#10;写作规则"
-            rows={8}
-            value={skillMarkdown}
-          />
-          <button
-            disabled={!skillMarkdown.trim()}
-            onClick={() => {
-              void onSkillCreate(skillMarkdown).then((created) => {
-                if (!created) return;
-                setSkillMarkdown('');
-                setSkillEditorOpen(false);
-              });
-            }}
-            type="button"
-          >
-            保存 Skill
-          </button>
-        </div>
+      {selected && !selected.isDefault ? (
+        <button aria-label="归档对话" className="header-icon-button" onClick={() => { onUpdate(selected, { archived: true }); }} type="button">
+          <Archive size={14} />
+        </button>
       ) : null}
-      {pending.map((memory) => (
-        <div className="memory-candidate" key={memory.id}>
-          <span>
-            {memory.subject}：{memory.value}
-          </span>
-          <button onClick={() => void onMemoryDecision(memory.id, 'accepted')} type="button">
-            接受
-          </button>
-          <button onClick={() => void onMemoryDecision(memory.id, 'rejected')} type="button">
-            拒绝
-          </button>
-        </div>
-      ))}
-      {contextError ? <p role="alert">{contextError}</p> : null}
-    </section>
+    </header>
   );
 }
 
 function UserMessage(): React.JSX.Element {
-  return (
-    <MessagePrimitive.Root className="aui-message aui-user-message">
-      <MessagePrimitive.Parts components={{ Text: MessageText }} />
-    </MessagePrimitive.Root>
-  );
+  return <MessagePrimitive.Root className="aui-message aui-user-message"><MessagePrimitive.Parts components={{ Text: MessageText }} /></MessagePrimitive.Root>;
 }
 
 function AssistantMessage(): React.JSX.Element {
   return (
     <MessagePrimitive.Root className="aui-message aui-assistant-message">
-      <div className="assistant-avatar" aria-hidden="true">
-        <Sparkles size={13} />
+      <div className="assistant-avatar" aria-hidden="true"><Sparkles size={13} /></div>
+      <div className="assistant-content">
+        <MessagePrimitive.Parts components={{ Text: MessageText, data: { by_name: { 'agentpress-run-part': RunPartRenderer } } }} />
       </div>
-      <MessagePrimitive.Parts components={{ Text: MessageText }} />
     </MessagePrimitive.Root>
   );
 }
@@ -344,318 +348,201 @@ function MessageText(): React.JSX.Element {
   return <MessagePartPrimitive.Text className="message-text" smooth />;
 }
 
-function AgentComposer({
-  readiness,
-  sendMode,
-  setSendMode,
-}: {
+function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Element | null {
+  const part = parseRunPart(data);
+  if (!part) return null;
+  if (part.type === 'plan') return <PlanPart part={part} />;
+  if (part.type === 'tool-approval') return <ApprovalPart part={part} />;
+  if (part.type === 'ask-user') return <AskUserPart part={part} />;
+  if (part.type === 'artifact') return <ArtifactPart part={part} />;
+  if (part.type === 'evidence') return <EvidencePart part={part} />;
+  if (part.type === 'article-change') return <ArticleChangePart part={part} />;
+  if (part.type === 'usage') return <UsagePart part={part} />;
+  if (part.type === 'warning' || part.type === 'recovery') return <NoticePart part={part} />;
+  if (part.type === 'activity') {
+    const proposal = proposalFromPart(part);
+    return proposal ? <ArticleChangePart part={part} proposal={proposal} /> : <ActivityPart part={part} />;
+  }
+  return null;
+}
+
+function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const tasks = Array.isArray(part.payload.tasks) ? part.payload.tasks.map(recordValue) : [];
+  return (
+    <details className="run-part plan-part" open>
+      <summary><Sparkles size={14} /> {stringValue(part.payload.summary) || '执行计划'}<small>v{numberValue(part.payload.revisionNumber) || 1}</small></summary>
+      <ol>{tasks.map((task, index) => <li key={stringValue(task.id) || String(index)}><span className="task-state" /><div><strong>{stringValue(task.objective) || stringValue(task.label)}</strong><small>{stringValue(task.owner) || 'Specialist'} · {task.criticality === 'optional' ? '可选' : '必需'}</small></div></li>)}</ol>
+    </details>
+  );
+}
+
+function ActivityPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const payload = part.payload;
+  const isTool = part.status.startsWith('tool.');
+  const title = isTool
+    ? stringValue(payload.toolId) || stringValue(payload.toolName) || '工具调用'
+    : stringValue(payload.summary) || stringValue(payload.owner) || statusLabel(part.status);
+  return (
+    <details className="run-part activity-part">
+      <summary>{isTool ? <Wrench size={13} /> : <Clock3 size={13} />}<span>{title}</span><small>{statusLabel(part.status)}</small></summary>
+      <pre>{compactJson(payload)}</pre>
+    </details>
+  );
+}
+
+function ApprovalPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const actions = useRunActions();
+  const toolCallId = stringValue(part.payload.toolCallId);
+  const [decision, setDecision] = useState<'approved' | 'denied'>();
+  return (
+    <section className="run-part approval-row" aria-label="工具审批">
+      <CircleAlert size={16} /><div><strong>需要你的确认</strong><span>{stringValue(part.payload.sideEffect) || stringValue(part.payload.toolId)}</span></div>
+      <div><button disabled={Boolean(decision)} onClick={() => { setDecision('approved'); void actions.decideTool(toolCallId, 'approved'); }} type="button"><Check size={14} />允许</button><button disabled={Boolean(decision)} onClick={() => { setDecision('denied'); void actions.decideTool(toolCallId, 'denied'); }} type="button"><X size={14} />拒绝</button></div>
+    </section>
+  );
+}
+
+function AskUserPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const actions = useRunActions();
+  const [answer, setAnswer] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const options = Array.isArray(part.payload.options) ? part.payload.options.filter((value): value is string => typeof value === 'string') : [];
+  const submit = (value: string): void => {
+    if (!value.trim() || submitted) return;
+    setSubmitted(true);
+    void actions.answerQuestion(part.runId, stringValue(part.payload.questionId), value).catch(() => { setSubmitted(false); });
+  };
+  return (
+    <section className="run-part ask-user-part">
+      <strong>{stringValue(part.payload.question) || '需要补充信息'}</strong>
+      {options.length > 0 ? <div>{options.map((option) => <button disabled={submitted} key={option} onClick={() => { submit(option); }} type="button">{option}</button>)}</div> : null}
+      <form onSubmit={(event) => { event.preventDefault(); submit(answer); }}><input aria-label="回答 Agent 的问题" disabled={submitted} onChange={(event) => { setAnswer(event.target.value); }} value={answer} /><button disabled={submitted || !answer.trim()} type="submit">回答</button></form>
+    </section>
+  );
+}
+
+function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const artifacts = Array.isArray(part.payload.artifacts) ? part.payload.artifacts.map(recordValue) : [part.payload];
+  return <section className="run-part artifact-part"><h3><FileText size={14} />产出</h3>{artifacts.map((artifact, index) => <div key={stringValue(artifact.id) || stringValue(artifact.artifactId) || String(index)}><strong>{stringValue(artifact.title) || stringValue(artifact.type) || '结构化产物'}</strong><span>{stringValue(artifact.summary)}</span></div>)}</section>;
+}
+
+function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  return <section className="run-part evidence-part"><FileCheck2 size={14} /><strong>{stringValue(part.payload.title) || '引用来源'}</strong><span>{stringValue(part.payload.source)}</span></section>;
+}
+
+type Proposal = { readonly proposalId: string; readonly operations: readonly EditOperation[]; readonly diffs: readonly DiffEntry[] };
+
+function ArticleChangePart({ part, proposal = proposalFromPart(part) }: { readonly part: RunPart; readonly proposal?: Proposal }): React.JSX.Element | null {
+  const actions = useRunActions();
+  const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'rejected'>>({});
+  const [submitting, setSubmitting] = useState(false);
+  if (!proposal) return null;
+  const allDecided = proposal.operations.every(({ operationId }) => decisions[operationId]);
+  const decideAll = (decision: 'accepted' | 'rejected'): void => { setDecisions(Object.fromEntries(proposal.operations.map(({ operationId }) => [operationId, decision]))); };
+  return (
+    <section className="run-part proposal-preview">
+      <div className="proposal-heading"><div><strong>文章修改</strong><span>{proposal.operations.length} 项</span></div><div><button onClick={() => { decideAll('accepted'); }} type="button">全部接受</button><button onClick={() => { decideAll('rejected'); }} type="button">全部拒绝</button></div></div>
+      <ArticleDiff decisions={decisions} disabled={submitting} entries={proposal.diffs} onDecision={(operationId, decision) => { setDecisions((current) => ({ ...current, [operationId]: decision })); }} />
+      <div className="proposal-submit-row"><span>逐项确认后应用到正文</span><button className="primary-action" disabled={!allDecided || submitting} onClick={() => { setSubmitting(true); void actions.decideProposal(proposal.proposalId, decisions).then(() => actions.onArticleUpdated?.()).finally(() => { setSubmitting(false); }); }} type="button">{submitting ? '应用中…' : '应用修改'}</button></div>
+    </section>
+  );
+}
+
+function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  return <div className={`run-part notice-part notice-${part.type}`}><RotateCcw size={13} /><span>{stringValue(part.payload.message) || stringValue(recordValue(part.payload.failure).message) || statusLabel(part.status)}</span></div>;
+}
+
+function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const usage = recordValue(part.payload.usage);
+  const tokens = numberValue(usage.inputTokens) + numberValue(usage.outputTokens);
+  return <details className="run-part usage-part"><summary><Coins size={13} />已完成 · {tokens.toLocaleString()} tokens</summary><pre>{compactJson(part.payload)}</pre></details>;
+}
+
+function AgentComposer({ activeArticleTitle, mentionActiveArticle, onMentionChange, onSkillChange, readiness, running, selectedSkillKeys, sendMode, setSendMode, skills }: {
+  readonly activeArticleTitle?: string;
+  readonly mentionActiveArticle: boolean;
+  readonly onMentionChange: (value: boolean) => void;
+  readonly onSkillChange: (value: readonly string[]) => void;
   readonly readiness: 'checking' | 'ready' | 'unavailable';
-  readonly sendMode: 'steering' | 'follow-up';
-  readonly setSendMode: (mode: 'steering' | 'follow-up') => void;
+  readonly running: boolean;
+  readonly selectedSkillKeys: readonly string[];
+  readonly sendMode: AgentSendMode;
+  readonly setSendMode: (mode: AgentSendMode) => void;
+  readonly skills: readonly SkillView[];
 }): React.JSX.Element {
-  const running = useAuiState((state) => state.thread.isRunning);
+  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <ComposerPrimitive.Root className="agent-composer">
-      <ComposerPrimitive.Input
-        aria-label="发送消息给 Agent"
-        placeholder={
-          readiness === 'ready'
-            ? '向 Agent 发送消息...'
-            : readiness === 'checking'
-              ? '正在检查运行时...'
-              : '请先配置 Agent 运行时'
-        }
-        rows={2}
-      />
+      <div className="composer-context">
+        {activeArticleTitle ? <button className={mentionActiveArticle ? 'is-selected' : ''} onClick={() => { onMentionChange(!mentionActiveArticle); }} type="button">@ {activeArticleTitle}</button> : null}
+        {selectedSkillKeys.map((key) => <button key={key} onClick={() => { onSkillChange(selectedSkillKeys.filter((item) => item !== key)); }} type="button">/ {key.split('@')[0]} <X size={10} /></button>)}
+      </div>
+      <ComposerPrimitive.Input aria-label="发送消息给 Agent" placeholder={readiness === 'ready' ? '提问或描述你希望完成的工作…' : readiness === 'checking' ? '正在连接…' : 'Agent 尚未配置'} rows={2} />
       <div className="composer-actions">
-        <div>
-          <div className="send-mode" aria-label="消息模式" role="group">
-            <button
-              className={sendMode === 'steering' ? 'is-active' : ''}
-              onClick={() => {
-                setSendMode('steering');
-              }}
-              type="button"
-            >
-              引导
-            </button>
-            <button
-              className={sendMode === 'follow-up' ? 'is-active' : ''}
-              onClick={() => {
-                setSendMode('follow-up');
-              }}
-              type="button"
-            >
-              后续
-            </button>
-          </div>
+        <div className="composer-menu-wrap">
+          <button aria-expanded={menuOpen} aria-label="添加上下文" className="composer-tool-button" onClick={() => { setMenuOpen((value) => !value); }} type="button"><Plus size={15} /></button>
+          {menuOpen ? <div className="composer-menu"><strong>Skills</strong>{skills.map((skill) => { const key = `${skill.skillId}@${skill.version}`; return <button key={key} onClick={() => { if (!selectedSkillKeys.includes(key)) onSkillChange([...selectedSkillKeys, key]); setMenuOpen(false); }} type="button">/{skill.skillId}<small>{skill.description}</small></button>; })}<button disabled type="button"><Paperclip size={13} />添加附件</button></div> : null}
+          {running ? <button className="send-behavior" onClick={() => { setSendMode(sendMode === 'steering' ? 'follow-up' : 'steering'); }} type="button">{sendMode === 'steering' ? '立即调整当前工作' : '完成后继续'}<ChevronDown size={11} /></button> : null}
         </div>
-        {running ? (
-          <ComposerPrimitive.Cancel asChild>
-            <button aria-label="停止运行" className="send-button" title="停止" type="button">
-              <Square aria-hidden="true" size={13} />
-            </button>
-          </ComposerPrimitive.Cancel>
-        ) : (
-          <ComposerPrimitive.Send asChild>
-            <button aria-label="发送" className="send-button" title="发送" type="submit">
-              <ArrowUp aria-hidden="true" size={17} />
-            </button>
-          </ComposerPrimitive.Send>
-        )}
+        {threadRunning ? <ComposerPrimitive.Cancel asChild><button aria-label="停止" className="send-button" type="button"><Square size={13} /></button></ComposerPrimitive.Cancel> : <ComposerPrimitive.Send asChild><button aria-label="发送" className="send-button" type="submit"><ArrowUp size={17} /></button></ComposerPrimitive.Send>}
       </div>
     </ComposerPrimitive.Root>
   );
 }
 
-function RunInspector({
-  run,
-  onToolDecision,
-  onProposalDecision,
-  onArticleUpdated,
-}: {
-  readonly run: typeof initialRunView;
-  readonly onToolDecision: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
-  readonly onProposalDecision: (
-    proposalId: string,
-    decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
-  ) => Promise<Readonly<Record<string, unknown>>>;
-  readonly onArticleUpdated?: () => Promise<void>;
-}): React.JSX.Element {
-  const [expanded, setExpanded] = useState(true);
-  const [toolDecisions, setToolDecisions] = useState<Record<string, 'approved' | 'denied'>>({});
-  const [proposalDecisions, setProposalDecisions] = useState<
-    Record<string, 'accepted' | 'rejected'>
-  >({});
-  const approval = run.tools.find((tool) => tool.status === 'approval_requested');
-  const groupedSpecialists = useMemo(
-    () => [...new Set(run.tasks.map((task) => task.owner))],
-    [run.tasks],
-  );
-  const proposal = run.proposal;
-  const allProposalOperationsDecided =
-    proposal?.operations.every((operation) => proposalDecisions[operation.operationId]) ?? false;
-  const proposalSettled =
-    proposal?.status === 'accepted' ||
-    proposal?.status === 'partially_accepted' ||
-    proposal?.status === 'rejected';
-
-  useEffect(() => {
-    setProposalDecisions({});
-  }, [proposal?.proposalId]);
-
-  const decideAll = (decision: 'accepted' | 'rejected'): void => {
-    if (!proposal) return;
-    setProposalDecisions(
-      Object.fromEntries(proposal.operations.map((operation) => [operation.operationId, decision])),
-    );
-  };
-
-  const submitProposal = async (): Promise<void> => {
-    if (!proposal || !allProposalOperationsDecided || proposalSettled) return;
-    try {
-      await onProposalDecision(proposal.proposalId, proposalDecisions);
-      await onArticleUpdated?.();
-    } catch {
-      // The runtime and workspace owner expose the persisted error state to the user.
-    }
-  };
-
-  return (
-    <section className="run-inspector" aria-label="Agent 运行详情">
-      <button
-        aria-expanded={expanded}
-        aria-label={expanded ? '折叠运行详情' : '展开运行详情'}
-        className="inspector-heading"
-        onClick={() => {
-          setExpanded((value) => !value);
-        }}
-        type="button"
-      >
-        <span>
-          <Sparkles aria-hidden="true" size={15} /> 执行计划 · v{run.revision}
-        </span>
-        <ChevronDown aria-hidden="true" className={expanded ? 'is-open' : ''} size={15} />
-      </button>
-      {expanded ? (
-        <div className="inspector-body">
-          <ol className="task-list">
-            {run.tasks.map((task) => (
-              <li key={task.id}>
-                <span className={`task-state task-${task.status}`}>
-                  {task.status === 'succeeded' ? <Check size={11} /> : null}
-                </span>
-                <span>
-                  <strong>{task.label}</strong>
-                  <small>
-                    {task.owner} · {task.criticality === 'required' ? '必需' : '可选'}
-                  </small>
-                </span>
-              </li>
-            ))}
-          </ol>
-          <div className="specialist-row" aria-label="协作 Specialist">
-            {groupedSpecialists.map((owner) => (
-              <span key={owner}>{owner}</span>
-            ))}
-          </div>
-
-          <section className="inspector-section">
-            <h3>
-              <Wrench aria-hidden="true" size={14} /> 工具调用
-            </h3>
-            {run.tools.map((tool) => (
-              <div className="tool-row" key={tool.id}>
-                <span>
-                  <strong>{tool.name}</strong>
-                  <small>{tool.status}</small>
-                </span>
-                <code>{compactJson(tool.args)}</code>
-              </div>
-            ))}
-          </section>
-
-          {approval ? (
-            <section className="approval-row" aria-label="工具审批">
-              <CircleAlert aria-hidden="true" size={16} />
-              <div>
-                <strong>写入前需要审批</strong>
-                <span>参数已绑定到本次 Tool Call</span>
-              </div>
-              <div>
-                <button
-                  aria-label="批准工具调用"
-                  aria-pressed={toolDecisions[approval.id] === 'approved'}
-                  className={toolDecisions[approval.id] === 'approved' ? 'is-selected' : ''}
-                  onClick={() => {
-                    setToolDecisions((value) => ({ ...value, [approval.id]: 'approved' }));
-                    void onToolDecision(approval.id, 'approved');
-                  }}
-                  title="批准"
-                  type="button"
-                >
-                  <Check size={14} />
-                </button>
-                <button
-                  aria-label="拒绝工具调用"
-                  aria-pressed={toolDecisions[approval.id] === 'denied'}
-                  className={toolDecisions[approval.id] === 'denied' ? 'is-selected' : ''}
-                  onClick={() => {
-                    setToolDecisions((value) => ({ ...value, [approval.id]: 'denied' }));
-                    void onToolDecision(approval.id, 'denied');
-                  }}
-                  title="拒绝"
-                  type="button"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {proposal ? (
-            <section className="proposal-preview" aria-label="文章修改提案审核">
-              <div className="proposal-heading">
-                <div>
-                  <strong>文章修改提案</strong>
-                  <span>{proposal.operations.length} 项修改</span>
-                </div>
-                {!proposalSettled ? (
-                  <div>
-                    <button
-                      disabled={proposal.status === 'submitting'}
-                      onClick={() => {
-                        decideAll('accepted');
-                      }}
-                      type="button"
-                    >
-                      全部接受
-                    </button>
-                    <button
-                      disabled={proposal.status === 'submitting'}
-                      onClick={() => {
-                        decideAll('rejected');
-                      }}
-                      type="button"
-                    >
-                      全部拒绝
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <ArticleDiff
-                decisions={proposalDecisions}
-                disabled={proposal.status === 'submitting' || proposalSettled}
-                entries={proposal.diffs}
-                onDecision={(operationId, decision) => {
-                  setProposalDecisions((current) => ({ ...current, [operationId]: decision }));
-                }}
-              />
-              {proposal.error ? (
-                <p className="proposal-error" role="alert">
-                  {proposal.error}
-                </p>
-              ) : null}
-              <div className="proposal-submit-row">
-                <span>{proposalStatusText(proposal.status)}</span>
-                {!proposalSettled ? (
-                  <button
-                    className="primary-action"
-                    disabled={!allProposalOperationsDecided || proposal.status === 'submitting'}
-                    onClick={() => void submitProposal()}
-                    type="button"
-                  >
-                    {proposal.status === 'submitting' ? '提交中...' : '应用决策'}
-                  </button>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          <section className="inspector-section evidence-list">
-            <h3>
-              <FileCheck2 aria-hidden="true" size={14} /> Evidence
-            </h3>
-            {run.evidence.map((item) => (
-              <div key={item.evidenceId}>
-                <strong>{item.title}</strong>
-                <span title={item.revision}>{item.source}</span>
-              </div>
-            ))}
-          </section>
-
-          <footer className="run-metadata">
-            <span>
-              <Coins aria-hidden="true" size={13} />{' '}
-              {run.usage.inputTokens + run.usage.outputTokens} tokens · $
-              {run.usage.costUsd.toFixed(3)}
-            </span>
-            <span>
-              <RotateCcw aria-hidden="true" size={13} /> {run.recovery}
-            </span>
-          </footer>
-        </div>
-      ) : null}
-    </section>
-  );
+function MemoryCandidates({ memories, onDecision }: { readonly memories: readonly MemoryView[]; readonly onDecision: (id: string, decision: 'accepted' | 'rejected') => Promise<void> }): React.JSX.Element | null {
+  const pending = memories.filter(({ status }) => status === 'pending');
+  if (pending.length === 0) return null;
+  return <section className="memory-candidates"><strong>可保存的偏好</strong>{pending.map((memory) => <div className="memory-candidate" key={memory.id}><span>{memory.subject}：{memory.value}</span><button onClick={() => void onDecision(memory.id, 'accepted')} type="button">保存</button><button onClick={() => void onDecision(memory.id, 'rejected')} type="button">忽略</button></div>)}</section>;
 }
 
-function proposalStatusText(status: NonNullable<typeof initialRunView.proposal>['status']): string {
-  if (status === 'submitting') return '正在写入不可变文章修订';
-  if (status === 'accepted') return '已接受全部修改';
-  if (status === 'partially_accepted') return '已应用部分修改';
-  if (status === 'rejected') return '已拒绝全部修改';
-  if (status === 'error') return '提交失败，可检查后重试';
-  return '请逐项审核后提交';
+function proposalFromPart(part: RunPart): Proposal | undefined {
+  const output = recordValue(part.payload.output);
+  const value = Object.keys(output).length > 0 ? output : part.payload;
+  const proposalId = stringValue(value.proposalId);
+  if (!proposalId || !Array.isArray(value.operations) || !Array.isArray(value.diffs)) return undefined;
+  return { proposalId, operations: value.operations as readonly EditOperation[], diffs: value.diffs as readonly DiffEntry[] };
+}
+
+function parseRunPart(value: unknown): RunPart | undefined {
+  const candidate = recordValue(value);
+  const type = stringValue(candidate.type);
+  const allowed = ['text', 'plan', 'activity', 'tool-approval', 'ask-user', 'evidence', 'article-change', 'artifact', 'warning', 'recovery', 'usage'] as const;
+  if (!allowed.some((item) => item === type)) return undefined;
+  return {
+    id: stringValue(candidate.id),
+    runId: stringValue(candidate.runId),
+    sequence: numberValue(candidate.sequence),
+    type: type as RunPart['type'],
+    status: stringValue(candidate.status),
+    payload: recordValue(candidate.payload),
+  };
+}
+
+function useRunActions(): RunActions {
+  const actions = useContext(RunActionsContext);
+  if (!actions) throw new Error('Run actions are unavailable');
+  return actions;
 }
 
 function compactJson(value: Readonly<Record<string, unknown>>): string {
-  const text = JSON.stringify(value);
-  return text.length > 72 ? `${text.slice(0, 69)}...` : text;
+  const text = JSON.stringify(value, null, 2);
+  return text.length > 1200 ? `${text.slice(0, 1197)}…` : text;
 }
+
+function statusLabel(status: string): string {
+  const labels: Record<string, string> = { ready: '就绪', checking: '连接中', unavailable: '未配置', queued: '排队中', planning: '规划中', running: '工作中', waiting_for_approval: '等待确认', waiting_for_user: '等待回答', recovering: '恢复中', completed: '已完成', completed_with_degradation: '已完成（有警告）', failed: '失败', cancelled: '已取消', 'run.started': '已开始', 'run.queued': '排队中', 'task.started': '进行中', 'task.succeeded': '已完成', 'task.failed': '失败', 'tool.proposed': '准备调用', 'tool.executing': '执行中', 'tool.succeeded': '已完成', 'tool.failed': '失败' };
+  return labels[status] ?? status.replaceAll('_', ' ');
+}
+
 function statusTone(status: string): string {
-  if (status.includes('失败') || status.includes('取消')) return 'danger';
-  if (status.includes('审批') || status.includes('重连')) return 'warning';
-  if (status.includes('完成')) return 'success';
+  if (status.includes('fail') || status.includes('cancel') || status === 'unavailable') return 'danger';
+  if (status.includes('waiting') || status.includes('recover')) return 'warning';
+  if (status.includes('complete') || status === 'ready') return 'success';
   return 'active';
+}
+
+function showContextError(setError: (message: string) => void): (error: unknown) => void {
+  return (error) => { setError(error instanceof Error ? error.message : '操作失败'); };
 }

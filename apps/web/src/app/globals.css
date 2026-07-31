@@ -88,7 +88,7 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr) 430px;
+  grid-template-columns: 248px minmax(0, 1fr) minmax(420px, 460px);
   min-height: 100dvh;
   background: #ffffff;
 }
@@ -787,6 +787,12 @@ button {
 }
 
 .agent-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid #ededeb;
   background: #ffffff;
 }
 
@@ -795,6 +801,112 @@ button {
   align-items: center;
   gap: 9px;
   font-size: 14px;
+}
+
+.conversation-picker {
+  min-width: 0;
+  flex: 1;
+}
+
+.conversation-picker > button {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.conversation-picker strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-menu,
+.composer-menu {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgb(20 20 18 / 12%);
+}
+
+.conversation-menu {
+  top: 42px;
+  left: 10px;
+  width: min(300px, calc(100vw - 24px));
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.conversation-menu button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 7px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.conversation-menu button:hover {
+  background: #f1f1ef;
+}
+
+.conversation-menu button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-menu small {
+  color: #979892;
+  font-size: 10px;
+}
+
+.conversation-menu .conversation-new {
+  justify-content: flex-start;
+  border-top: 1px solid #ececea;
+  border-radius: 0;
+  margin-top: 4px;
+  padding-top: 9px;
+}
+
+.header-icon-button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  color: #777873;
+  cursor: pointer;
+}
+
+.header-icon-button:hover {
+  background: #eeeeec;
+}
+
+.agent-status-banner {
+  position: absolute;
+  z-index: 12;
+  top: 52px;
+  right: 10px;
+  left: 10px;
+  border: 1px solid #eadcc9;
+  border-radius: 6px;
+  background: #fffaf3;
+  padding: 7px 9px;
+  color: #79501d;
+  font-size: 11px;
 }
 
 .status-dot {
@@ -870,6 +982,15 @@ button {
   width: 100%;
 }
 
+.assistant-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.assistant-content > * + * {
+  margin-top: 8px;
+}
+
 .assistant-avatar {
   display: grid;
   width: 24px;
@@ -885,6 +1006,161 @@ button {
 .message-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.run-part {
+  color: #4a4b47;
+  font-size: 12px;
+}
+
+.run-part summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-part summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-part summary small {
+  margin-left: auto;
+  color: #92938e;
+  font-size: 10px;
+  font-weight: 450;
+}
+
+.plan-part,
+.artifact-part,
+.proposal-preview,
+.ask-user-part {
+  border-top: 1px solid #e5e5e2;
+  border-bottom: 1px solid #e5e5e2;
+  padding: 8px 0;
+}
+
+.plan-part ol {
+  display: grid;
+  gap: 9px;
+  margin: 5px 0 4px;
+  padding: 0 0 0 4px;
+  list-style: none;
+}
+
+.plan-part li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.plan-part li strong,
+.plan-part li small,
+.artifact-part strong,
+.artifact-part span {
+  display: block;
+}
+
+.plan-part li strong {
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.plan-part li small,
+.artifact-part span {
+  color: #8b8c86;
+  font-size: 10px;
+}
+
+.activity-part {
+  border-left: 1px solid #dcdcd8;
+  padding-left: 10px;
+}
+
+.activity-part pre,
+.usage-part pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 2px 0 8px;
+  border-radius: 5px;
+  background: #f4f4f2;
+  padding: 7px;
+  color: #676862;
+  font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}
+
+.ask-user-part > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #333430;
+}
+
+.ask-user-part > div,
+.ask-user-part form {
+  display: flex;
+  gap: 5px;
+}
+
+.ask-user-part > div {
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
+
+.ask-user-part button {
+  border: 1px solid #dcdcd8;
+  border-radius: 5px;
+  background: #ffffff;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.ask-user-part input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid #dcdcd8;
+  border-radius: 5px;
+  outline: none;
+  padding: 6px 8px;
+}
+
+.artifact-part h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  font-size: 12px;
+}
+
+.artifact-part > div {
+  padding: 5px 0;
+}
+
+.evidence-part,
+.notice-part {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.evidence-part span {
+  margin-left: auto;
+  color: #8b8c86;
+}
+
+.notice-part {
+  color: #805b26;
+}
+
+.notice-warning {
+  color: #9a463e;
+}
+
+.usage-part {
+  color: #858680;
 }
 
 .run-inspector {
@@ -1083,11 +1359,12 @@ button {
 }
 
 .approval-row button {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
+  display: inline-flex;
+  height: 27px;
+  align-items: center;
+  gap: 3px;
   border-radius: 5px;
+  padding: 0 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -1334,6 +1611,7 @@ button {
 }
 
 .agent-composer {
+  position: relative;
   margin: 12px;
   border: 1px solid #d8d8d4;
   border-radius: 8px;
@@ -1348,12 +1626,27 @@ button {
   padding: 9px 10px 0;
 }
 
-.composer-context span {
+.composer-context button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   min-width: 0;
+  border: 1px solid #dededb;
+  border-radius: 5px;
+  background: #ffffff;
   padding: 3px 6px;
   overflow: hidden;
+  color: #676862;
+  cursor: pointer;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-context button.is-selected {
+  border-color: #b9d1c3;
+  background: #f2f8f4;
+  color: #35694b;
 }
 
 .agent-composer textarea {
@@ -1382,6 +1675,79 @@ button {
 .composer-actions > div {
   display: flex;
   align-items: center;
+}
+
+.composer-menu-wrap {
+  position: relative;
+  gap: 6px;
+}
+
+.composer-tool-button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  color: #696a65;
+  cursor: pointer;
+}
+
+.composer-tool-button:hover {
+  background: #eeeeec;
+}
+
+.composer-menu {
+  bottom: 34px;
+  left: 0;
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.composer-menu > strong {
+  padding: 5px 7px;
+  color: #93948f;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.composer-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.composer-menu button:hover:not(:disabled) {
+  background: #f1f1ef;
+}
+
+.composer-menu button small {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #93948f;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.send-behavior {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 5px 6px;
+  color: #757670;
+  cursor: pointer;
+  font-size: 10px;
 }
 
 .send-mode {
@@ -1709,13 +2075,19 @@ button {
   color: #92938e;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1180px) {
   .workspace {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
   .agent-panel {
-    display: none;
+    position: fixed;
+    z-index: 40;
+    top: 0;
+    right: 0;
+    width: min(460px, calc(100vw - 48px));
+    height: 100dvh;
+    box-shadow: -16px 0 40px rgb(20 20 18 / 12%);
   }
 
   .document-outline {
