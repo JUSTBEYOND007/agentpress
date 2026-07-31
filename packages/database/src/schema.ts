@@ -231,11 +231,15 @@ export const conversations = pgTable(
       onDelete: 'cascade',
     }),
     title: varchar('title', { length: 300 }).notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    archivedAt: timestamp('archived_at', { withTimezone: true, precision: 3 }),
     createdAt,
     updatedAt,
   },
   (table) => [
-    unique('conversations_article_unique').on(table.articleId),
+    uniqueIndex('conversations_article_default_unique')
+      .on(table.articleId)
+      .where(sql`${table.articleId} is not null and ${table.isDefault} = true`),
     index('conversations_workspace_updated_idx').on(table.workspaceId, table.updatedAt),
   ],
 );
@@ -544,6 +548,9 @@ export const contextPacks = pgTable(
       onDelete: 'restrict',
     }),
     manifest: jsonb('manifest').$type<Readonly<Record<string, unknown>>>().notNull(),
+    content: text('content').notNull().default(''),
+    format: varchar('format', { length: 32 }).notNull().default('json'),
+    schemaVersion: integer('schema_version').notNull().default(1),
     contentHash: varchar('content_hash', { length: 80 }).notNull(),
     tokenCount: integer('token_count').notNull(),
     createdAt,
@@ -551,6 +558,247 @@ export const contextPacks = pgTable(
   (table) => [
     unique('context_packs_task_unique').on(table.taskId),
     check('context_packs_token_count_check', sql`${table.tokenCount} >= 0`),
+    check('context_packs_schema_version_check', sql`${table.schemaVersion} > 0`),
+  ],
+);
+
+export const agentSessions = pgTable(
+  'agent_sessions',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 24 }).notNull(),
+    attempt: integer('attempt').notNull().default(1),
+    logicalKey: varchar('logical_key', { length: 240 }).notNull(),
+    model: varchar('model', { length: 160 }).notNull(),
+    promptRevisionId: uuid('prompt_revision_id').references(() => promptRevisions.id, {
+      onDelete: 'restrict',
+    }),
+    status: varchar('status', { length: 24 }).notNull().default('active'),
+    nextSequence: bigint('next_sequence', { mode: 'number' }).notNull().default(1),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    unique('agent_sessions_logical_key_unique').on(table.logicalKey),
+    index('agent_sessions_run_idx').on(table.runId, table.createdAt),
+    check('agent_sessions_kind_check', sql`${table.kind} in ('main', 'specialist')`),
+    check('agent_sessions_status_check', sql`${table.status} in ('active', 'completed', 'failed')`),
+    check('agent_sessions_attempt_check', sql`${table.attempt} > 0`),
+  ],
+);
+
+export const agentTranscriptEntries = pgTable(
+  'agent_transcript_entries',
+  {
+    id: uuid('id').primaryKey(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: 'cascade' }),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    role: varchar('role', { length: 24 }).notNull(),
+    messageType: varchar('message_type', { length: 32 }).notNull(),
+    content: jsonb('content').$type<Readonly<Record<string, unknown>>>().notNull(),
+    providerToolCallId: varchar('provider_tool_call_id', { length: 240 }),
+    createdAt,
+  },
+  (table) => [
+    unique('agent_transcript_entries_session_sequence_unique').on(
+      table.sessionId,
+      table.sequence,
+    ),
+    index('agent_transcript_entries_tool_call_idx').on(table.providerToolCallId),
+    check(
+      'agent_transcript_entries_role_check',
+      sql`${table.role} in ('system', 'user', 'assistant', 'tool', 'application')`,
+    ),
+  ],
+);
+
+export const planRevisionTasks = pgTable(
+  'plan_revision_tasks',
+  {
+    planRevisionId: uuid('plan_revision_id')
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    sourceRevisionId: uuid('source_revision_id').references(() => planRevisions.id, {
+      onDelete: 'set null',
+    }),
+    createdAt,
+  },
+  (table) => [
+    primaryKey({ columns: [table.planRevisionId, table.taskId] }),
+    unique('plan_revision_tasks_position_unique').on(table.planRevisionId, table.position),
+    check('plan_revision_tasks_position_check', sql`${table.position} >= 0`),
+  ],
+);
+
+export const runQuestions = pgTable(
+  'run_questions',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    prompt: text('prompt').notNull(),
+    options: jsonb('options').$type<readonly string[]>().notNull(),
+    status: varchar('status', { length: 24 }).notNull().default('pending'),
+    answer: text('answer'),
+    answeredByUserId: uuid('answered_by_user_id').references(() => appUsers.id, {
+      onDelete: 'restrict',
+    }),
+    createdAt,
+    answeredAt: timestamp('answered_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    uniqueIndex('run_questions_one_pending_unique')
+      .on(table.runId)
+      .where(sql`${table.status} = 'pending'`),
+    check('run_questions_status_check', sql`${table.status} in ('pending', 'answered', 'cancelled')`),
+  ],
+);
+
+export const queuedFollowups = pgTable(
+  'queued_followups',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    content: text('content').notNull(),
+    requestedByUserId: uuid('requested_by_user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'restrict' }),
+    status: varchar('status', { length: 24 }).notNull().default('pending'),
+    createdRunId: uuid('created_run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    createdAt,
+    consumedAt: timestamp('consumed_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    unique('queued_followups_run_sequence_unique').on(table.runId, table.sequence),
+    check('queued_followups_status_check', sql`${table.status} in ('pending', 'cancelled', 'consumed')`),
+  ],
+);
+
+export const artifacts = pgTable(
+  'artifacts',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
+    type: varchar('type', { length: 40 }).notNull(),
+    title: varchar('title', { length: 300 }).notNull(),
+    currentVersion: integer('current_version').notNull().default(1),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    index('artifacts_run_idx').on(table.runId, table.createdAt),
+    check(
+      'artifacts_type_check',
+      sql`${table.type} in ('ResearchBrief', 'Outline', 'ArticleDraft', 'EditProposal', 'ClaimReview', 'ImagePlan', 'AssetProposal')`,
+    ),
+  ],
+);
+
+export const artifactVersions = pgTable(
+  'artifact_versions',
+  {
+    id: uuid('id').primaryKey(),
+    artifactId: uuid('artifact_id')
+      .notNull()
+      .references(() => artifacts.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    summary: text('summary').notNull(),
+    content: jsonb('content').$type<Readonly<Record<string, unknown>>>().notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    editProposalId: uuid('edit_proposal_id').references(() => editProposals.id, {
+      onDelete: 'set null',
+    }),
+    createdAt,
+  },
+  (table) => [
+    unique('artifact_versions_artifact_version_unique').on(table.artifactId, table.version),
+    check('artifact_versions_version_check', sql`${table.version} > 0`),
+  ],
+);
+
+export const evidenceRecords = pgTable(
+  'evidence_records',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
+    sourceType: varchar('source_type', { length: 32 }).notNull(),
+    sourceUri: text('source_uri'),
+    title: text('title').notNull(),
+    excerpt: text('excerpt').notNull(),
+    sourceRevision: varchar('source_revision', { length: 160 }).notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    metadata: jsonb('metadata').$type<Readonly<Record<string, unknown>>>().notNull(),
+    createdAt,
+  },
+  (table) => [index('evidence_records_run_idx').on(table.runId, table.createdAt)],
+);
+
+export const artifactEvidence = pgTable(
+  'artifact_evidence',
+  {
+    artifactVersionId: uuid('artifact_version_id')
+      .notNull()
+      .references(() => artifactVersions.id, { onDelete: 'cascade' }),
+    evidenceId: uuid('evidence_id')
+      .notNull()
+      .references(() => evidenceRecords.id, { onDelete: 'restrict' }),
+    claim: text('claim').notNull(),
+    ordinal: integer('ordinal').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.artifactVersionId, table.evidenceId, table.ordinal] }),
+    check('artifact_evidence_ordinal_check', sql`${table.ordinal} > 0`),
+  ],
+);
+
+export const runAttachments = pgTable(
+  'run_attachments',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    uploadedByUserId: uuid('uploaded_by_user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'restrict' }),
+    filename: varchar('filename', { length: 300 }).notNull(),
+    mimeType: varchar('mime_type', { length: 120 }).notNull(),
+    byteSize: integer('byte_size').notNull(),
+    objectKey: text('object_key').notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    parseStatus: varchar('parse_status', { length: 24 }).notNull().default('pending'),
+    extractedText: text('extracted_text'),
+    parseFailure: text('parse_failure'),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    index('run_attachments_workspace_idx').on(table.workspaceId, table.createdAt),
+    check('run_attachments_size_check', sql`${table.byteSize} > 0 and ${table.byteSize} <= 20971520`),
+    check(
+      'run_attachments_parse_status_check',
+      sql`${table.parseStatus} in ('pending', 'ready', 'failed')`,
+    ),
   ],
 );
 
