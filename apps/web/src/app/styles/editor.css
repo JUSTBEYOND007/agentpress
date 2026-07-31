@@ -1,0 +1,269 @@
+.article-canvas {
+  width: min(780px, calc(100% - 64px));
+  min-height: calc(100dvh - 52px);
+  margin: 0 auto;
+  padding: 88px 0 160px;
+  outline: none;
+}
+
+.article-editor-shell {
+  position: relative;
+}
+
+.editor-toolbar {
+  position: sticky;
+  z-index: 8;
+  top: 0;
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-bottom: 1px solid #eeeeec;
+  background: rgb(255 255 255 / 96%);
+}
+
+.editor-toolbar button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.editor-toolbar button:hover,
+.editor-toolbar button.is-active {
+  background: #eeeeec;
+}
+
+.editor-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.slash-menu {
+  position: fixed;
+  z-index: 20;
+  top: 150px;
+  left: max(280px, calc(50vw - 240px));
+  display: grid;
+  width: 240px;
+  border: 1px solid #dededb;
+  border-radius: 7px;
+  background: #fff;
+  padding: 5px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 14%);
+}
+
+.slash-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 4px;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.slash-menu button:hover {
+  background: #f1f1ef;
+}
+
+.slash-menu span {
+  color: #92938e;
+  font-size: 11px;
+}
+
+.document-outline {
+  position: fixed;
+  z-index: 7;
+  top: 112px;
+  right: 448px;
+  width: 170px;
+  border: 1px solid #e8e8e6;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 96%);
+  padding: 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 6%);
+}
+
+.document-outline summary {
+  cursor: pointer;
+  color: #73746f;
+  font-size: 12px;
+}
+
+.document-outline nav {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.document-outline button {
+  overflow: hidden;
+  background: transparent;
+  color: #858680;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article-canvas .tiptap {
+  min-height: inherit;
+  outline: none;
+}
+
+.article-canvas .tiptap p.is-editor-empty:first-child::before {
+  float: left;
+  height: 0;
+  color: #aaa;
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.article-canvas table {
+  width: 100%;
+  margin: 18px 0;
+  border-collapse: collapse;
+}
+
+.article-canvas th,
+.article-canvas td {
+  min-width: 80px;
+  border: 1px solid #d8d8d5;
+  padding: 7px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.article-canvas th {
+  background: #f5f5f3;
+  font-weight: 600;
+}
+
+.article-canvas ul[data-type='taskList'] {
+  padding-left: 4px;
+  list-style: none;
+}
+
+.article-canvas li[data-type='taskItem'] {
+  display: flex;
+  gap: 8px;
+}
+
+.save-state {
+  position: absolute;
+  top: 18px;
+  right: 24px;
+  color: #898a85;
+  font-size: 12px;
+}
+
+.save-offline {
+  color: #a56625;
+}
+
+.article-diff {
+  display: grid;
+  gap: 8px;
+}
+
+.diff-operation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid #e1e1de;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-before,
+.diff-after {
+  padding: 8px 10px;
+}
+
+.diff-before {
+  background: #fff0ef;
+  color: #8e3731;
+}
+
+.diff-after {
+  background: #edf8ef;
+  color: #27643c;
+}
+
+.diff-before span,
+.diff-after span {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.diff-before p,
+.diff-after p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.diff-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px;
+}
+
+.diff-actions button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diff-actions button:hover,
+.diff-actions button.is-selected {
+  background: #e9e9e6;
+}
+
+.article-canvas h1 {
+  margin: 0 0 28px;
+  color: #202124;
+  font-size: 44px;
+  font-weight: 720;
+  line-height: 1.16;
+}
+
+.article-canvas h2 {
+  margin: 42px 0 14px;
+  font-size: 25px;
+  line-height: 1.3;
+}
+
+.article-canvas p,
+.article-canvas blockquote {
+  font-family: ui-serif, Georgia, 'Noto Serif SC', serif;
+  font-size: 17px;
+  line-height: 1.85;
+}
+
+.article-canvas p {
+  margin: 12px 0;
+}
+
+.article-canvas .article-lead {
+  color: #696a66;
+  font-size: 19px;
+}
+
+.article-canvas blockquote {
+  margin: 28px 0;
+  border-left: 3px solid #2b7de9;
+  padding-left: 18px;
+  color: #53544f;
+}

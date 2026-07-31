@@ -5,6 +5,7 @@
   "scripts": {
     "benchmark:editor": "tsx scripts/editor-benchmark.ts",
     "build": "next build",
+    "check:file-lengths": "node scripts/check-file-lengths.mjs",
     "dev": "next dev --port 3000",
     "lint": "eslint src scripts",
     "start": "next start --port 3000",

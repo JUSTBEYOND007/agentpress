@@ -1,0 +1,150 @@
+.sidebar,
+.agent-panel {
+  min-width: 0;
+  background: #fafafa;
+}
+
+.sidebar {
+  border-right: 1px solid #e8e8e6;
+  padding: 12px 10px;
+}
+
+.workspace-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.brand-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 6px;
+  background: #202124;
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.primary-nav {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.nav-item,
+.tree-item {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  border-radius: 6px;
+  background: transparent;
+  color: #555650;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-item {
+  height: 34px;
+  padding: 0 9px;
+  font-size: 14px;
+}
+
+.nav-item:hover,
+.tree-item:hover,
+.nav-item.is-active {
+  background: #efefed;
+  color: #242522;
+}
+
+.sidebar-section {
+  margin-top: 24px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 7px;
+  color: #92938e;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tree-item {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.tree-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 6px;
+  background: transparent;
+  color: #747570;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: #eeeeec;
+  color: #202124;
+}
+
+.icon-button.is-active {
+  background: #e7eef8;
+  color: #2868aa;
+}
+
+.document-pane {
+  min-width: 0;
+  background: #ffffff;
+}
+
+.document-toolbar,
+.agent-header {
+  display: flex;
+  height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #eeeeec;
+  padding: 0 18px;
+}
+
+.breadcrumb {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: #8b8c87;
+  font-size: 13px;
+}
+
+.breadcrumb strong {
+  overflow: hidden;
+  color: #454642;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+}
