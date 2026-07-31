@@ -22,12 +22,20 @@ export type RuntimeToolCall = {
   readonly arguments: Readonly<Record<string, unknown>>;
 };
 
+export type RuntimeAssistantContentBlock =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'thinking'; readonly thinking: string }
+  | RuntimeToolCall;
+
 export type RuntimeToolResultMessage = {
   readonly role: 'tool';
   readonly toolCallId: string;
   readonly toolName: string;
   readonly content: string;
   readonly details?: unknown;
+  readonly usage?: RuntimeUsage;
+  readonly terminate?: boolean;
+  readonly addedToolNames?: readonly string[];
   readonly isError: boolean;
   readonly timestamp: number;
 };
@@ -35,6 +43,7 @@ export type RuntimeToolResultMessage = {
 export type RuntimeAssistantMessage = {
   readonly role: 'assistant';
   readonly content: string;
+  readonly blocks?: readonly RuntimeAssistantContentBlock[];
   readonly parts?: readonly RuntimeToolCall[];
   readonly provider: string;
   readonly model: string;
@@ -73,11 +82,7 @@ export type RuntimeEvent =
   | { readonly type: 'run.failed'; readonly error: RuntimeFailure };
 
 export type RuntimeFailure = {
-  readonly code:
-    | 'provider_error'
-    | 'invalid_history'
-    | 'protocol_error'
-    | 'runtime_error';
+  readonly code: 'provider_error' | 'invalid_history' | 'protocol_error' | 'runtime_error';
   readonly message: string;
   readonly retryable: boolean;
 };
@@ -85,9 +90,39 @@ export type RuntimeFailure = {
 export type RuntimeRequest = {
   readonly runId: string;
   readonly systemPrompt: string;
-  readonly history: readonly RuntimeMessage[];
+  readonly history: readonly RuntimeTranscriptMessage[];
   readonly prompt: string;
   readonly tools?: readonly RuntimeTool[];
+  readonly continuation?: boolean;
+  readonly maxToolCalls?: number;
+  readonly maxFailedCompletionCalls?: number;
+  readonly beforeToolCall?: (
+    context: RuntimeBeforeToolCallContext,
+  ) => Promise<RuntimeBeforeToolCallResult | undefined> | RuntimeBeforeToolCallResult | undefined;
+  readonly afterToolCall?: (
+    context: RuntimeAfterToolCallContext,
+  ) => Promise<RuntimeAfterToolCallResult | undefined> | RuntimeAfterToolCallResult | undefined;
+};
+
+export type RuntimeBeforeToolCallContext = {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly arguments: unknown;
+};
+
+export type RuntimeBeforeToolCallResult = { readonly block?: boolean; readonly reason?: string };
+
+export type RuntimeAfterToolCallContext = RuntimeBeforeToolCallContext & {
+  readonly result: RuntimeToolResultMessage;
+};
+
+export type RuntimeAfterToolCallResult = {
+  readonly content?: string;
+  readonly details?: unknown;
+  readonly isError?: boolean;
+  readonly usage?: RuntimeUsage;
+  readonly terminate?: boolean;
+  readonly addedToolNames?: readonly string[];
 };
 
 export type RuntimeTool = {
@@ -95,10 +130,12 @@ export type RuntimeTool = {
   readonly label: string;
   readonly description: string;
   readonly parameters: TSchema;
-  readonly constrainedSampling?: false | {
-    readonly type: 'json_schema';
-    readonly strict: 'prefer' | 'require';
-  };
+  readonly constrainedSampling?:
+    | false
+    | {
+        readonly type: 'json_schema';
+        readonly strict: 'prefer' | 'require';
+      };
   readonly executionMode?: 'sequential' | 'parallel';
   readonly output?: 'json' | 'text';
   readonly terminateOnSuccess?: boolean;
@@ -136,4 +173,5 @@ export type AgentRuntime = {
     sink: RuntimeEventSink,
     signal?: AbortSignal,
   ): Promise<RuntimeResult>;
+  steer?(message: RuntimeUserMessage): boolean;
 };

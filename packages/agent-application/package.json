@@ -26,7 +26,9 @@
     "@agentpress/agent-context": "workspace:*",
     "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/database": "workspace:*",
+    "@agentpress/editor-patch": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
+    "@earendil-works/pi-ai": "catalog:",
     "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:"
   }

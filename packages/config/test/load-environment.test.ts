@@ -45,4 +45,14 @@ describe('loadApiEnvironment', () => {
       arkEmbeddingModel: 'embedding-endpoint-id',
     });
   });
+
+  it('treats empty optional values from the example env as unconfigured', () => {
+    expect(
+      loadWorkerEnvironment({
+        ARK_API_KEY: '',
+        ARK_MODEL_PRO: '',
+        ARK_RERANK_MODEL: '',
+      }),
+    ).not.toHaveProperty('arkApiKey');
+  });
 });

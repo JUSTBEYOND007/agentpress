@@ -6,12 +6,17 @@ import {
   appendRunEvent,
   approvals,
   type AgentPressDatabase,
+  enqueueOutboxMessage,
   toolCalls,
 } from '@agentpress/database';
 import { hashToolArguments, ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
-import type { DurableRunEvent, RunEventPublisher } from './contracts.js';
+import {
+  AGENT_RUN_COMMAND_TOPIC,
+  type DurableRunEvent,
+  type RunEventPublisher,
+} from './contracts.js';
 
 const APPROVAL_RISKS = new Set(['external_write', 'destructive']);
 
@@ -36,6 +41,7 @@ export class ToolCallApplicationError extends Error {
 export type ProposeToolCallInput = {
   readonly runId: string;
   readonly taskId?: string;
+  readonly providerToolCallId?: string;
   readonly toolId: string;
   readonly toolVersion: string;
   readonly arguments: Readonly<Record<string, unknown>>;
@@ -106,7 +112,8 @@ export class ToolCallService {
             existing.runId !== input.runId ||
             existing.toolId !== definition.toolId ||
             existing.toolVersion !== definition.version ||
-            existing.argumentsHash !== argumentsHash
+            existing.argumentsHash !== argumentsHash ||
+            existing.providerToolCallId !== (input.providerToolCallId ?? null)
           ) {
             throw new ToolCallApplicationError(
               'approval_mismatch',
@@ -137,6 +144,7 @@ export class ToolCallService {
         id: toolCallId,
         runId: input.runId,
         ...(input.taskId ? { taskId: input.taskId } : {}),
+        ...(input.providerToolCallId ? { providerToolCallId: input.providerToolCallId } : {}),
         toolId: definition.toolId,
         toolVersion: definition.version,
         arguments: input.arguments,
@@ -295,6 +303,17 @@ export class ToolCallService {
         runId: call.runId,
         eventType: input.decision === 'approved' ? 'tool.approved' : 'tool.denied',
         payload: { toolCallId: input.toolCallId, approvalId: call.approvalId },
+      });
+      const resumeMessageId = this.createId();
+      await enqueueOutboxMessage(transaction, {
+        id: resumeMessageId,
+        aggregateType: 'AgentRun',
+        aggregateId: call.runId,
+        topic: AGENT_RUN_COMMAND_TOPIC,
+        messageKey: call.runId,
+        payload: { command: 'run.execute', messageId: resumeMessageId, runId: call.runId },
+        occurredAt: now,
+        availableAt: new Date(now.getTime() + 31_000),
       });
       return { expired: false as const, event: toDurableEvent(event) };
     });

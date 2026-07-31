@@ -31,10 +31,16 @@ import { Type } from '@sinclair/typebox';
 import { fetchPublicImage, fetchResearchSource } from '@agentpress/web-research';
 import { and, eq } from 'drizzle-orm';
 
+import { searchPublicSources } from './web-search.js';
+
 export function createBuiltInToolRuntime(
   database: AgentPressDatabase,
   publisher: RunEventPublisher,
-): { readonly bridge: PersistentToolBridge; readonly manager: McpServerManager } {
+): {
+  readonly bridge: PersistentToolBridge;
+  readonly manager: McpServerManager;
+  readonly toolCalls: ToolCallService;
+} {
   const manager = new McpServerManager();
   const handlers = createHandlers(database);
   for (const definition of createInMemoryBuiltInDefinitions(handlers)) manager.register(definition);
@@ -107,7 +113,11 @@ export function createBuiltInToolRuntime(
     },
   });
   const toolCalls = new ToolCallService({ database, publisher, registry });
-  return { bridge: new PersistentToolBridge({ database, registry, toolCalls }), manager };
+  return {
+    bridge: new PersistentToolBridge({ database, registry, toolCalls }),
+    manager,
+    toolCalls,
+  };
 }
 
 function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
@@ -131,17 +141,7 @@ function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
       : undefined;
   return {
     web_research: async ({ query, limit }, signal) => {
-      const endpoint = new URL('https://zh.wikipedia.org/w/api.php');
-      endpoint.search = new URLSearchParams({
-        action: 'query',
-        list: 'search',
-        srsearch: query,
-        srlimit: String(limit),
-        format: 'json',
-        origin: '*',
-      }).toString();
-      const payload = await fetchJson(endpoint, signal);
-      const results = normalizeWikiSearch(payload);
+      const results = await searchPublicSources(query, limit, { signal });
       return Promise.all(
         results.map(async (result) => {
           try {
@@ -229,27 +229,6 @@ async function fetchJson(url: URL, signal: AbortSignal): Promise<unknown> {
   });
   if (!response.ok) throw new Error(`Search provider returned HTTP ${String(response.status)}`);
   return response.json() as Promise<unknown>;
-}
-
-function normalizeWikiSearch(value: unknown): readonly {
-  readonly title: string;
-  readonly url: string;
-  readonly excerpt: string;
-  readonly source: string;
-}[] {
-  if (!isRecord(value) || !isRecord(value.query) || !Array.isArray(value.query.search)) return [];
-  return value.query.search.flatMap((item) => {
-    if (!isRecord(item) || typeof item.title !== 'string' || typeof item.pageid !== 'number')
-      return [];
-    return [
-      {
-        title: item.title,
-        url: `https://zh.wikipedia.org/?curid=${String(item.pageid)}`,
-        excerpt: typeof item.snippet === 'string' ? stripTags(item.snippet) : '',
-        source: 'Wikipedia',
-      },
-    ];
-  });
 }
 
 function normalizeCommonsSearch(value: unknown): readonly unknown[] {

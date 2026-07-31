@@ -94,7 +94,9 @@ export type WorkerEnvironment = {
 
 function cleanEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(source).flatMap(([key, value]) => (value === undefined ? [] : [[key, value]])),
+    Object.entries(source).flatMap(([key, value]) =>
+      value === undefined || value.length === 0 ? [] : [[key, value]],
+    ),
   );
 }
 

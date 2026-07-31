@@ -143,7 +143,7 @@ describeWithDatabase('Tool Call application flow', () => {
       registry,
       toolCalls: service,
     });
-    const tools = await bridge.createForRun(runId);
+    const tools = await bridge.createForRun(runId, ['workspace.read']);
     const search = tools.find((tool) => tool.label === 'workspace.search');
     await expect(
       search?.execute({ query: 'durable tool' }, { runId, providerToolCallId: randomUUID() }),
@@ -162,7 +162,7 @@ describeWithDatabase('Tool Call application flow', () => {
       registry,
       toolCalls: service,
     });
-    const search = (await bridge.createForRun(runId)).find(
+    const search = (await bridge.createForRun(runId, ['workspace.read'])).find(
       (tool) => tool.label === 'workspace.search',
     );
     const providerToolCallId = randomUUID();
@@ -200,7 +200,7 @@ describeWithDatabase('Tool Call application flow', () => {
       database: connection.db,
       registry,
       toolCalls: service,
-    }).createForRun(runId);
+    }).createForRun(runId, ['publication.write']);
     expect(tools.map(({ label }) => label)).toEqual(['publication.publish']);
   });
 
@@ -211,7 +211,7 @@ describeWithDatabase('Tool Call application flow', () => {
       registry,
       toolCalls: service,
       capabilityLimit: 1,
-    }).createForRun(runId, ['workspace.knowledge.read']);
+    }).createForRun(runId, ['workspace.read']);
     expect(tools.map(({ label }) => label)).toEqual(['workspace.search']);
   });
 

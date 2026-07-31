@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -10,6 +10,8 @@ import {
   agentTasks,
   appUsers,
   approvals,
+  articleRevisions,
+  articles,
   artifacts,
   connectDatabase,
   conversationBranches,
@@ -21,6 +23,7 @@ import {
   workspaces,
 } from '@agentpress/database';
 import { eq } from 'drizzle-orm';
+import { createBuiltInToolRuntime } from '@agentpress/runtime-tools';
 
 import {
   runOnlineEvals,
@@ -32,6 +35,7 @@ import { EVAL_CATEGORIES, evalScenarios, type EvalCategory } from './scenarios.j
 const { values } = parseArgs({
   options: {
     category: { type: 'string' },
+    scenario: { type: 'string' },
     concurrency: { type: 'string', default: '2' },
     limit: { type: 'string', default: String(evalScenarios.length) },
     'max-total-tokens': { type: 'string', default: '200000' },
@@ -45,9 +49,19 @@ const proModel = requiredEnv('ARK_MODEL_PRO');
 const turboModel = process.env.ARK_MODEL_TURBO?.trim();
 const databaseUrl = requiredEnv('DATABASE_URL');
 const category = parseCategory(values.category);
-const scenarios = category
+const categoryScenarios = category
   ? evalScenarios.filter((scenario) => scenario.category === category)
   : evalScenarios;
+const selectedScenario = values.scenario;
+const scenarios = selectedScenario
+  ? categoryScenarios.filter(
+      (scenario) =>
+        scenario.id === selectedScenario || scenario.id === `agentpress-${selectedScenario}`,
+    )
+  : categoryScenarios;
+if (selectedScenario && scenarios.length === 0) {
+  throw new Error(`Unknown eval scenario: ${selectedScenario}`);
+}
 const limits: OnlineEvalLimits = {
   concurrency: parseNumber(values.concurrency, 'concurrency'),
   maxScenarios: parseNumber(values.limit, 'limit'),
@@ -56,7 +70,16 @@ const limits: OnlineEvalLimits = {
 };
 const connection = connectDatabase(databaseUrl);
 const publisher: RunEventPublisher = { publish: () => Promise.resolve() };
+const runtimeTools = createBuiltInToolRuntime(connection.db, publisher);
 const harness = createDatabaseHarness();
+const emptyUsage: RuntimeUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  totalTokens: 0,
+  costUsd: 0,
+};
 
 try {
   const report = await runOnlineEvals({
@@ -83,6 +106,11 @@ try {
   );
   if (!report.gatesPassed) process.exitCode = 1;
 } finally {
+  await Promise.all(
+    (['web_research', 'workspace_knowledge', 'licensed_media'] as const).map((serverId) =>
+      runtimeTools.manager.stop(serverId),
+    ),
+  );
   await connection.close();
 }
 
@@ -93,6 +121,27 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
       const workspaceId = randomUUID();
       const conversationId = randomUUID();
       const branchId = randomUUID();
+      const requiresArticle =
+        scenario.expected.requiredCapabilities.includes('article.read') ||
+        scenario.expected.requiredCapabilities.includes('article.propose');
+      const articleId = requiresArticle ? randomUUID() : undefined;
+      const revisionId = requiresArticle ? randomUUID() : undefined;
+      const document = {
+        type: 'doc',
+        content: [
+          {
+            type: 'heading',
+            attrs: { level: 1, blockId: 'eval-heading' },
+            content: [{ type: 'text', text: '待修改的评测文章' }],
+          },
+          {
+            type: 'paragraph',
+            attrs: { blockId: 'eval-paragraph' },
+            content: [{ type: 'text', text: '这是供 AgentPress 在线评测使用的真实文章上下文。' }],
+          },
+        ],
+      } as const;
+      const documentHash = createHash('sha256').update(JSON.stringify(document)).digest('hex');
       await connection.db.transaction(async (transaction) => {
         await transaction
           .insert(appUsers)
@@ -101,9 +150,33 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           .insert(workspaces)
           .values({ id: workspaceId, name: `Eval ${scenario.id}` });
         await transaction.insert(workspaceMembers).values({ workspaceId, userId, role: 'owner' });
-        await transaction
-          .insert(conversations)
-          .values({ id: conversationId, workspaceId, title: '新对话' });
+        if (articleId && revisionId) {
+          await transaction.insert(articles).values({
+            id: articleId,
+            workspaceId,
+            title: '待修改的评测文章',
+          });
+          await transaction.insert(articleRevisions).values({
+            id: revisionId,
+            articleId,
+            revisionNumber: 1,
+            schemaVersion: 1,
+            document,
+            documentHash,
+            source: 'manual',
+            createdByUserId: userId,
+          });
+          await transaction
+            .update(articles)
+            .set({ currentRevisionId: revisionId })
+            .where(eq(articles.id, articleId));
+        }
+        await transaction.insert(conversations).values({
+          id: conversationId,
+          workspaceId,
+          title: '新对话',
+          ...(articleId ? { articleId, isDefault: true } : {}),
+        });
         await transaction.insert(conversationBranches).values({ id: branchId, conversationId });
       });
       const service = new DirectRunService({
@@ -122,6 +195,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
             });
           },
         },
+        runtimeToolFactory: runtimeTools.bridge,
         systemPrompt:
           'You are AgentPress. Use the control tools to execute the user request and preserve evidence. Never reveal hidden chain of thought.',
       });
@@ -131,8 +205,24 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
         userId,
         prompt: scenario.prompt,
         idempotencyKey: `eval:${scenario.id}:${randomUUID()}`,
+        ...(articleId && revisionId
+          ? { contextBindings: [{ type: 'article_revision' as const, articleId, revisionId }] }
+          : {}),
       });
-      await service.execute(created.runId);
+      const execution = service.execute(created.runId);
+      let executionFinished = false;
+      void execution.then(
+        () => {
+          executionFinished = true;
+        },
+        () => {
+          executionFinished = true;
+        },
+      );
+      if (scenario.expected.approval === 'required') {
+        await approvePendingToolCall(created.runId, userId, () => executionFinished);
+      }
+      await execution;
       const [runRows, taskRows, artifactRows, evidenceRows, approvalRows, toolRows, eventRows] =
         await Promise.all([
           connection.db
@@ -213,14 +303,33 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
   };
 }
 
-const emptyUsage: RuntimeUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cacheReadTokens: 0,
-  cacheWriteTokens: 0,
-  totalTokens: 0,
-  costUsd: 0,
-};
+async function approvePendingToolCall(
+  runId: string,
+  userId: string,
+  executionFinished: () => boolean,
+): Promise<boolean> {
+  const deadline = Date.now() + 20 * 60_000;
+  const approved = new Set<string>();
+  while (Date.now() < deadline) {
+    if (executionFinished()) return approved.size > 0;
+    const rows = await connection.db
+      .select({ id: toolCalls.id, status: toolCalls.status })
+      .from(toolCalls)
+      .where(eq(toolCalls.runId, runId));
+    for (const row of rows) {
+      if (row.status !== 'awaiting_approval' || approved.has(row.id)) continue;
+      await runtimeTools.toolCalls.decideApproval({
+        toolCallId: row.id,
+        decision: 'approved',
+        userId,
+      });
+      approved.add(row.id);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for required approval in Run ${runId}`);
+}
+
 function requiredEnv(name: 'ARK_API_KEY' | 'ARK_MODEL_PRO' | 'DATABASE_URL'): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required for full Orchestrator online eval`);

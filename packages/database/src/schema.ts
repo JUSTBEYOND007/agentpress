@@ -606,10 +606,7 @@ export const agentTranscriptEntries = pgTable(
     createdAt,
   },
   (table) => [
-    unique('agent_transcript_entries_session_sequence_unique').on(
-      table.sessionId,
-      table.sequence,
-    ),
+    unique('agent_transcript_entries_session_sequence_unique').on(table.sessionId, table.sequence),
     index('agent_transcript_entries_tool_call_idx').on(table.providerToolCallId),
     check(
       'agent_transcript_entries_role_check',
@@ -661,7 +658,10 @@ export const runQuestions = pgTable(
     uniqueIndex('run_questions_one_pending_unique')
       .on(table.runId)
       .where(sql`${table.status} = 'pending'`),
-    check('run_questions_status_check', sql`${table.status} in ('pending', 'answered', 'cancelled')`),
+    check(
+      'run_questions_status_check',
+      sql`${table.status} in ('pending', 'answered', 'cancelled')`,
+    ),
   ],
 );
 
@@ -684,7 +684,10 @@ export const queuedFollowups = pgTable(
   },
   (table) => [
     unique('queued_followups_run_sequence_unique').on(table.runId, table.sequence),
-    check('queued_followups_status_check', sql`${table.status} in ('pending', 'cancelled', 'consumed')`),
+    check(
+      'queued_followups_status_check',
+      sql`${table.status} in ('pending', 'cancelled', 'consumed')`,
+    ),
   ],
 );
 
@@ -794,7 +797,10 @@ export const runAttachments = pgTable(
   },
   (table) => [
     index('run_attachments_workspace_idx').on(table.workspaceId, table.createdAt),
-    check('run_attachments_size_check', sql`${table.byteSize} > 0 and ${table.byteSize} <= 20971520`),
+    check(
+      'run_attachments_size_check',
+      sql`${table.byteSize} > 0 and ${table.byteSize} <= 20971520`,
+    ),
     check(
       'run_attachments_parse_status_check',
       sql`${table.parseStatus} in ('pending', 'ready', 'failed')`,
@@ -855,6 +861,7 @@ export const toolCalls = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: 'cascade' }),
     taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
+    providerToolCallId: varchar('provider_tool_call_id', { length: 240 }),
     toolId: varchar('tool_id', { length: 180 }).notNull(),
     toolVersion: varchar('tool_version', { length: 80 }).notNull(),
     arguments: jsonb('arguments').$type<Readonly<Record<string, unknown>>>().notNull(),
@@ -872,6 +879,9 @@ export const toolCalls = pgTable(
   },
   (table) => [
     index('tool_calls_run_status_idx').on(table.runId, table.status),
+    uniqueIndex('tool_calls_run_provider_call_unique')
+      .on(table.runId, table.providerToolCallId)
+      .where(sql`${table.providerToolCallId} is not null`),
     uniqueIndex('tool_calls_idempotency_unique')
       .on(table.idempotencyKey)
       .where(sql`${table.idempotencyKey} is not null`),
@@ -962,7 +972,7 @@ export const runDirectives = pgTable(
     check('run_directives_kind_check', sql`${table.kind} in ('steering', 'follow_up')`),
     check(
       'run_directives_status_check',
-      sql`${table.status} in ('pending', 'applied', 'consumed')`,
+      sql`${table.status} in ('pending', 'applied', 'consumed', 'cancelled')`,
     ),
   ],
 );

@@ -56,5 +56,25 @@ describe('agent application contracts', () => {
         () => 'task-2',
       ),
     ).toThrow(/unauthorized capability/u);
+    expect(() =>
+      validateSubmittedPlan(
+        {
+          goal: 'Role escalation',
+          tasks: [
+            {
+              clientKey: 'research',
+              owner: 'researcher',
+              objective: 'Modify the article',
+              criticality: 'required',
+              acceptanceCriteria: ['Change proposed'],
+              dependencyKeys: [],
+              capabilities: ['article.propose'],
+            },
+          ],
+        },
+        ['article.propose'],
+        () => 'task-3',
+      ),
+    ).toThrow(/forbidden for researcher/u);
   });
 });

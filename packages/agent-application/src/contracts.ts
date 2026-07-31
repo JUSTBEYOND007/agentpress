@@ -1,7 +1,19 @@
-import type { AgentRuntime, RuntimeEvent, RuntimeTool } from '@agentpress/agent-runtime';
+import type {
+  AgentRuntime,
+  RuntimeEvent,
+  RuntimeTool,
+  RuntimeToolResultMessage,
+} from '@agentpress/agent-runtime';
 
 export const AGENT_RUN_COMMAND_TOPIC = 'agent.run.commands';
 export const AGENT_RUN_CANCEL_CHANNEL = 'agentpress:run:cancel';
+export const AGENT_RUN_STEER_CHANNEL = 'agentpress:run:steer';
+
+export type RunSteeringCommand = {
+  readonly runId: string;
+  readonly directiveId: string;
+  readonly content: string;
+};
 
 export type DurableRunEvent = {
   readonly id: string;
@@ -39,6 +51,11 @@ export type RuntimeToolFactory = {
     taskId?: string,
   ): Promise<readonly RuntimeTool[]>;
   listCapabilities(runId: string): Promise<readonly string[]>;
+  resumeApprovedToolCall?(
+    runId: string,
+    taskId: string,
+    providerToolCallId: string,
+  ): Promise<RuntimeToolResultMessage | undefined>;
 };
 
 export type SelectedSkillInput = {
@@ -46,12 +63,30 @@ export type SelectedSkillInput = {
   readonly version: string;
 };
 
+export type RunContextBinding =
+  | { readonly type: 'mention'; readonly targetId: string }
+  | { readonly type: 'attachment'; readonly attachmentId: string }
+  | { readonly type: 'evidence'; readonly evidenceId: string }
+  | {
+      readonly type: 'article_revision';
+      readonly articleId: string;
+      readonly revisionId: string;
+    }
+  | {
+      readonly type: 'article_selection';
+      readonly articleId: string;
+      readonly revisionId: string;
+      readonly blocks: readonly { readonly blockId: string; readonly contentHash: string }[];
+    }
+  | ({ readonly type: 'skill' } & SelectedSkillInput);
+
 export type CreateDirectRunInput = {
   readonly conversationId: string;
   readonly branchId: string;
   readonly userId: string;
   readonly prompt: string;
   readonly idempotencyKey: string;
+  readonly contextBindings?: readonly RunContextBinding[];
   readonly mentionTargetIds?: readonly string[];
   readonly attachmentIds?: readonly string[];
   readonly skills?: readonly SelectedSkillInput[];

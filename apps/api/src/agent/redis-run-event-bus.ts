@@ -1,5 +1,7 @@
 import {
   AGENT_RUN_CANCEL_CHANNEL,
+  AGENT_RUN_STEER_CHANNEL,
+  type RunSteeringCommand,
   type LiveRunEvent,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
@@ -29,6 +31,11 @@ export class RedisRunEventBus implements RunEventPublisher {
   public async publishCancellation(runId: string): Promise<void> {
     await this.ensurePublisherConnected();
     await this.publisher.publish(AGENT_RUN_CANCEL_CHANNEL, runId);
+  }
+
+  public async publishSteering(command: RunSteeringCommand): Promise<void> {
+    await this.ensurePublisherConnected();
+    await this.publisher.publish(AGENT_RUN_STEER_CHANNEL, JSON.stringify(command));
   }
 
   public async subscribe(runId: string, listener: RunEventListener): Promise<() => Promise<void>> {

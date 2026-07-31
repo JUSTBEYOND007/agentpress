@@ -6,6 +6,7 @@ import type {
   RuntimeMessage,
   RuntimeResult,
   RuntimeTool,
+  RuntimeTranscriptMessage,
   RuntimeUsage,
 } from '@agentpress/agent-runtime';
 import {
@@ -32,9 +33,10 @@ import {
   runQuestions,
   taskBriefs,
   taskResults,
+  toolCalls,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, max, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -118,6 +120,28 @@ const artifactTypes = [
   'AssetProposal',
 ] as const;
 
+const specialistCapabilityPolicy: Readonly<Record<SpecialistRole, ReadonlySet<string>>> = {
+  researcher: new Set(['web.research', 'workspace.knowledge.read', 'article.read']),
+  writer: new Set(['workspace.knowledge.read', 'article.read', 'article.propose']),
+  editor: new Set(['workspace.knowledge.read', 'article.read', 'article.propose']),
+  fact_checker: new Set(['web.research', 'workspace.knowledge.read', 'article.read']),
+  illustrator: new Set([
+    'article.read',
+    'article.propose',
+    'licensed_media.search',
+    'licensed_media.import',
+    'image.generate',
+  ]),
+};
+
+const specialistResponsibilities: Readonly<Record<SpecialistRole, string>> = {
+  researcher: 'Collect and synthesize source-backed information.',
+  writer: 'Create new outlines and article drafts from supplied context and upstream results.',
+  editor: 'Revise existing article content and create reviewable edit proposals.',
+  fact_checker: 'Verify claims and citations against available sources.',
+  illustrator: 'Plan, find, generate, and propose licensed or generated visual assets.',
+};
+
 const taskSchema = Type.Object(
   {
     clientKey: Type.String({ minLength: 1, maxLength: 80 }),
@@ -136,7 +160,10 @@ const taskSchema = Type.Object(
 
 const taskCompleteSchema = Type.Object(
   {
-    status: Type.Union([Type.Literal('succeeded'), Type.Literal('failed')]),
+    status: Type.Unsafe<'succeeded' | 'failed'>({
+      type: 'string',
+      enum: ['succeeded', 'failed'],
+    }),
     summary: Type.String({ minLength: 1, maxLength: 20_000 }),
     artifacts: Type.Array(
       Type.Object(
@@ -169,10 +196,19 @@ const planRevisionSchema = Type.Object(
 export class PlannedRunExecutor {
   private readonly now: () => Date;
   private readonly createId: () => string;
+  private readonly activeMainRuntimes = new Map<
+    string,
+    ReturnType<AgentRuntimeFactory['create']>
+  >();
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
+  }
+
+  public steerActiveMain(runId: string, content: string): boolean {
+    const runtime = this.activeMainRuntimes.get(runId);
+    return runtime?.steer?.({ role: 'user', content, timestamp: this.now().getTime() }) ?? false;
   }
 
   public async execute(
@@ -221,8 +257,9 @@ export class PlannedRunExecutor {
       return this.persistAndExecutePlan(runId, prompt, control.plan, signal);
     }
     const tasks = await this.loadPlanTasks(runId, run.revisionId);
+    const settled = await this.loadPersistedTaskResults(tasks);
     await this.enterRunning(runId, 'planned');
-    return this.executePlannedWork(runId, prompt, tasks, signal);
+    return this.executePlannedWork(runId, prompt, tasks, signal, settled);
   }
 
   private async runMainControl(
@@ -388,8 +425,9 @@ export class PlannedRunExecutor {
     prompt: string,
     tasks: readonly PlannedTaskSpec[],
     signal?: AbortSignal,
+    initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
   ): Promise<PlannedExecutionOutcome> {
-    const settled = await this.executeDag(runId, tasks, prompt, signal);
+    const settled = await this.executeDag(runId, tasks, prompt, signal, initialSettled);
     if (signal?.aborted || settled.some(({ status }) => status === 'cancelled')) {
       return { degraded: false, result: { status: 'cancelled', messages: [] } };
     }
@@ -508,9 +546,12 @@ export class PlannedRunExecutor {
     tasks: readonly PlannedTaskSpec[],
     rootPrompt: string,
     signal?: AbortSignal,
+    initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
   ): Promise<readonly SettledTask[]> {
-    const settled = new Map<string, SettledTask>();
-    const pending = new Map(tasks.map((task) => [task.id, task]));
+    const settled = new Map(initialSettled);
+    const pending = new Map(
+      tasks.filter((task) => !settled.has(task.id)).map((task) => [task.id, task]),
+    );
     const orderedTasks = [...tasks];
     while (pending.size > 0) {
       if (signal?.aborted) {
@@ -814,7 +855,15 @@ export class PlannedRunExecutor {
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
-    await this.updateTaskStatus(runId, task, 'running');
+    if (!(await this.updateTaskStatus(runId, task, 'running'))) {
+      return {
+        ...task,
+        status: 'failed',
+        artifacts: [],
+        warnings: [],
+        failure: 'attempt_budget_exhausted',
+      };
+    }
     let completion:
       | {
           readonly status: 'succeeded' | 'failed';
@@ -850,24 +899,39 @@ export class PlannedRunExecutor {
         ? [{ taskId: id, status: dependency.status, summary: dependency.summary }]
         : [];
     });
-    let result = await this.executeWithTranscript(
-      runId,
-      task.id,
-      'specialist',
-      1,
-      task.owner,
-      specialistPrompt(task.owner),
-      [],
-      JSON.stringify({ rootRequest: rootPrompt, task, upstream }),
-      [...domainTools, taskComplete],
-      signal,
-    );
-    for (let repair = 1; !completion && result.status === 'completed' && repair <= 2; repair += 1) {
+    const recoveredHistory = await this.loadApprovedToolContinuation(runId, task.id);
+    let result = recoveredHistory
+      ? await this.executeWithTranscript(
+          runId,
+          task.id,
+          'specialist',
+          2,
+          task.owner,
+          specialistPrompt(task.owner),
+          recoveredHistory,
+          '',
+          [...domainTools, taskComplete],
+          signal,
+          true,
+        )
+      : await this.executeWithTranscript(
+          runId,
+          task.id,
+          'specialist',
+          1,
+          task.owner,
+          specialistPrompt(task.owner),
+          [],
+          JSON.stringify({ rootRequest: rootPrompt, task, upstream }),
+          [...domainTools, taskComplete],
+          signal,
+        );
+    for (let repair = 1; !completion && result.status !== 'cancelled' && repair <= 2; repair += 1) {
       result = await this.executeWithTranscript(
         runId,
         task.id,
         'specialist',
-        repair + 1,
+        (recoveredHistory ? 2 : 1) + repair,
         task.owner,
         specialistPrompt(task.owner),
         [],
@@ -883,7 +947,7 @@ export class PlannedRunExecutor {
         status: result.status === 'cancelled' ? 'cancelled' : 'failed',
         artifacts: [],
         warnings: [],
-        failure: result.status === 'failed' ? result.error.message : 'protocol_error',
+        failure: 'protocol_error',
         ...(assistant ? { usage: assistant.usage } : {}),
       };
       await this.persistTaskResult(runId, failed);
@@ -909,48 +973,95 @@ export class PlannedRunExecutor {
     attempt: number,
     modelPurpose: string,
     systemPrompt: string,
-    history: readonly RuntimeMessage[],
+    history: readonly RuntimeTranscriptMessage[],
     prompt: string,
     tools: readonly RuntimeTool[],
     signal?: AbortSignal,
+    continuation = false,
   ): Promise<RuntimeResult> {
-    const sessionId = this.createId();
-    await this.options.database.insert(agentSessions).values({
-      id: sessionId,
-      runId,
-      ...(taskId ? { taskId } : {}),
-      kind,
-      attempt,
-      logicalKey: taskId
-        ? `${runId}:task:${taskId}:${String(attempt)}`
-        : `${runId}:main:${String(attempt)}`,
-      model: modelPurpose,
-    });
-    let sequence = 1;
+    const logicalKey = taskId
+      ? `${runId}:task:${taskId}:${String(attempt)}`
+      : `${runId}:main:${String(attempt)}`;
+    const sessionRows = await this.options.database
+      .insert(agentSessions)
+      .values({
+        id: this.createId(),
+        runId,
+        ...(taskId ? { taskId } : {}),
+        kind,
+        attempt,
+        logicalKey,
+        model: modelPurpose,
+      })
+      .onConflictDoUpdate({
+        target: agentSessions.logicalKey,
+        set: { status: 'active', model: modelPurpose, updatedAt: this.now() },
+      })
+      .returning({ id: agentSessions.id });
+    const sessionId = sessionRows[0]?.id;
+    if (!sessionId) throw new Error(`Unable to initialize Agent Session ${logicalKey}`);
     const record = async (
       role: string,
       messageType: string,
       content: Readonly<Record<string, unknown>>,
       providerToolCallId?: string,
     ) => {
-      await this.options.database.insert(agentTranscriptEntries).values({
-        id: this.createId(),
-        sessionId,
-        sequence,
-        role,
-        messageType,
-        content,
-        ...(providerToolCallId ? { providerToolCallId } : {}),
+      await this.options.database.transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select id from ${agentSessions} where id = ${sessionId} for update`,
+        );
+        const sequenceRows = await transaction
+          .select({ nextSequence: agentSessions.nextSequence })
+          .from(agentSessions)
+          .where(eq(agentSessions.id, sessionId))
+          .limit(1);
+        const existingRows = await transaction
+          .select({ maxSequence: max(agentTranscriptEntries.sequence) })
+          .from(agentTranscriptEntries)
+          .where(eq(agentTranscriptEntries.sessionId, sessionId));
+        const persistedNext = sequenceRows[0]?.nextSequence;
+        if (!persistedNext)
+          throw new Error(`Agent Session ${sessionId} has no transcript sequence`);
+        const sequence = Math.max(persistedNext, (existingRows[0]?.maxSequence ?? 0) + 1);
+        await transaction.insert(agentTranscriptEntries).values({
+          id: this.createId(),
+          sessionId,
+          sequence,
+          role,
+          messageType,
+          content,
+          ...(providerToolCallId ? { providerToolCallId } : {}),
+        });
+        await transaction
+          .update(agentSessions)
+          .set({ nextSequence: sequence + 1, updatedAt: this.now() })
+          .where(eq(agentSessions.id, sessionId));
       });
-      sequence += 1;
     };
     await record('system', 'system_prompt', { content: systemPrompt });
+    for (const message of history) {
+      await record(
+        message.role,
+        'history',
+        { message },
+        message.role === 'tool' ? message.toolCallId : undefined,
+      );
+    }
     await record('user', 'prompt', { content: prompt });
     const runtime = this.options.runtimeFactory.create(modelPurpose);
+    if (kind === 'main') this.activeMainRuntimes.set(runId, runtime);
     let result: RuntimeResult;
     try {
       result = await runtime.execute(
-        { runId: sessionId, systemPrompt, history, prompt, tools },
+        {
+          runId: sessionId,
+          systemPrompt,
+          history,
+          prompt,
+          tools,
+          continuation,
+          ...(kind === 'specialist' ? { maxToolCalls: 12, maxFailedCompletionCalls: 2 } : {}),
+        },
         async (event) => {
           if (event.type === 'message.completed') {
             await record(event.message.role, 'message', { message: event.message });
@@ -974,11 +1085,13 @@ export class PlannedRunExecutor {
         error instanceof Error ? error.message : 'Unknown Pi runtime error',
       );
     }
+    if (kind === 'main' && this.activeMainRuntimes.get(runId) === runtime) {
+      this.activeMainRuntimes.delete(runId);
+    }
     await this.options.database
       .update(agentSessions)
       .set({
         status: result.status === 'completed' ? 'completed' : 'failed',
-        nextSequence: sequence,
         updatedAt: this.now(),
       })
       .where(eq(agentSessions.id, sessionId));
@@ -1151,6 +1264,96 @@ export class PlannedRunExecutor {
     }));
   }
 
+  private async loadPersistedTaskResults(
+    tasks: readonly PlannedTaskSpec[],
+  ): Promise<ReadonlyMap<string, SettledTask>> {
+    if (tasks.length === 0) return new Map();
+    const rows = await this.options.database
+      .select({
+        taskId: taskResults.taskId,
+        status: taskResults.status,
+        artifacts: taskResults.artifacts,
+        usage: taskResults.usage,
+        warnings: taskResults.warnings,
+        failure: taskResults.failure,
+      })
+      .from(taskResults)
+      .where(
+        inArray(
+          taskResults.taskId,
+          tasks.map(({ id }) => id),
+        ),
+      )
+      .orderBy(desc(taskResults.attempt));
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    const settled = new Map<string, SettledTask>();
+    for (const row of rows) {
+      if (settled.has(row.taskId) || row.status !== 'succeeded') continue;
+      const task = byId.get(row.taskId);
+      if (!task) continue;
+      settled.set(row.taskId, {
+        ...task,
+        status: 'succeeded',
+        summary: extractPersistedSummary(row.artifacts),
+        artifacts: decodePersistedArtifacts(row.artifacts),
+        usage: row.usage as RuntimeUsage,
+        warnings: row.warnings,
+        ...(typeof row.failure?.message === 'string' ? { failure: row.failure.message } : {}),
+      });
+    }
+    return settled;
+  }
+
+  private async loadApprovedToolContinuation(
+    runId: string,
+    taskId: string,
+  ): Promise<readonly RuntimeTranscriptMessage[] | undefined> {
+    const callRows = await this.options.database
+      .select({ providerToolCallId: toolCalls.providerToolCallId })
+      .from(toolCalls)
+      .where(
+        and(
+          eq(toolCalls.runId, runId),
+          eq(toolCalls.taskId, taskId),
+          inArray(toolCalls.status, ['approved', 'succeeded', 'denied', 'expired']),
+        ),
+      )
+      .orderBy(desc(toolCalls.createdAt))
+      .limit(1);
+    const providerToolCallId = callRows[0]?.providerToolCallId;
+    if (!providerToolCallId) return undefined;
+    const rows = await this.options.database
+      .select({ content: agentTranscriptEntries.content })
+      .from(agentTranscriptEntries)
+      .innerJoin(agentSessions, eq(agentSessions.id, agentTranscriptEntries.sessionId))
+      .where(
+        and(
+          eq(agentSessions.runId, runId),
+          eq(agentSessions.taskId, taskId),
+          eq(agentTranscriptEntries.role, 'assistant'),
+          eq(agentTranscriptEntries.messageType, 'message'),
+        ),
+      )
+      .orderBy(desc(agentTranscriptEntries.createdAt))
+      .limit(1);
+    const message = rows[0]?.content.message;
+    if (!isRuntimeAssistantMessage(message)) return undefined;
+    if (
+      !message.blocks?.some(
+        (block) => block.type === 'tool_call' && block.id === providerToolCallId,
+      )
+    ) {
+      return undefined;
+    }
+    const toolResult = await this.options.runtimeToolFactory?.resumeApprovedToolCall?.(
+      runId,
+      taskId,
+      providerToolCallId,
+    );
+    if (!toolResult) return undefined;
+    return [message, toolResult];
+  }
+
   private async persistTaskResult(runId: string, result: SettledTask): Promise<void> {
     const event = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
@@ -1198,10 +1401,15 @@ export class PlannedRunExecutor {
         persistedArtifacts.push({ artifactId, versionId, ...artifact });
       }
       if (result.status !== 'cancelled' && result.status !== 'skipped') {
+        const attempts = await transaction
+          .select({ attempt: agentTasks.attempt })
+          .from(agentTasks)
+          .where(eq(agentTasks.id, result.id))
+          .limit(1);
         await transaction.insert(taskResults).values({
           id: this.createId(),
           taskId: result.id,
-          attempt: 1,
+          attempt: Math.max(1, attempts[0]?.attempt ?? 1),
           status: result.status,
           artifacts: persistedArtifacts,
           evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
@@ -1214,7 +1422,7 @@ export class PlannedRunExecutor {
         id: this.createId(),
         runId,
         reason: 'task_settled',
-        state: { taskId: result.id, status: result.status, attempt: 1 },
+        state: { taskId: result.id, status: result.status },
       });
       return appendRunEvent(transaction, {
         id: this.createId(),
@@ -1243,10 +1451,10 @@ export class PlannedRunExecutor {
     task: PlannedTaskSpec,
     status: 'running' | 'skipped',
     failure?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const event = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
-      await transaction
+      const updated = await transaction
         .update(agentTasks)
         .set({
           status,
@@ -1256,7 +1464,16 @@ export class PlannedRunExecutor {
           updatedAt: now,
           version: sql`${agentTasks.version} + 1`,
         })
-        .where(eq(agentTasks.id, task.id));
+        .where(
+          status === 'running'
+            ? and(
+                eq(agentTasks.id, task.id),
+                sql`${agentTasks.attempt} < ${agentTasks.maxAttempts}`,
+              )
+            : eq(agentTasks.id, task.id),
+        )
+        .returning({ id: agentTasks.id });
+      if (updated.length === 0) return undefined;
       return appendRunEvent(transaction, {
         id: this.createId(),
         runId,
@@ -1264,7 +1481,9 @@ export class PlannedRunExecutor {
         payload: { taskId: task.id, owner: task.owner, ...(failure ? { failure } : {}) },
       });
     });
+    if (!event) return false;
     await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+    return true;
   }
 
   private async assertRunReferences(
@@ -1381,6 +1600,13 @@ export function validateSubmittedPlan(
     if (task.capabilities.some((capability) => !available.has(capability))) {
       throw new Error(`Task ${task.clientKey} requested an unauthorized capability`);
     }
+    if (
+      task.capabilities.some(
+        (capability) => !specialistCapabilityPolicy[task.owner].has(capability),
+      )
+    ) {
+      throw new Error(`Task ${task.clientKey} requested a capability forbidden for ${task.owner}`);
+    }
   }
   const ids = new Map(rawTasks.map(({ clientKey }) => [clientKey, createId()]));
   const tasks = rawTasks.map((task) => ({
@@ -1415,9 +1641,19 @@ function assertAcyclic(tasks: readonly PlannedTaskSpec[]): void {
 }
 
 function mainPlanningPrompt(capabilities: readonly string[]): string {
+  const specialists = specialistRoles.map((role) => ({
+    role,
+    responsibility: specialistResponsibilities[role],
+    allowedCapabilities: [...specialistCapabilityPolicy[role]],
+  }));
   return `You are the persistent AgentPress Main Agent. Decide how to handle the user's request.
-Return a normal final answer only when no tools or specialist work are needed.
-For work requiring tools, research, writing pipeline, article changes, or media, call plan_submit with a concrete minimal DAG.
+Current date: ${new Date().toISOString().slice(0, 10)}.
+Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.
+Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.
+Keep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.
+Choose Specialists from this policy catalog: ${JSON.stringify(specialists)}.
+For any edit to existing article content, delegate to editor and request both article.read and article.propose so it can obtain stable block hashes before proposing changes. Use writer for new drafts, not revisions to existing content.
+Request article.read or article.propose only when the frozen root context contains an article revision. A new standalone draft is an Artifact and does not need article tools.
 If required business information is missing, call user_request_input.
 Available capabilities: ${JSON.stringify(capabilities)}.
 Never emit a generic template plan. Never reveal hidden chain of thought.`;
@@ -1436,7 +1672,7 @@ Never answer as ordinary text and never reveal hidden chain of thought.`;
 }
 
 function specialistPrompt(role: SpecialistRole): string {
-  return `You are the AgentPress ${role} Specialist. Work only on the supplied immutable Task Brief. Use only available tools. Submit the final structured result through task_complete and never reveal hidden chain of thought.`;
+  return `You are the AgentPress ${role} Specialist. Current date: ${new Date().toISOString().slice(0, 10)}. Work only on the supplied immutable Task Brief. Use only available tools. Submit the final structured result through task_complete and never reveal hidden chain of thought.`;
 }
 
 function protocolFailure(messages: readonly RuntimeMessage[], message: string): RuntimeResult {
@@ -1451,6 +1687,52 @@ function findAssistant(result: RuntimeResult): RuntimeAssistantMessage | undefin
   return result.messages.findLast(
     (message): message is RuntimeAssistantMessage => message.role === 'assistant',
   );
+}
+
+function isRuntimeAssistantMessage(value: unknown): value is RuntimeAssistantMessage {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'role' in value &&
+    value.role === 'assistant' &&
+    'content' in value &&
+    typeof value.content === 'string' &&
+    'provider' in value &&
+    typeof value.provider === 'string' &&
+    'model' in value &&
+    typeof value.model === 'string'
+  );
+}
+
+function decodePersistedArtifacts(value: readonly unknown[]): readonly StructuredArtifact[] {
+  return value.flatMap((candidate) => {
+    if (typeof candidate !== 'object' || candidate === null) return [];
+    const item = candidate as Record<string, unknown>;
+    if (
+      !artifactTypes.includes(item.type as ArtifactType) ||
+      typeof item.title !== 'string' ||
+      typeof item.summary !== 'string' ||
+      typeof item.content !== 'object' ||
+      item.content === null
+    )
+      return [];
+    return [
+      {
+        type: item.type as ArtifactType,
+        title: item.title,
+        summary: item.summary,
+        content: item.content as Readonly<Record<string, unknown>>,
+        evidenceIds: Array.isArray(item.evidenceIds)
+          ? item.evidenceIds.filter((id): id is string => typeof id === 'string')
+          : [],
+      },
+    ];
+  });
+}
+
+function extractPersistedSummary(value: readonly unknown[]): string {
+  const artifacts = decodePersistedArtifacts(value);
+  return artifacts.map(({ summary }) => summary).join('\n') || 'Previously completed task result';
 }
 
 function publicTask(task: PlannedTaskSpec) {

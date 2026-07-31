@@ -7,6 +7,12 @@ import {
   type LiveRunEvent,
 } from '@agentpress/agent-application';
 import {
+  conversationBranches,
+  conversationMessages,
+  conversations,
+  type DatabaseConnection,
+} from '@agentpress/database';
+import {
   BadRequestException,
   Body,
   Controller,
@@ -21,12 +27,15 @@ import {
   Sse,
   type MessageEvent,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { and, asc, eq, lte } from 'drizzle-orm';
 import { Observable } from 'rxjs';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { AuthorizationService } from '../auth/authorization.service.js';
+import { DATABASE_CONNECTION } from './agent.providers.js';
 
 type CreateRunBody = {
   readonly branchId?: unknown;
@@ -34,6 +43,7 @@ type CreateRunBody = {
   readonly mentionTargetIds?: unknown;
   readonly attachmentIds?: unknown;
   readonly skills?: unknown;
+  readonly contextBindings?: unknown;
 };
 
 type RunDirectiveBody = {
@@ -64,6 +74,7 @@ export class AgentController {
     @Inject(RedisRunEventBus) private readonly eventBus: RedisRunEventBus,
     @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
     @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
+    @Inject(DATABASE_CONNECTION) private readonly connection?: DatabaseConnection,
   ) {}
 
   @Get('conversations/:conversationId/branches/:branchId/messages')
@@ -73,6 +84,72 @@ export class AgentController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.runs.listMessages(conversationId, branchId, user.id);
+  }
+
+  @Post('conversations/:conversationId/branches/:branchId/fork')
+  public async forkBranch(
+    @Param('conversationId') conversationId: string,
+    @Param('branchId') branchId: string,
+    @Body() body: { readonly messageId?: unknown },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!this.connection) throw new BadRequestException('Database connection is unavailable');
+    if (typeof body.messageId !== 'string')
+      throw new BadRequestException('messageId must be a string');
+    const messageId = body.messageId;
+    const rows = await this.connection.db
+      .select({
+        workspaceId: conversations.workspaceId,
+        sequence: conversationMessages.sequence,
+      })
+      .from(conversationMessages)
+      .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+      .where(
+        and(
+          eq(conversationMessages.id, messageId),
+          eq(conversationMessages.branchId, branchId),
+          eq(conversations.id, conversationId),
+          eq(conversationMessages.stable, true),
+        ),
+      )
+      .limit(1);
+    const forkPoint = rows[0];
+    if (!forkPoint) throw new NotFoundException('Fork message does not exist on this branch');
+    await this.authorization?.assertWorkspaceMember(forkPoint.workspaceId, user.id);
+    const messages = await this.connection.db
+      .select()
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.branchId, branchId),
+          eq(conversationMessages.stable, true),
+          lte(conversationMessages.sequence, forkPoint.sequence),
+        ),
+      )
+      .orderBy(asc(conversationMessages.sequence));
+    const newBranchId = randomUUID();
+    await this.connection.db.transaction(async (transaction) => {
+      await transaction.insert(conversationBranches).values({
+        id: newBranchId,
+        conversationId,
+        parentBranchId: branchId,
+        forkedFromMessageId: messageId,
+      });
+      if (messages.length > 0)
+        await transaction.insert(conversationMessages).values(
+          messages.map((message) => ({
+            id: randomUUID(),
+            branchId: newBranchId,
+            role: message.role,
+            sequence: message.sequence,
+            content: message.content,
+            stable: true,
+            createdAt: message.createdAt,
+          })),
+        );
+    });
+    return { branchId: newBranchId, parentBranchId: branchId, forkedFromMessageId: messageId };
   }
 
   @Post('conversations/:conversationId/runs')
@@ -92,6 +169,7 @@ export class AgentController {
     const mentionTargetIds = parseStringArray(body.mentionTargetIds, 'mentionTargetIds', 20);
     const attachmentIds = parseStringArray(body.attachmentIds, 'attachmentIds', 10);
     const skills = parseSkills(body.skills);
+    const contextBindings = parseContextBindings(body.contextBindings);
 
     try {
       return await this.runs.create({
@@ -103,6 +181,7 @@ export class AgentController {
         mentionTargetIds,
         attachmentIds,
         skills,
+        contextBindings,
       });
     } catch (error) {
       throw mapApplicationError(error);
@@ -254,10 +333,27 @@ export class AgentController {
     }
     if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
     try {
-      return await this.runs.enqueueSteering(runId, body.content);
+      const directive = await this.runs.enqueueSteering(runId, body.content);
+      await this.eventBus.publishSteering({
+        runId,
+        directiveId: directive.directiveId,
+        content: body.content.trim(),
+      });
+      return directive;
     } catch (error) {
       throw mapApplicationError(error);
     }
+  }
+
+  @Post('runs/:runId/steering/:directiveId/cancel')
+  @HttpCode(200)
+  public async cancelSteering(
+    @Param('runId') runId: string,
+    @Param('directiveId') directiveId: string,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
+    return { cancelled: await this.runs.cancelSteering(runId, directiveId) };
   }
 
   @Post('runs/:runId/follow-ups')
@@ -367,6 +463,60 @@ function parseSkills(value: unknown): readonly { skillId: string; version: strin
       throw new BadRequestException('Every Skill selection requires skillId and version');
     return { skillId: selection.skillId, version: selection.version };
   });
+}
+
+function parseContextBindings(
+  value: unknown,
+): readonly import('@agentpress/agent-application').RunContextBinding[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 40)
+    throw new BadRequestException('contextBindings must contain at most 40 bindings');
+  return value.map((binding) => {
+    if (typeof binding !== 'object' || binding === null || Array.isArray(binding))
+      throw new BadRequestException('Every context binding must be an object');
+    const item = binding as Record<string, unknown>;
+    if (item.type === 'mention' && typeof item.targetId === 'string')
+      return { type: 'mention', targetId: item.targetId };
+    if (item.type === 'attachment' && typeof item.attachmentId === 'string')
+      return { type: 'attachment', attachmentId: item.attachmentId };
+    if (item.type === 'evidence' && typeof item.evidenceId === 'string')
+      return { type: 'evidence', evidenceId: item.evidenceId };
+    if (
+      item.type === 'skill' &&
+      typeof item.skillId === 'string' &&
+      typeof item.version === 'string'
+    )
+      return { type: 'skill', skillId: item.skillId, version: item.version };
+    if (
+      item.type === 'article_revision' &&
+      typeof item.articleId === 'string' &&
+      typeof item.revisionId === 'string'
+    )
+      return { type: 'article_revision', articleId: item.articleId, revisionId: item.revisionId };
+    if (
+      item.type === 'article_selection' &&
+      typeof item.articleId === 'string' &&
+      typeof item.revisionId === 'string' &&
+      Array.isArray(item.blocks) &&
+      item.blocks.length <= 50 &&
+      item.blocks.every(isArticleSelectionBlock)
+    )
+      return {
+        type: 'article_selection',
+        articleId: item.articleId,
+        revisionId: item.revisionId,
+        blocks: item.blocks,
+      };
+    throw new BadRequestException('Unsupported or malformed context binding');
+  });
+}
+
+function isArticleSelectionBlock(
+  block: unknown,
+): block is { readonly blockId: string; readonly contentHash: string } {
+  if (typeof block !== 'object' || block === null || Array.isArray(block)) return false;
+  const value = block as Record<string, unknown>;
+  return typeof value.blockId === 'string' && typeof value.contentHash === 'string';
 }
 
 function toSseEvent(event: DurableRunEvent): MessageEvent {

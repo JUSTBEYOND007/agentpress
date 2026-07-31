@@ -83,12 +83,14 @@ export function useAgentPressAssistantRuntime(
     readonly conversationId?: string;
     readonly branchId?: string;
     readonly mentionTargetIds?: readonly string[];
+    readonly attachmentIds?: readonly string[];
     readonly skills?: readonly { readonly skillId: string; readonly version: string }[];
   } = {},
 ) {
   const conversationId = context.conversationId;
   const branchId = context.branchId;
   const mentionTargetIds = context.mentionTargetIds ?? [];
+  const attachmentIds = context.attachmentIds ?? [];
   const selectedSkills = context.skills ?? [];
   const [stableMessages, setStableMessages] = useState<readonly StableMessage[]>([]);
   const [optimisticMessages, setOptimisticMessages] = useState<readonly AgentMessage[]>([]);
@@ -120,9 +122,7 @@ export function useAgentPressAssistantRuntime(
     let active = true;
     setPanelError(undefined);
     void Promise.all([
-      authenticatedFetch(
-        `${apiUrl}/conversations/${conversationId}/branches/${branchId}/messages`,
-      ),
+      authenticatedFetch(`${apiUrl}/conversations/${conversationId}/branches/${branchId}/messages`),
       authenticatedFetch(`${apiUrl}/conversations/${conversationId}/branches/${branchId}/runs`),
     ])
       .then(async ([messageResponse, runResponse]) => {
@@ -163,7 +163,9 @@ export function useAgentPressAssistantRuntime(
         const missing = Array.isArray(result.missing)
           ? result.missing.filter((value): value is string => typeof value === 'string')
           : [];
-        setReadiness(result.ready === true ? { status: 'ready', missing } : { status: 'unavailable', missing });
+        setReadiness(
+          result.ready === true ? { status: 'ready', missing } : { status: 'unavailable', missing },
+        );
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -190,6 +192,7 @@ export function useAgentPressAssistantRuntime(
       refreshing = true;
       try {
         const projection = await refreshProjection(activeRunId);
+        setPanelError(undefined);
         if (!ACTIVE_RUN_STATES.has(projection.status)) {
           setActiveRunId(undefined);
           stream.abort();
@@ -228,11 +231,18 @@ export function useAgentPressAssistantRuntime(
         setPanelError('连接中断，正在恢复实时状态…');
         throw error;
       },
+      onclose: () => {
+        void sync();
+      },
     }).catch((error: unknown) => {
-      if (!stream.signal.aborted)
+      if (!stream.signal.aborted) {
         setPanelError(error instanceof Error ? error.message : 'Agent 事件流连接失败');
+        void sync();
+      }
     });
-    return () => { stream.abort(); };
+    return () => {
+      stream.abort();
+    };
   }, [activeRunId, refreshProjection]);
 
   const messages = useMemo(
@@ -253,12 +263,26 @@ export function useAgentPressAssistantRuntime(
       try {
         if (activeProjection && ACTIVE_RUN_STATES.has(activeProjection.status)) {
           const endpoint = sendMode === 'steering' ? 'steering' : 'follow-ups';
-          await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, { content: prompt });
+          await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, {
+            content: prompt,
+          });
           return;
         }
         const created = await request(
           `${apiUrl}/conversations/${conversationId}/runs`,
-          { branchId, prompt, mentionTargetIds, skills: selectedSkills },
+          {
+            branchId,
+            prompt,
+            contextBindings: [
+              ...mentionTargetIds.map((targetId) => ({ type: 'mention', targetId })),
+              ...attachmentIds.map((attachmentId) => ({ type: 'attachment', attachmentId })),
+              ...selectedSkills.map(({ skillId, version }) => ({
+                type: 'skill',
+                skillId,
+                version,
+              })),
+            ],
+          },
           true,
         );
         const runId = stringValue(created.runId);
@@ -276,7 +300,16 @@ export function useAgentPressAssistantRuntime(
         setPanelError(error instanceof Error ? error.message : '消息发送失败');
       }
     },
-    [activeProjection, branchId, conversationId, mentionTargetIds, refreshProjection, selectedSkills, sendMode],
+    [
+      activeProjection,
+      attachmentIds,
+      branchId,
+      conversationId,
+      mentionTargetIds,
+      refreshProjection,
+      selectedSkills,
+      sendMode,
+    ],
   );
 
   const onCancel = useCallback(async () => {
@@ -302,7 +335,9 @@ export function useAgentPressAssistantRuntime(
 
   const decideProposal = useCallback(
     async (proposalId: string, decisions: Readonly<Record<string, 'accepted' | 'rejected'>>) => {
-      const result = await request(`${apiUrl}/edit-proposals/${proposalId}/decisions`, { decisions });
+      const result = await request(`${apiUrl}/edit-proposals/${proposalId}/decisions`, {
+        decisions,
+      });
       if (activeRunId) await refreshProjection(activeRunId);
       return result;
     },
@@ -383,8 +418,10 @@ function convertMessage(message: AgentMessage): ThreadMessageLike {
 }
 
 function projectionContent(projection: RunProjection): ThreadMessageLike['content'] {
-  const parts: (| { readonly type: 'text'; readonly text: string }
-    | { readonly type: 'data'; readonly name: string; readonly data: unknown })[] = [];
+  const parts: (
+    | { readonly type: 'text'; readonly text: string }
+    | { readonly type: 'data'; readonly name: string; readonly data: unknown }
+  )[] = [];
   for (const part of [...projection.parts].sort((left, right) => left.sequence - right.sequence)) {
     if (part.type === 'text') {
       const message = recordValue(part.payload.message);
@@ -394,7 +431,10 @@ function projectionContent(projection: RunProjection): ThreadMessageLike['conten
     }
     parts.push({ type: 'data', name: 'agentpress-run-part', data: part });
   }
-  if (projection.artifacts.length > 0 && !projection.parts.some(({ type }) => type === 'artifact')) {
+  if (
+    projection.artifacts.length > 0 &&
+    !projection.parts.some(({ type }) => type === 'artifact')
+  ) {
     parts.push({
       type: 'data',
       name: 'agentpress-run-part',

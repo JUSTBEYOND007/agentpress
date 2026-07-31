@@ -18,6 +18,7 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - Model Context Protocol TypeScript SDK — MIT
 - YAML — ISC
 - unpdf — MIT; used as a pinned dependency for bounded server-side PDF text extraction
+- fast-xml-parser 4.5.7 — MIT; used directly to parse bounded Google News RSS responses
 
 OpenTelemetry packages are used directly from their published npm releases; no source files
 are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm-lock.yaml`.

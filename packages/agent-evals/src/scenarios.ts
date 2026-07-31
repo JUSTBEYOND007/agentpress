@@ -48,21 +48,23 @@ export const evalScenarios: readonly EvalScenario[] = [
   scenario(
     'routing-03',
     'routing',
-    '修改当前文章标题',
-    expectation(['planned'], ['editor'], ['article.edit'], ['EditProposal']),
+    '将当前文章标题修改为《真实 Pi Agent 实践指南》',
+    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
   ),
   scenario(
     'routing-04',
     'routing',
-    '生成图文长文',
+    '以下要点已确认，无需研究、核查、联网或修改现有文章：真实 Pi Agent 由模型、工具、消息历史和事件循环组成，模型通过真实 tool call 自主推进任务。请基于这些要点新生成一篇图文长文。',
     expectation(
       ['planned'],
       ['writer', 'illustrator'],
-      ['media.generate'],
+      ['image.generate'],
       ['ArticleDraft', 'ImagePlan'],
+      'optional',
+      'required',
     ),
   ),
-  scenario('routing-05', 'routing', '仅回答当前会话问题', direct),
+  scenario('routing-05', 'routing', '仅回答当前会话问题：Kafka 的消费者组有什么作用？', direct),
   scenario(
     'delegation-01',
     'delegation',
@@ -79,13 +81,19 @@ export const evalScenarios: readonly EvalScenario[] = [
     'delegation-02',
     'delegation',
     '只润色当前段落',
-    expectation(['planned'], ['editor'], ['article.edit'], ['EditProposal']),
+    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
   ),
   scenario(
     'delegation-03',
     'delegation',
     '为文章寻找授权配图',
-    expectation(['planned'], ['illustrator'], ['media.search'], ['AssetProposal'], 'required'),
+    expectation(
+      ['planned'],
+      ['illustrator'],
+      ['licensed_media.search'],
+      ['AssetProposal'],
+      'required',
+    ),
   ),
   scenario(
     'delegation-04',
@@ -224,7 +232,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     expectation(
       ['planned'],
       ['editor'],
-      ['article.edit'],
+      ['article.propose'],
       ['EditProposal'],
       'optional',
       'required',
@@ -239,7 +247,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     expectation(
       ['planned'],
       ['editor'],
-      ['article.edit'],
+      ['article.propose'],
       ['EditProposal'],
       'optional',
       'required',
@@ -254,7 +262,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     expectation(
       ['planned'],
       ['editor'],
-      ['article.edit'],
+      ['article.propose'],
       ['EditProposal'],
       'optional',
       'required',

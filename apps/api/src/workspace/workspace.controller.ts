@@ -366,13 +366,19 @@ export class WorkspaceController {
       .limit(1);
     if (!rows[0]) throw new NotFoundException('Conversation does not exist');
     await this.authorization.assertWorkspaceEditor(rows[0].workspaceId, user.id);
-    const title = body.title === undefined ? undefined : validName(body.title, 'Conversation title');
-    const archivedAt = body.archived === undefined ? undefined : body.archived === true ? new Date() : null;
+    const title =
+      body.title === undefined ? undefined : validName(body.title, 'Conversation title');
+    const archivedAt =
+      body.archived === undefined ? undefined : body.archived === true ? new Date() : null;
     if (title === undefined && archivedAt === undefined)
       throw new BadRequestException('title or archived is required');
     const updated = await this.connection.db
       .update(conversations)
-      .set({ ...(title ? { title } : {}), ...(archivedAt !== undefined ? { archivedAt } : {}), updatedAt: new Date() })
+      .set({
+        ...(title ? { title } : {}),
+        ...(archivedAt !== undefined ? { archivedAt } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(conversations.id, conversationId))
       .returning();
     return updated[0];

@@ -1,37 +1,37 @@
 {
-  "name": "@agentpress/agent-worker",
+  "name": "@agentpress/runtime-tools",
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/main.ts",
-    "lint": "eslint src test",
-    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@agentpress/agent-application": "workspace:*",
-    "@agentpress/agent-context": "workspace:*",
-    "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/config": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/editor-application": "workspace:*",
     "@agentpress/knowledge-retrieval": "workspace:*",
-    "@agentpress/media-application": "workspace:*",
     "@agentpress/mcp-runtime": "workspace:*",
-    "@agentpress/observability": "workspace:*",
-    "@agentpress/runtime-tools": "workspace:*",
+    "@agentpress/media-application": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
     "@agentpress/web-research": "workspace:*",
-    "@nestjs/common": "catalog:",
-    "@nestjs/core": "catalog:",
     "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:",
-    "ioredis": "catalog:",
-    "kafkajs": "catalog:",
-    "reflect-metadata": "catalog:",
-    "rxjs": "catalog:"
+    "fast-xml-parser": "4.5.7"
   }
 }

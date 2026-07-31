@@ -11,20 +11,27 @@ import {
 } from '@agentpress/agent-context';
 import {
   articleRevisions,
+  agentRuns,
   articles,
   type AgentPressDatabase,
   type DatabaseTransaction,
   memoryCandidates,
   mentionBindings,
+  evidenceRecords,
   promptRevisions,
   runAttachments,
   runContextPacks,
   runSkillBindings,
   skillRevisions,
 } from '@agentpress/database';
+import { hashBlock, type EditorBlock } from '@agentpress/editor-patch';
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { AgentApplicationError, type SelectedSkillInput } from './contracts.js';
+import {
+  AgentApplicationError,
+  type RunContextBinding,
+  type SelectedSkillInput,
+} from './contracts.js';
 
 export class RunContextService {
   private readonly createId: () => string;
@@ -54,11 +61,13 @@ export class RunContextService {
       readonly mentionTargetIds: readonly string[];
       readonly attachmentIds: readonly string[];
       readonly skills: readonly SelectedSkillInput[];
+      readonly contextBindings: readonly RunContextBinding[];
     },
   ): Promise<ContextPack> {
-    const mentions = unique(input.mentionTargetIds);
-    const attachmentIds = unique(input.attachmentIds);
-    const selectedSkills = uniqueSkills(input.skills);
+    const normalized = normalizeBindings(input.contextBindings);
+    const mentions = unique([...input.mentionTargetIds, ...normalized.mentionTargetIds]);
+    const attachmentIds = unique([...input.attachmentIds, ...normalized.attachmentIds]);
+    const selectedSkills = uniqueSkills([...input.skills, ...normalized.skills]);
     if (mentions.length > 20)
       throw new AgentApplicationError('invalid_context', 'A Run can bind at most 20 Mentions');
     if (selectedSkills.length > 8)
@@ -113,6 +122,35 @@ export class RunContextService {
         'An attachment is missing, outside the workspace, or not ready',
       );
     }
+
+    const articleBindings = await loadBoundArticleContent(
+      transaction,
+      input.workspaceId,
+      normalized.articleBindings,
+    );
+    const evidenceRows =
+      normalized.evidenceIds.length === 0
+        ? []
+        : await transaction
+            .select({
+              id: evidenceRecords.id,
+              title: evidenceRecords.title,
+              excerpt: evidenceRecords.excerpt,
+              sourceRevision: evidenceRecords.sourceRevision,
+            })
+            .from(evidenceRecords)
+            .innerJoin(agentRuns, eq(agentRuns.id, evidenceRecords.runId))
+            .where(
+              and(
+                inArray(evidenceRecords.id, normalized.evidenceIds),
+                eq(agentRuns.workspaceId, input.workspaceId),
+              ),
+            );
+    if (evidenceRows.length !== normalized.evidenceIds.length)
+      throw new AgentApplicationError(
+        'unauthorized_context',
+        'An Evidence binding is missing or outside the current workspace',
+      );
 
     const requestedSkillIds = unique(selectedSkills.map(({ skillId }) => skillId));
     const availableSkillRows =
@@ -186,6 +224,19 @@ export class RunContextService {
           'attachment',
           attachment.content ?? '',
           attachment.contentHash,
+          1,
+          true,
+        ),
+      ),
+      ...articleBindings.map((binding) =>
+        contextCandidate(binding.id, 'mention', binding.content, binding.revision, 1, true),
+      ),
+      ...evidenceRows.map((evidence) =>
+        contextCandidate(
+          `evidence:${evidence.id}`,
+          'evidence',
+          `${evidence.title}\n${evidence.excerpt}`,
+          evidence.sourceRevision,
           1,
           true,
         ),
@@ -323,4 +374,84 @@ function unique(values: readonly string[]): readonly string[] {
 
 function uniqueSkills(values: readonly SelectedSkillInput[]): readonly SelectedSkillInput[] {
   return [...new Map(values.map((skill) => [`${skill.skillId}@${skill.version}`, skill])).values()];
+}
+
+type ArticleContextBinding = Extract<
+  RunContextBinding,
+  { readonly type: 'article_revision' | 'article_selection' }
+>;
+
+function normalizeBindings(bindings: readonly RunContextBinding[]) {
+  return {
+    mentionTargetIds: bindings.flatMap((binding) =>
+      binding.type === 'mention' ? [binding.targetId] : [],
+    ),
+    attachmentIds: bindings.flatMap((binding) =>
+      binding.type === 'attachment' ? [binding.attachmentId] : [],
+    ),
+    evidenceIds: unique(
+      bindings.flatMap((binding) => (binding.type === 'evidence' ? [binding.evidenceId] : [])),
+    ),
+    skills: bindings.flatMap((binding) =>
+      binding.type === 'skill' ? [{ skillId: binding.skillId, version: binding.version }] : [],
+    ),
+    articleBindings: bindings.filter(
+      (binding): binding is ArticleContextBinding =>
+        binding.type === 'article_revision' || binding.type === 'article_selection',
+    ),
+  };
+}
+
+async function loadBoundArticleContent(
+  transaction: DatabaseTransaction,
+  workspaceId: string,
+  bindings: readonly ArticleContextBinding[],
+): Promise<readonly { id: string; content: string; revision: string }[]> {
+  const result = [];
+  for (const binding of bindings) {
+    const rows = await transaction
+      .select({ document: articleRevisions.document, contentHash: articleRevisions.documentHash })
+      .from(articleRevisions)
+      .innerJoin(articles, eq(articles.id, articleRevisions.articleId))
+      .where(
+        and(
+          eq(articles.workspaceId, workspaceId),
+          eq(articles.id, binding.articleId),
+          eq(articleRevisions.id, binding.revisionId),
+        ),
+      )
+      .limit(1);
+    const revision = rows[0];
+    if (!revision)
+      throw new AgentApplicationError(
+        'unauthorized_context',
+        'An article revision is missing or outside the current workspace',
+      );
+    if (binding.type === 'article_revision') {
+      result.push({
+        id: `article-revision:${binding.revisionId}`,
+        content: JSON.stringify(revision.document),
+        revision: `${binding.revisionId}:${revision.contentHash}`,
+      });
+      continue;
+    }
+    const document = revision.document as {
+      readonly content?: readonly { readonly attrs?: Readonly<Record<string, unknown>> }[];
+    };
+    const blocks = binding.blocks.map(({ blockId, contentHash }) => {
+      const block = document.content?.find((candidate) => candidate.attrs?.blockId === blockId);
+      if (!block || hashBlock(block as EditorBlock) !== contentHash)
+        throw new AgentApplicationError(
+          'invalid_context',
+          `Article selection block ${blockId} is stale or missing`,
+        );
+      return block;
+    });
+    result.push({
+      id: `article-selection:${binding.articleId}:${binding.revisionId}`,
+      content: JSON.stringify({ type: 'doc', content: blocks }),
+      revision: `${binding.revisionId}:${blocks.map((block) => hashBlock(block as EditorBlock)).join(':')}`,
+    });
+  }
+  return result;
 }

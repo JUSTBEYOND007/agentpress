@@ -2,9 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
+import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import {
+  agentSessions,
+  agentTranscriptEntries,
   agentTasks,
   agentRuns,
+  approvals,
   appUsers,
   articleRevisions,
   articles,
@@ -24,9 +28,12 @@ import {
   memoryCandidates,
   mentionBindings,
   taskResults,
+  toolCalls,
   workspaceMembers,
   workspaces,
 } from '@agentpress/database';
+import { hashToolArguments, ToolRegistry } from '@agentpress/tool-runtime';
+import { Type } from '@sinclair/typebox';
 import { eq, inArray } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -34,6 +41,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ContextGovernanceService,
   DirectRunService,
+  PersistentToolBridge,
+  runtimeToolName,
+  ToolCallService,
   type LiveRunEvent,
   type RunEventPublisher,
 } from '../src/index.js';
@@ -188,7 +198,7 @@ describeWithDatabase('Direct Run application flow', () => {
     ).toHaveLength(2);
     expect(
       await connection.db.select().from(runEvents).where(eq(runEvents.runId, second.runId)),
-    ).toHaveLength(4);
+    ).toHaveLength(5);
     expect(published.some((event) => !event.durable)).toBe(true);
   });
 
@@ -304,19 +314,18 @@ describeWithDatabase('Direct Run application flow', () => {
       id: plannedBranch,
       conversationId: ids.conversation,
     });
+    const tasks = [
+      plannedTask('research', 'researcher'),
+      plannedTask('write', 'writer', ['research']),
+      plannedTask('edit', 'editor', ['write']),
+      plannedTask('verify', 'fact_checker', ['edit']),
+      plannedTask('illustrate', 'illustrator', ['verify'], 'optional'),
+    ];
     const plannedRuntime = PiRuntimeAdapter.forTests({
       responses: [
-        '研究结果一',
-        '写作草稿一',
-        '编辑结果一',
-        '核查结果一',
-        '配图方案一',
-        '研究结果二',
-        '写作草稿二',
-        '编辑结果二',
-        '核查结果二',
-        '配图方案二',
-        '最终综合文章',
+        toolResponse('plan_submit', { goal: 'Produce a verified illustrated article', tasks }),
+        ...tasks.map((task) => taskCompleteResponse(`${task.owner} completed`)),
+        runCompleteResponse('最终综合文章'),
       ],
     });
     const plannedService = new DirectRunService({
@@ -333,51 +342,98 @@ describeWithDatabase('Direct Run application flow', () => {
       idempotencyKey: randomUUID(),
     });
 
-    expect(run.mode).toBe('planned');
-    await plannedService.enqueueSteering(run.runId, '加入性能与成本对比');
+    expect(run.mode).toBe('direct');
     await expect(plannedService.execute(run.runId)).resolves.toMatchObject({
       status: 'completed',
     });
 
-    const tasks = await connection.db
+    const persistedTasks = await connection.db
       .select()
       .from(agentTasks)
       .where(eq(agentTasks.runId, run.runId));
-    expect(tasks).toHaveLength(10);
-    expect(new Set(tasks.map(({ owner }) => owner))).toEqual(
+    expect(persistedTasks).toHaveLength(5);
+    expect(new Set(persistedTasks.map(({ owner }) => owner))).toEqual(
       new Set(['researcher', 'writer', 'editor', 'fact_checker', 'illustrator']),
     );
-    expect(tasks.every(({ status }) => status === 'succeeded')).toBe(true);
+    expect(persistedTasks.every(({ status }) => status === 'succeeded')).toBe(true);
     const revisions = await connection.db
       .select({ revisionNumber: planRevisions.revisionNumber })
       .from(planRevisions)
       .innerJoin(executionPlans, eq(executionPlans.id, planRevisions.planId))
       .where(eq(executionPlans.runId, run.runId));
-    expect(revisions.map(({ revisionNumber }) => revisionNumber)).toEqual([1, 2]);
+    expect(revisions.map(({ revisionNumber }) => revisionNumber)).toEqual([1]);
     const contexts = await connection.db
       .select()
       .from(contextPacks)
       .where(
         inArray(
           contextPacks.taskId,
-          tasks.map(({ id }) => id),
+          persistedTasks.map(({ id }) => id),
         ),
       );
-    expect(contexts).toHaveLength(10);
-    expect(contexts.every(({ manifest }) => manifest.conversationHistoryIncluded === false)).toBe(
-      true,
-    );
+    expect(contexts).toHaveLength(5);
+    expect(
+      contexts.every(
+        ({ content, contentHash, format, schemaVersion, manifest }) =>
+          content.length > 0 &&
+          contentHash.length > 0 &&
+          format === 'json' &&
+          schemaVersion === 1 &&
+          typeof manifest.taskId === 'string' &&
+          Array.isArray(manifest.capabilities),
+      ),
+    ).toBe(true);
     const results = await connection.db.select().from(taskResults);
-    expect(results.filter(({ taskId }) => tasks.some(({ id }) => id === taskId))).toHaveLength(10);
+    expect(
+      results.filter(({ taskId }) => persistedTasks.some(({ id }) => id === taskId)),
+    ).toHaveLength(5);
     const events = await connection.db
       .select({ eventType: runEvents.eventType })
       .from(runEvents)
       .where(eq(runEvents.runId, run.runId));
-    expect(events.filter(({ eventType }) => eventType === 'plan.revised')).toHaveLength(2);
-    expect(events.some(({ eventType }) => eventType === 'steering.applied')).toBe(true);
+    expect(events.filter(({ eventType }) => eventType === 'plan.revised')).toHaveLength(1);
   });
 
-  it('rejects Steering for a Direct Run', async () => {
+  it('repairs a failed Specialist protocol twice before accepting task_complete', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const task = plannedTask('repairable', 'writer');
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', { goal: 'Repair specialist completion', tasks: [task] }),
+        fauxAssistantMessage([fauxToolCall('task_complete', { status: 'invalid' })], {
+          stopReason: 'toolUse',
+        }),
+        taskCompleteResponse('Recovered after protocol repair'),
+        runCompleteResponse('协议修复后完成。'),
+      ],
+    });
+    const repairService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await repairService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '执行需要协议修复的任务',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(repairService.execute(run.runId)).resolves.toMatchObject({ status: 'completed' });
+    const sessions = await connection.db
+      .select({ logicalKey: agentSessions.logicalKey, status: agentSessions.status })
+      .from(agentSessions)
+      .where(eq(agentSessions.runId, run.runId));
+    expect(sessions.some(({ logicalKey }) => logicalKey.endsWith(':2'))).toBe(true);
+  });
+
+  it('persists and can cancel Steering while a Direct Run is still active', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
       id: branchId,
@@ -391,9 +447,9 @@ describeWithDatabase('Direct Run application flow', () => {
       idempotencyKey: randomUUID(),
     });
 
-    await expect(service.enqueueSteering(run.runId, '改变方向')).rejects.toMatchObject({
-      code: 'invalid_directive',
-    });
+    const directive = await service.enqueueSteering(run.runId, '改变方向');
+    await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(true);
+    await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(false);
   });
 
   it('fails the Run when a Required Specialist fails', async () => {
@@ -402,21 +458,15 @@ describeWithDatabase('Direct Run application flow', () => {
       id: branchId,
       conversationId: ids.conversation,
     });
-    const runtime: AgentRuntime = {
-      execute(request) {
-        if (request.systemPrompt.includes('researcher')) {
-          return Promise.resolve({
-            status: 'failed',
-            messages: [],
-            error: { code: 'provider_error', message: 'research unavailable', retryable: true },
-          });
-        }
-        return Promise.resolve({
-          status: 'completed',
-          messages: [assistantMessage(request.runId)],
-        });
-      },
-    };
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Research the subject',
+          tasks: [plannedTask('research', 'researcher')],
+        }),
+        taskCompleteResponse('Research unavailable', 'failed'),
+      ],
+    });
     const requiredFailureService = new DirectRunService({
       database: connection.db,
       publisher,
@@ -448,21 +498,32 @@ describeWithDatabase('Direct Run application flow', () => {
       conversationId: ids.conversation,
     });
     const controller = new AbortController();
-    const serviceReference: { current?: DirectRunService } = {};
-    const runtime: AgentRuntime = {
-      async execute(request) {
-        await serviceReference.current?.requestCancellation(request.runId.split(':')[0] ?? '');
-        controller.abort();
-        return { status: 'cancelled', messages: [] };
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Research and write',
+          tasks: [plannedTask('research', 'researcher')],
+        }),
+        '不会完成的 Specialist 输出',
+      ],
+    });
+    let runId = '';
+    let cancellationRequested = false;
+    const cancellationPublisher: RunEventPublisher = {
+      async publish(event) {
+        if (event.durable && event.event.eventType === 'task.started' && !cancellationRequested) {
+          cancellationRequested = true;
+          await cancellationService.requestCancellation(runId);
+          controller.abort();
+        }
       },
     };
     const cancellationService = new DirectRunService({
       database: connection.db,
-      publisher,
+      publisher: cancellationPublisher,
       runtimeFactory: { create: () => runtime },
       systemPrompt: 'You are AgentPress.',
     });
-    serviceReference.current = cancellationService;
     const run = await cancellationService.create({
       conversationId: ids.conversation,
       userId: ids.user,
@@ -470,6 +531,7 @@ describeWithDatabase('Direct Run application flow', () => {
       prompt: '联网搜索资料并写一篇图文文章',
       idempotencyKey: randomUUID(),
     });
+    runId = run.runId;
 
     await expect(cancellationService.execute(run.runId, controller.signal)).resolves.toMatchObject({
       status: 'cancelled',
@@ -478,11 +540,11 @@ describeWithDatabase('Direct Run application flow', () => {
       .select({ status: agentTasks.status })
       .from(agentTasks)
       .where(eq(agentTasks.runId, run.runId));
-    expect(tasks).toHaveLength(5);
+    expect(tasks).toHaveLength(1);
     expect(tasks.every(({ status }) => status === 'cancelled')).toBe(true);
   });
 
-  it('recovers a Planned Run through a new immutable Plan Revision', async () => {
+  it('recovers a Planned Run without fabricating a replacement revision', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
       id: branchId,
@@ -492,10 +554,9 @@ describeWithDatabase('Direct Run application flow', () => {
       database: connection.db,
       publisher,
       runtimeFactory: {
-        create: () =>
-          PiRuntimeAdapter.forTests({
-            responses: ['研究', '草稿', '编辑', '核查', '配图', '恢复后的最终文章'],
-          }),
+        create: () => {
+          throw new Error('Preparing recovery must not invoke Pi');
+        },
       },
       systemPrompt: 'You are AgentPress.',
     });
@@ -522,14 +583,279 @@ describeWithDatabase('Direct Run application flow', () => {
       .where(eq(agentRuns.id, run.runId));
 
     await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
-    await expect(recoveryService.execute(run.runId)).resolves.toMatchObject({
-      status: 'completed',
-    });
+    const recoveredRuns = await connection.db
+      .select({ status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(recoveredRuns[0]?.status).toBe('recovering');
     const revisions = await connection.db
       .select({ reason: planRevisions.reason })
       .from(planRevisions)
       .where(eq(planRevisions.planId, planId));
-    expect(revisions.map(({ reason }) => reason)).toEqual(['initial_plan', 'worker_recovery']);
+    expect(revisions.map(({ reason }) => reason)).toEqual(['initial_plan']);
+  });
+
+  it('reuses a persisted logical Main Session and appends transcript sequences', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const recoveryService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => PiRuntimeAdapter.forTests({ responses: ['恢复后的直接回答。'] }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await recoveryService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '继续上次直接回答',
+      idempotencyKey: randomUUID(),
+    });
+    const sessionId = randomUUID();
+    await connection.db.insert(agentSessions).values({
+      id: sessionId,
+      runId: run.runId,
+      kind: 'main',
+      attempt: 1,
+      logicalKey: `${run.runId}:main:1`,
+      model: 'main',
+      status: 'failed',
+      nextSequence: 1,
+    });
+    await connection.db.insert(agentTranscriptEntries).values({
+      id: randomUUID(),
+      sessionId,
+      sequence: 1,
+      role: 'system',
+      messageType: 'system_prompt',
+      content: { content: 'Persisted before worker loss' },
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'recovering' })
+      .where(eq(agentRuns.id, run.runId));
+
+    await expect(recoveryService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    const sessions = await connection.db
+      .select({ id: agentSessions.id, nextSequence: agentSessions.nextSequence })
+      .from(agentSessions)
+      .where(eq(agentSessions.logicalKey, `${run.runId}:main:1`));
+    expect(sessions).toEqual([{ id: sessionId, nextSequence: 6 }]);
+    const entries = await connection.db
+      .select({ sequence: agentTranscriptEntries.sequence })
+      .from(agentTranscriptEntries)
+      .where(eq(agentTranscriptEntries.sessionId, sessionId));
+    expect(entries.map(({ sequence }) => sequence).sort((left, right) => left - right)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+  });
+
+  it('resumes an approved provider Tool Call and continues the real Pi transcript', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const registry = new ToolRegistry();
+    let sideEffects = 0;
+    registry.register({
+      toolId: 'article.apply_proposal',
+      version: '1.0.0',
+      owner: 'article',
+      description: 'Apply an immutable article proposal',
+      capabilities: ['article.propose'],
+      inputSchema: Type.Object(
+        { proposalId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+      outputSchema: Type.Object(
+        { applied: Type.Boolean(), proposalId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+      risk: 'external_write',
+      sideEffect: 'Apply the selected immutable proposal',
+      idempotency: 'provider_key',
+      timeoutMs: 1_000,
+      estimateCost: () => ({ credits: 1 }),
+      execute: ({ proposalId }) => {
+        sideEffects += 1;
+        return Promise.resolve({ applied: true, proposalId });
+      },
+    });
+    const toolService = new ToolCallService({ database: connection.db, registry, publisher });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: toolService,
+    });
+    const recoveryService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () =>
+          PiRuntimeAdapter.forTests({
+            responses: [
+              taskCompleteResponse('Proposal applied after approval recovery'),
+              runCompleteResponse('恢复后已完成文章修改。'),
+            ],
+          }),
+      },
+      runtimeToolFactory: bridge,
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await recoveryService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '应用已准备好的文章修改提案',
+      idempotencyKey: randomUUID(),
+    });
+    const planId = randomUUID();
+    const revisionId = randomUUID();
+    const taskId = randomUUID();
+    await connection.db.insert(executionPlans).values({ id: planId, runId: run.runId });
+    await connection.db.insert(planRevisions).values({
+      id: revisionId,
+      planId,
+      revisionNumber: 1,
+      reason: 'main_agent',
+      summary: 'Apply the approved proposal',
+    });
+    await connection.db.insert(agentTasks).values({
+      id: taskId,
+      runId: run.runId,
+      planRevisionId: revisionId,
+      objective: 'Apply the immutable article proposal',
+      criticality: 'required',
+      owner: 'writer',
+      acceptanceCriteria: ['The exact approved proposal is applied once'],
+      outputSchema: {},
+      toolPolicy: { capabilities: ['article.propose'] },
+      budget: { maxAttempts: 3, protocolRepairTurns: 2 },
+      status: 'running',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ mode: 'planned', status: 'running', activePlanRevisionId: revisionId })
+      .where(eq(agentRuns.id, run.runId));
+
+    const providerToolCallId = 'provider-approval-recovery';
+    const proposalId = randomUUID();
+    const toolName = runtimeToolName('article.apply_proposal', '1.0.0');
+    const assistant = {
+      role: 'assistant' as const,
+      content: '',
+      blocks: [
+        {
+          type: 'tool_call' as const,
+          id: providerToolCallId,
+          name: toolName,
+          arguments: { proposalId },
+        },
+      ],
+      provider: 'faux',
+      model: 'faux-model',
+      stopReason: 'tool_use' as const,
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 2,
+        costUsd: 0,
+      },
+      timestamp: Date.now(),
+    };
+    const interruptedSessionId = randomUUID();
+    await connection.db.insert(agentSessions).values({
+      id: interruptedSessionId,
+      runId: run.runId,
+      taskId,
+      kind: 'specialist',
+      attempt: 1,
+      logicalKey: `${run.runId}:task:${taskId}:1`,
+      model: 'writer',
+      status: 'failed',
+    });
+    await connection.db.insert(agentTranscriptEntries).values({
+      id: randomUUID(),
+      sessionId: interruptedSessionId,
+      sequence: 1,
+      role: 'assistant',
+      messageType: 'message',
+      content: { message: assistant },
+      providerToolCallId,
+    });
+
+    const proposal = await toolService.propose({
+      runId: run.runId,
+      taskId,
+      providerToolCallId,
+      toolId: 'article.apply_proposal',
+      toolVersion: '1.0.0',
+      arguments: { proposalId },
+      requestedFromUserId: ids.user,
+      allowedCapabilities: new Set(['article.propose']),
+      idempotencyKey: `pi:${hashToolArguments({ runId: run.runId, providerToolCallId })}`,
+    });
+    expect(proposal.status).toBe('awaiting_approval');
+    await toolService.decideApproval({
+      toolCallId: proposal.toolCallId,
+      decision: 'approved',
+      userId: ids.user,
+    });
+
+    await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
+    await expect(recoveryService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    await expect(
+      bridge.resumeApprovedToolCall(run.runId, taskId, providerToolCallId),
+    ).resolves.toMatchObject({
+      toolCallId: providerToolCallId,
+      isError: false,
+    });
+    expect(sideEffects).toBe(1);
+    const persistedCalls = await connection.db
+      .select({
+        providerToolCallId: toolCalls.providerToolCallId,
+        status: toolCalls.status,
+        output: toolCalls.output,
+      })
+      .from(toolCalls)
+      .where(eq(toolCalls.id, proposal.toolCallId));
+    expect(persistedCalls[0]).toMatchObject({
+      providerToolCallId,
+      status: 'succeeded',
+      output: { applied: true, proposalId },
+    });
+    const approvalRows = await connection.db
+      .select({ decision: approvals.decision })
+      .from(approvals)
+      .where(eq(approvals.toolCallId, proposal.toolCallId));
+    expect(approvalRows).toEqual([{ decision: 'approved' }]);
+    const recoveredTranscript = await connection.db
+      .select({ role: agentTranscriptEntries.role, content: agentTranscriptEntries.content })
+      .from(agentTranscriptEntries)
+      .innerJoin(agentSessions, eq(agentSessions.id, agentTranscriptEntries.sessionId))
+      .where(eq(agentSessions.taskId, taskId));
+    expect(
+      recoveredTranscript.some(
+        ({ role, content }) =>
+          role === 'tool' &&
+          'message' in content &&
+          (content.message as { toolCallId?: string }).toolCallId === providerToolCallId,
+      ),
+    ).toBe(true);
   });
 
   it('finishes with degradation when only an Optional Specialist fails', async () => {
@@ -538,25 +864,20 @@ describeWithDatabase('Direct Run application flow', () => {
       id: branchId,
       conversationId: ids.conversation,
     });
-    const runtime: AgentRuntime = {
-      execute(request) {
-        if (request.systemPrompt.includes('illustrator')) {
-          return Promise.resolve({
-            status: 'failed',
-            messages: [],
-            error: {
-              code: 'provider_error',
-              message: 'image provider unavailable',
-              retryable: true,
-            },
-          });
-        }
-        return Promise.resolve({
-          status: 'completed',
-          messages: [assistantMessage(request.runId)],
-        });
-      },
-    };
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Write and illustrate',
+          tasks: [
+            plannedTask('write', 'writer'),
+            plannedTask('illustrate', 'illustrator', ['write'], 'optional'),
+          ],
+        }),
+        taskCompleteResponse('Draft completed'),
+        taskCompleteResponse('Image provider unavailable', 'failed'),
+        runCompleteResponse('无配图降级交付'),
+      ],
+    });
     const degradedService = new DirectRunService({
       database: connection.db,
       publisher,
@@ -658,4 +979,39 @@ function assistantMessageWithContent(seed: string, content: string) {
     },
     timestamp: Date.now(),
   };
+}
+
+function plannedTask(
+  clientKey: string,
+  owner: 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator',
+  dependencyKeys: readonly string[] = [],
+  criticality: 'required' | 'optional' = 'required',
+) {
+  return {
+    clientKey,
+    owner,
+    objective: `${owner} objective`,
+    criticality,
+    acceptanceCriteria: [`${owner} result is complete`],
+    dependencyKeys,
+    capabilities: [],
+  };
+}
+
+function toolResponse(name: string, arguments_: Readonly<Record<string, unknown>>) {
+  return fauxAssistantMessage([fauxToolCall(name, arguments_)], { stopReason: 'toolUse' });
+}
+
+function taskCompleteResponse(summary: string, status: 'succeeded' | 'failed' = 'succeeded') {
+  return toolResponse('task_complete', {
+    status,
+    summary,
+    artifacts: [],
+    warnings: [],
+    ...(status === 'failed' ? { failure: summary } : {}),
+  });
+}
+
+function runCompleteResponse(answer: string) {
+  return toolResponse('run_complete', { answer, artifactIds: [], evidenceIds: [] });
 }

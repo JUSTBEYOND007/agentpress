@@ -254,6 +254,7 @@ export class DirectRunService {
         mentionTargetIds: input.mentionTargetIds ?? [],
         attachmentIds: input.attachmentIds ?? [],
         skills: input.skills ?? [],
+        contextBindings: input.contextBindings ?? [],
       });
       const queued = await appendRunEvent(transaction, {
         id: this.createId(),
@@ -463,6 +464,45 @@ export class DirectRunService {
     return this.enqueueDirective(runId, 'steering', content);
   }
 
+  public async steerActiveMain(
+    runId: string,
+    directiveId: string,
+    content: string,
+  ): Promise<boolean> {
+    if (!this.plannedRuns.steerActiveMain(runId, content)) return false;
+    const event = await this.options.database.transaction(async (transaction) => {
+      const updated = await transaction
+        .update(runDirectives)
+        .set({ status: 'applied', appliedAt: this.now() })
+        .where(
+          and(
+            eq(runDirectives.id, directiveId),
+            eq(runDirectives.runId, runId),
+            eq(runDirectives.kind, 'steering'),
+            eq(runDirectives.status, 'pending'),
+          ),
+        )
+        .returning({ id: runDirectives.id });
+      if (updated.length === 0) return undefined;
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'steering_applied',
+        state: { directiveId, delivery: 'active_main' },
+      });
+      return appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'steering.applied',
+        payload: { directiveIds: [directiveId], delivery: 'active_main' },
+      });
+    });
+    if (event) {
+      await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+    }
+    return Boolean(event);
+  }
+
   public enqueueFollowUp(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
     return this.enqueueQueuedFollowUp(runId, content);
   }
@@ -480,6 +520,33 @@ export class DirectRunService {
       )
       .returning({ id: queuedFollowups.id });
     return rows.length === 1;
+  }
+
+  public async cancelSteering(runId: string, directiveId: string): Promise<boolean> {
+    const event = await this.options.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .update(runDirectives)
+        .set({ status: 'cancelled' })
+        .where(
+          and(
+            eq(runDirectives.id, directiveId),
+            eq(runDirectives.runId, runId),
+            eq(runDirectives.kind, 'steering'),
+            eq(runDirectives.status, 'pending'),
+          ),
+        )
+        .returning({ id: runDirectives.id });
+      if (rows.length === 0) return undefined;
+      return appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'steering.cancelled',
+        payload: { directiveId },
+      });
+    });
+    if (event)
+      await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+    return Boolean(event);
   }
 
   public async listEvents(runId: string, afterSequence = 0): Promise<readonly DurableRunEvent[]> {
@@ -536,6 +603,7 @@ export class DirectRunService {
           source: evidenceRecords.sourceUri,
           excerpt: evidenceRecords.excerpt,
           sourceRevision: evidenceRecords.sourceRevision,
+          metadata: evidenceRecords.metadata,
         })
         .from(evidenceRecords)
         .where(eq(evidenceRecords.runId, runId)),
@@ -571,14 +639,44 @@ export class DirectRunService {
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
       parts: [
         ...events.flatMap(toRunParts),
-        ...evidenceRows.map((evidence, index) => ({
-          id: evidence.id,
-          runId,
-          sequence: (events.at(-1)?.sequence ?? 0) + index + 1,
-          type: 'evidence' as const,
-          status: 'evidence.available',
-          payload: evidence,
-        })),
+        ...evidenceRows.map((evidence) => {
+          const toolCallId =
+            typeof evidence.metadata.toolCallId === 'string'
+              ? evidence.metadata.toolCallId
+              : undefined;
+          const sourceEvent = toolCallId
+            ? events.find(
+                (event) =>
+                  event.eventType === 'tool.succeeded' && event.payload.toolCallId === toolCallId,
+              )
+            : undefined;
+          return {
+            id: evidence.id,
+            runId,
+            sequence: sourceEvent?.sequence ?? 0,
+            type: 'evidence' as const,
+            status: 'evidence.available',
+            payload: evidence,
+          };
+        }),
+        ...artifactRows.map((artifact) => {
+          const sourceEvent = events.find(
+            (event) =>
+              event.eventType === 'task.succeeded' &&
+              Array.isArray(event.payload.artifacts) &&
+              event.payload.artifacts.some(
+                (candidate) => artifactIdFromEvent(candidate) === artifact.id,
+              ),
+          );
+          return {
+            id: artifact.id,
+            runId,
+            sequence: sourceEvent?.sequence ?? 0,
+            type: 'artifact' as const,
+            status: 'artifact.available',
+            payload: artifact,
+          };
+        }),
       ],
       artifacts: artifactRows,
       ...(pendingInteraction ? { pendingInteraction } : {}),
@@ -754,12 +852,6 @@ export class DirectRunService {
       }
       if (TERMINAL_RUN_STATES.includes(run.status as (typeof TERMINAL_RUN_STATES)[number])) {
         throw new AgentApplicationError('invalid_directive', 'A terminal Run cannot accept input');
-      }
-      if (kind === 'steering' && run.mode !== 'planned') {
-        throw new AgentApplicationError(
-          'invalid_directive',
-          'Steering is available after a Run has entered Planned mode',
-        );
       }
       const sequences = await transaction
         .select({ sequence: max(runDirectives.sequence) })
@@ -1043,6 +1135,12 @@ function encodeRuntimeMessage(message: RuntimeMessage): readonly unknown[] {
 
 function isRecoverableRunStatus(status: string): status is 'planning' | 'running' | 'interrupted' {
   return status === 'planning' || status === 'running' || status === 'interrupted';
+}
+
+function artifactIdFromEvent(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const artifact = value as Record<string, unknown>;
+  return typeof artifact.artifactId === 'string' ? artifact.artifactId : undefined;
 }
 
 function decodeRuntimeMessage(content: readonly unknown[]): RuntimeMessage | undefined {

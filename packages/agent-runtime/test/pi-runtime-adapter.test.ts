@@ -123,4 +123,273 @@ describe('PiRuntimeAdapter', () => {
     expect(calls[0]?.context.runId).toBe('run-tool');
     expect(typeof calls[0]?.context.providerToolCallId).toBe('string');
   });
+
+  it('rebuilds a Pi transcript and continues after a persisted tool result', async () => {
+    const runtime = PiRuntimeAdapter.forTests({ responses: ['恢复后的最终回答。'] });
+    const result = await runtime.execute(
+      {
+        runId: 'session-recovered',
+        systemPrompt: 'Continue from persisted PostgreSQL transcript entries.',
+        history: [
+          {
+            role: 'assistant',
+            content: '',
+            blocks: [
+              {
+                type: 'tool_call',
+                id: 'provider-call-1',
+                name: 'workspace_search',
+                arguments: { query: 'Pi recovery' },
+              },
+            ],
+            provider: 'faux',
+            model: 'faux-model',
+            stopReason: 'tool_use',
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 0,
+              costUsd: 0,
+            },
+            timestamp: 1,
+          },
+          {
+            role: 'tool',
+            toolCallId: 'provider-call-1',
+            toolName: 'workspace_search',
+            content: '{"evidence":["persisted"]}',
+            details: { evidence: ['persisted'] },
+            isError: false,
+            timestamp: 2,
+          },
+        ],
+        prompt: '',
+        continuation: true,
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.messages.at(-1)).toMatchObject({ content: '恢复后的最终回答。' });
+  });
+
+  it('injects steering into the active Pi agent', async () => {
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: ['处理中。', '已按新要求完成。'],
+      tokensPerSecond: 1,
+    });
+    let steered = false;
+    const execution = runtime.execute(
+      {
+        runId: 'session-steering',
+        systemPrompt: 'Apply user steering after the current safe turn.',
+        history: [],
+        prompt: '开始任务',
+      },
+      (event) => {
+        if (event.type === 'content.delta' && !steered) {
+          steered = true;
+          runtime.steer({ role: 'user', content: '增加成本分析', timestamp: Date.now() });
+        }
+      },
+    );
+    const result = await execution;
+    expect(result.status).toBe('completed');
+    expect(result.messages.at(-1)).toMatchObject({ content: '已按新要求完成。' });
+  });
+
+  it('uses the Pi beforeToolCall hook to block execution', async () => {
+    let executions = 0;
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('blocked_tool', {}, { id: 'blocked-call' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxText('已处理阻断结果。')]),
+      ],
+    });
+    const toolResults: RuntimeEvent[] = [];
+    const result = await runtime.execute(
+      {
+        runId: 'run-hook',
+        systemPrompt: 'Respect tool policy hooks.',
+        history: [],
+        prompt: '尝试工具',
+        tools: [
+          {
+            name: 'blocked_tool',
+            label: 'Blocked Tool',
+            description: 'Must be blocked by policy',
+            parameters: Type.Object({}, { additionalProperties: false }),
+            execute: () => {
+              executions += 1;
+              return Promise.resolve({ unsafe: true });
+            },
+          },
+        ],
+        beforeToolCall: ({ toolCallId }) => ({
+          block: toolCallId === 'blocked-call',
+          reason: 'Policy denied this call',
+        }),
+      },
+      (event) => {
+        if (event.type === 'tool.completed') toolResults.push(event);
+      },
+    );
+
+    expect(result.status).toBe('completed');
+    expect(executions).toBe(0);
+    expect(toolResults[0]).toMatchObject({
+      type: 'tool.completed',
+      result: { content: 'Policy denied this call', isError: true },
+    });
+  });
+
+  it('uses the Pi afterToolCall hook to sanitize an executed result', async () => {
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('allowed_tool', {}, { id: 'allowed-call' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxText('已读取脱敏结果。')]),
+      ],
+    });
+    const toolResults: RuntimeEvent[] = [];
+    const result = await runtime.execute(
+      {
+        runId: 'run-after-hook',
+        systemPrompt: 'Use sanitized tool results.',
+        history: [],
+        prompt: '执行工具',
+        tools: [
+          {
+            name: 'allowed_tool',
+            label: 'Allowed Tool',
+            description: 'Returns private details before sanitization',
+            parameters: Type.Object({}, { additionalProperties: false }),
+            execute: () => Promise.resolve({ private: 'secret' }),
+          },
+        ],
+        afterToolCall: ({ result: toolResult }) => ({
+          content: `sanitized:${toolResult.content}`,
+          details: { sanitized: true },
+        }),
+      },
+      (event) => {
+        if (event.type === 'tool.completed') toolResults.push(event);
+      },
+    );
+
+    expect(result.status).toBe('completed');
+    const completed = toolResults.find((event) => event.type === 'tool.completed');
+    expect(completed?.type === 'tool.completed' ? completed.result.content : undefined).toContain(
+      'sanitized:',
+    );
+    expect(completed?.type === 'tool.completed' ? completed.result.details : undefined).toEqual({
+      sanitized: true,
+    });
+  });
+
+  it('blocks domain tools beyond the request budget while preserving completion tools', async () => {
+    let domainExecutions = 0;
+    let completed = false;
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('domain_tool', {}, { id: 'domain-1' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('domain_tool', {}, { id: 'domain-2' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('task_complete', {}, { id: 'complete-1' })], {
+          stopReason: 'toolUse',
+        }),
+      ],
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'run-tool-budget',
+        systemPrompt: 'Respect the domain tool budget and complete through task_complete.',
+        history: [],
+        prompt: '执行受限任务',
+        maxToolCalls: 1,
+        tools: [
+          {
+            name: 'domain_tool',
+            label: 'Domain Tool',
+            description: 'A budgeted domain tool',
+            parameters: Type.Object({}, { additionalProperties: false }),
+            execute: () => {
+              domainExecutions += 1;
+              return Promise.resolve({ ok: true });
+            },
+          },
+          {
+            name: 'task_complete',
+            label: 'Complete Task',
+            description: 'The protocol completion tool',
+            parameters: Type.Object({}, { additionalProperties: false }),
+            terminateOnSuccess: true,
+            execute: () => {
+              completed = true;
+              return Promise.resolve({ accepted: true });
+            },
+          },
+        ],
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('completed');
+    expect(domainExecutions).toBe(1);
+    expect(completed).toBe(true);
+  });
+
+  it('ends a Pi loop after repeated invalid completion tool calls', async () => {
+    let executions = 0;
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('task_complete', {}, { id: 'invalid-complete-1' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('task_complete', {}, { id: 'invalid-complete-2' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('task_complete', {}, { id: 'invalid-complete-3' })], {
+          stopReason: 'toolUse',
+        }),
+      ],
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'run-invalid-completion-budget',
+        systemPrompt: 'Complete through task_complete.',
+        history: [],
+        prompt: '完成任务',
+        maxFailedCompletionCalls: 2,
+        tools: [
+          {
+            name: 'task_complete',
+            label: 'Complete Task',
+            description: 'Reject invalid completion payloads',
+            parameters: Type.Object(
+              { status: Type.Literal('succeeded') },
+              { additionalProperties: false },
+            ),
+            terminateOnSuccess: true,
+            execute: () => {
+              executions += 1;
+              return Promise.resolve({ accepted: true });
+            },
+          },
+        ],
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('failed');
+    expect(executions).toBe(0);
+  });
 });

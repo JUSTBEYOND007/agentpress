@@ -18,6 +18,7 @@
     "@agentpress/agent-application": "workspace:*",
     "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/database": "workspace:*",
+    "@agentpress/runtime-tools": "workspace:*",
     "drizzle-orm": "catalog:"
   },
   "scripts": {

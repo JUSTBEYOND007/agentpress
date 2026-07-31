@@ -12,6 +12,7 @@ export type OutboxEnvelope = {
   readonly payload: Readonly<Record<string, unknown>>;
   readonly headers?: Readonly<Record<string, string>>;
   readonly occurredAt: Date;
+  readonly availableAt?: Date;
 };
 
 export async function enqueueOutboxMessage(

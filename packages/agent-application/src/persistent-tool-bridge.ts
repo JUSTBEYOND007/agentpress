@@ -1,17 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { RuntimeTool } from '@agentpress/agent-runtime';
+import type { RuntimeTool, RuntimeToolResultMessage } from '@agentpress/agent-runtime';
 import {
   agentRuns,
+  conversationBranches,
+  conversations,
   type AgentPressDatabase,
   evidenceRecords,
   rootRequests,
   runSkillBindings,
   skillRevisions,
+  toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
 import { ToolRegistry } from '@agentpress/tool-runtime';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import type { RuntimeToolFactory } from './contracts.js';
 import { ToolCallApplicationError, ToolCallService } from './tool-call-service.js';
@@ -22,6 +25,8 @@ type PersistentToolBridgeOptions = {
   readonly toolCalls: ToolCallService;
   readonly capabilityLimit?: number;
 };
+
+const ARTICLE_CONTEXT_CAPABILITIES = new Set(['article.read', 'article.propose']);
 
 export class PersistentToolBridge implements RuntimeToolFactory {
   public constructor(private readonly options: PersistentToolBridgeOptions) {}
@@ -39,10 +44,8 @@ export class PersistentToolBridge implements RuntimeToolFactory {
     const { definitions, requestedByUserId, allowedCapabilities } = await this.authorize(runId);
     const requested = new Set(capabilities);
     return definitions
-      .filter(
-        (definition) =>
-          requested.size === 0 ||
-          definition.capabilities.every((capability) => requested.has(capability)),
+      .filter((definition) =>
+        definition.capabilities.every((capability) => requested.has(capability)),
       )
       .slice(0, this.options.capabilityLimit ?? 16)
       .map((definition) => ({
@@ -56,6 +59,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
           const proposal = await this.options.toolCalls.propose({
             runId,
             ...(taskId ? { taskId } : {}),
+            providerToolCallId: context.providerToolCallId,
             toolId: definition.toolId,
             toolVersion: definition.version,
             arguments: arguments_,
@@ -114,11 +118,61 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       }));
   }
 
+  public async resumeApprovedToolCall(
+    runId: string,
+    taskId: string,
+    providerToolCallId: string,
+  ): Promise<RuntimeToolResultMessage | undefined> {
+    const rows = await this.options.database
+      .select()
+      .from(toolCalls)
+      .where(
+        and(
+          eq(toolCalls.runId, runId),
+          eq(toolCalls.taskId, taskId),
+          eq(toolCalls.providerToolCallId, providerToolCallId),
+          inArray(toolCalls.status, ['approved', 'succeeded', 'denied', 'expired']),
+        ),
+      )
+      .orderBy(desc(toolCalls.createdAt))
+      .limit(1);
+    const call = rows[0];
+    if (!call?.providerToolCallId) return undefined;
+    const toolName = runtimeToolName(call.toolId, call.toolVersion);
+    if (call.status === 'denied' || call.status === 'expired') {
+      return {
+        role: 'tool',
+        toolCallId: call.providerToolCallId,
+        toolName,
+        content: `Tool call ${call.status}`,
+        details: { toolCallId: call.id, status: call.status },
+        isError: true,
+        timestamp: call.updatedAt.getTime(),
+      };
+    }
+    const result = await this.options.toolCalls.execute(call.id);
+    return {
+      role: 'tool',
+      toolCallId: call.providerToolCallId,
+      toolName,
+      content: serializeToolResult(result.output),
+      details: result.output,
+      isError: result.status !== 'succeeded',
+      timestamp: Date.now(),
+    };
+  }
+
   private async authorize(runId: string) {
     const rows = await this.options.database
-      .select({ userId: rootRequests.requestedByUserId, role: workspaceMembers.role })
+      .select({
+        userId: rootRequests.requestedByUserId,
+        role: workspaceMembers.role,
+        articleId: conversations.articleId,
+      })
       .from(agentRuns)
       .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
+      .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
       .leftJoin(
         workspaceMembers,
         and(
@@ -145,6 +199,13 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       .filter((definition) => authorization.role !== 'viewer' || definition.risk === 'read_only')
       .filter(
         (definition) =>
+          authorization.articleId !== null ||
+          definition.capabilities.every(
+            (capability) => !ARTICLE_CONTEXT_CAPABILITIES.has(capability),
+          ),
+      )
+      .filter(
+        (definition) =>
           skillRows.length === 0 ||
           skillRows.every(({ allowedTools }) => allowedTools.includes(definition.toolId)),
       );
@@ -156,6 +217,12 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       ),
     };
   }
+}
+
+function serializeToolResult(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === undefined) return 'null';
+  return JSON.stringify(value);
 }
 
 type ToolEvidence = {

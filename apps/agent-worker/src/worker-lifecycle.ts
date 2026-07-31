@@ -3,6 +3,7 @@ import { ModelPolicyCatalog } from '@agentpress/agent-context';
 
 import {
   AGENT_RUN_CANCEL_CHANNEL,
+  AGENT_RUN_STEER_CHANNEL,
   AGENT_RUN_COMMAND_TOPIC,
   DirectRunService,
   type LiveRunEvent,
@@ -19,6 +20,7 @@ import {
   type DatabaseConnection,
 } from '@agentpress/database';
 import { createServiceLogger } from '@agentpress/observability';
+import { createBuiltInToolRuntime } from '@agentpress/runtime-tools';
 import {
   ArkEmbeddingProvider,
   ArticleKnowledgeIndexer,
@@ -29,7 +31,6 @@ import { Redis } from 'ioredis';
 import { Kafka, Partitioners } from 'kafkajs';
 
 import { RedisRunLeaseManager } from './redis-run-lease.js';
-import { createBuiltInToolRuntime } from './built-in-tool-runtime.js';
 
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
 const CONSUMER_GROUP = 'agentpress-agent-worker-v1';
@@ -123,9 +124,16 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     this.redisSubscriber.on('message', (channel: string, runId: string) => {
       if (channel === AGENT_RUN_CANCEL_CHANNEL) {
         this.activeRuns.get(runId)?.abort();
+        return;
+      }
+      if (channel === AGENT_RUN_STEER_CHANNEL) {
+        const command = parseSteeringCommand(runId);
+        if (command) {
+          void this.runService.steerActiveMain(command.runId, command.directiveId, command.content);
+        }
       }
     });
-    await this.redisSubscriber.subscribe(AGENT_RUN_CANCEL_CHANNEL);
+    await this.redisSubscriber.subscribe(AGENT_RUN_CANCEL_CHANNEL, AGENT_RUN_STEER_CHANNEL);
     await this.consumer.subscribe({ topics: [AGENT_RUN_COMMAND_TOPIC], fromBeginning: true });
     if (this.articleIndexer) {
       await this.indexConsumer.subscribe({
@@ -202,7 +210,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       this.consumer.disconnect(),
       ...(this.articleIndexer ? [this.indexConsumer.disconnect()] : []),
       this.producer.disconnect(),
-      this.redisSubscriber.unsubscribe(AGENT_RUN_CANCEL_CHANNEL),
+      this.redisSubscriber.unsubscribe(AGENT_RUN_CANCEL_CHANNEL, AGENT_RUN_STEER_CHANNEL),
       ...(['web_research', 'workspace_knowledge', 'licensed_media'] as const).map((serverId) =>
         this.builtInTools.manager.stop(serverId),
       ),
@@ -369,6 +377,33 @@ function parseRunCommand(payload: string | undefined): RunCommand | undefined {
       return undefined;
     }
     return value as RunCommand;
+  } catch {
+    return undefined;
+  }
+}
+
+type SteeringCommand = {
+  readonly runId: string;
+  readonly directiveId: string;
+  readonly content: string;
+};
+
+function parseSteeringCommand(payload: string | undefined): SteeringCommand | undefined {
+  if (!payload) return undefined;
+  try {
+    const value: unknown = JSON.parse(payload);
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      !('runId' in value) ||
+      typeof value.runId !== 'string' ||
+      !('directiveId' in value) ||
+      typeof value.directiveId !== 'string' ||
+      !('content' in value) ||
+      typeof value.content !== 'string'
+    )
+      return undefined;
+    return value as SteeringCommand;
   } catch {
     return undefined;
   }

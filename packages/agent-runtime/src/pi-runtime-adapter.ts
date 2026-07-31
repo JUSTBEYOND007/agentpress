@@ -3,6 +3,7 @@ import {
   type AgentEvent,
   type AgentMessage,
   type AgentTool,
+  type AgentToolResult,
 } from '@earendil-works/pi-agent-core';
 import {
   contentText,
@@ -14,12 +15,15 @@ import {
   type Message,
   type Model,
   type Models,
+  type ToolResultMessage,
+  type Usage,
   type UserMessage,
 } from '@earendil-works/pi-ai';
 
 import { createArkBackend, type ArkRuntimeConfig } from './ark-provider.js';
 import type {
   AgentRuntime,
+  RuntimeAssistantContentBlock,
   RuntimeAssistantMessage,
   RuntimeEvent,
   RuntimeEventSink,
@@ -29,6 +33,8 @@ import type {
   RuntimeResult,
   RuntimeTool,
   RuntimeToolResultMessage,
+  RuntimeTranscriptMessage,
+  RuntimeUserMessage,
   RuntimeUsage,
 } from './contracts.js';
 
@@ -60,6 +66,8 @@ export type FauxRuntimeConfig = {
 };
 
 export class PiRuntimeAdapter implements AgentRuntime {
+  private activeAgent: Agent | undefined;
+
   private constructor(private readonly backend: PiBackend) {}
 
   public static forArk(config: ArkRuntimeConfig): PiRuntimeAdapter {
@@ -86,7 +94,16 @@ export class PiRuntimeAdapter implements AgentRuntime {
     sink: RuntimeEventSink,
     signal?: AbortSignal,
   ): Promise<RuntimeResult> {
-    const stableMessages: RuntimeMessage[] = [...request.history];
+    const stableMessages: RuntimeMessage[] = request.history.filter(
+      (message): message is RuntimeMessage => message.role !== 'tool',
+    );
+    const terminatingTools = new Set(
+      request.tools?.filter(({ terminateOnSuccess }) => terminateOnSuccess).map(({ name }) => name),
+    );
+    const blockedByToolLimit = new Map<string, boolean>();
+    let domainToolCalls = 0;
+    let blockedToolCalls = 0;
+    let failedCompletionCalls = 0;
     const agent = new Agent({
       initialState: {
         systemPrompt: request.systemPrompt,
@@ -98,7 +115,61 @@ export class PiRuntimeAdapter implements AgentRuntime {
       streamFn: this.backend.models.streamSimple.bind(this.backend.models),
       sessionId: request.runId,
       maxRetryDelayMs: 10_000,
+      ...(request.beforeToolCall || request.maxToolCalls !== undefined
+        ? {
+            beforeToolCall: async ({ toolCall, args }) => {
+              const policy = await request.beforeToolCall?.({
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                arguments: args,
+              });
+              if (policy?.block) return policy;
+              if (terminatingTools.has(toolCall.name)) return policy;
+              if (request.maxToolCalls !== undefined && domainToolCalls >= request.maxToolCalls) {
+                blockedToolCalls += 1;
+                blockedByToolLimit.set(toolCall.id, blockedToolCalls > 1);
+                return {
+                  block: true,
+                  reason: `Tool call limit reached (${String(request.maxToolCalls)}). Submit the protocol completion tool now.`,
+                };
+              }
+              domainToolCalls += 1;
+              return policy;
+            },
+          }
+        : {}),
+      ...(request.afterToolCall || request.maxToolCalls !== undefined
+        ? {
+            afterToolCall: async ({ toolCall, args, result, isError }) => {
+              const normalized = toRuntimeToolResult(toolCall.id, toolCall.name, result, isError);
+              const update = await request.afterToolCall?.({
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                arguments: args,
+                result: normalized,
+              });
+              const terminateForLimit = blockedByToolLimit.get(toolCall.id);
+              blockedByToolLimit.delete(toolCall.id);
+              const terminate = terminateForLimit ? true : update?.terminate;
+              return update || terminate
+                ? {
+                    ...(update?.content === undefined
+                      ? {}
+                      : { content: [{ type: 'text' as const, text: update.content }] }),
+                    ...(update?.details === undefined ? {} : { details: update.details }),
+                    ...(update?.isError === undefined ? {} : { isError: update.isError }),
+                    ...(update?.usage === undefined ? {} : { usage: toPiUsage(update.usage) }),
+                    ...(terminate === undefined ? {} : { terminate }),
+                    ...(update?.addedToolNames === undefined
+                      ? {}
+                      : { addedToolNames: [...update.addedToolNames] }),
+                  }
+                : undefined;
+            },
+          }
+        : {}),
     });
+    this.activeAgent = agent;
     const state = new ExecutionState(signal?.aborted ?? false);
     const abort = (): void => {
       state.cancel();
@@ -124,6 +195,20 @@ export class PiRuntimeAdapter implements AgentRuntime {
             }
           }
         }
+        if (
+          runtimeEvent.type === 'tool.completed' &&
+          runtimeEvent.result.isError &&
+          terminatingTools.has(runtimeEvent.result.toolName) &&
+          request.maxFailedCompletionCalls !== undefined &&
+          ++failedCompletionCalls >= request.maxFailedCompletionCalls
+        ) {
+          state.failure = {
+            code: 'protocol_error',
+            message: `Completion tool failed validation ${String(failedCompletionCalls)} times`,
+            retryable: true,
+          };
+          agent.abort();
+        }
         await sink(runtimeEvent);
       }
     });
@@ -134,15 +219,19 @@ export class PiRuntimeAdapter implements AgentRuntime {
         return { status: 'cancelled', messages: stableMessages };
       }
 
-      await agent.prompt(request.prompt);
-
-      if (state.isCancelled()) {
-        await sink({ type: 'run.cancelled' });
-        return { status: 'cancelled', messages: stableMessages };
+      if (request.continuation) {
+        await agent.continue();
+      } else {
+        await agent.prompt(request.prompt);
       }
+
       if (state.failure) {
         await sink({ type: 'run.failed', error: state.failure });
         return { status: 'failed', messages: stableMessages, error: state.failure };
+      }
+      if (state.isCancelled()) {
+        await sink({ type: 'run.cancelled' });
+        return { status: 'cancelled', messages: stableMessages };
       }
 
       await sink({ type: 'run.completed', messages: stableMessages });
@@ -153,6 +242,10 @@ export class PiRuntimeAdapter implements AgentRuntime {
         message: error instanceof Error ? error.message : 'Unknown Pi runtime error',
         retryable: !state.isCancelled(),
       };
+      if (state.failure) {
+        await sink({ type: 'run.failed', error: state.failure });
+        return { status: 'failed', messages: stableMessages, error: state.failure };
+      }
       if (state.isCancelled()) {
         await sink({ type: 'run.cancelled' });
         return { status: 'cancelled', messages: stableMessages };
@@ -160,9 +253,17 @@ export class PiRuntimeAdapter implements AgentRuntime {
       await sink({ type: 'run.failed', error: runtimeFailure });
       return { status: 'failed', messages: stableMessages, error: runtimeFailure };
     } finally {
+      if (this.activeAgent === agent) this.activeAgent = undefined;
       signal?.removeEventListener('abort', abort);
       unsubscribe();
     }
+  }
+
+  public steer(message: RuntimeUserMessage): boolean {
+    const agent = this.activeAgent;
+    if (!agent?.state.isStreaming) return false;
+    agent.steer(toPiMessage(message));
+    return true;
   }
 }
 
@@ -179,10 +280,16 @@ function toPiTool(tool: RuntimeTool, runId: string): AgentTool {
         runId,
         providerToolCallId,
         ...(signal ? { signal } : {}),
-        ...(onUpdate ? { onUpdate: (details: unknown) => onUpdate({
-          content: [{ type: 'text', text: serializeToolOutput(details) }],
-          details,
-        }) } : {}),
+        ...(onUpdate
+          ? {
+              onUpdate: (details: unknown) => {
+                onUpdate({
+                  content: [{ type: 'text', text: serializeToolOutput(details) }],
+                  details,
+                });
+              },
+            }
+          : {}),
       });
       return {
         content: [{ type: 'text', text: serializeToolOutput(output) }],
@@ -244,25 +351,38 @@ function normalizeEvent(event: AgentEvent): readonly RuntimeEvent[] {
         },
       ];
     case 'tool_execution_end': {
-      const result = event.result as {
-        readonly content?: readonly { readonly type: 'text'; readonly text: string }[];
-        readonly details?: unknown;
-      };
-      const toolResult: RuntimeToolResultMessage = {
-        role: 'tool',
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        content: result.content?.map(({ text }) => text).join('') ?? '',
-        ...(result.details === undefined ? {} : { details: result.details }),
-        isError: event.isError,
-        timestamp: Date.now(),
-      };
+      const toolResult = toRuntimeToolResult(
+        event.toolCallId,
+        event.toolName,
+        event.result as AgentToolResult<unknown>,
+        event.isError,
+      );
       return [{ type: 'tool.completed', result: toolResult }];
     }
     case 'agent_end':
     case 'turn_end':
       return [];
   }
+}
+
+function toRuntimeToolResult(
+  toolCallId: string,
+  toolName: string,
+  result: AgentToolResult<unknown>,
+  isError: boolean,
+): RuntimeToolResultMessage {
+  return {
+    role: 'tool',
+    toolCallId,
+    toolName,
+    content: result.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join(''),
+    ...(result.details === undefined ? {} : { details: result.details }),
+    ...(result.usage === undefined ? {} : { usage: normalizePiUsage(result.usage) }),
+    ...(result.terminate === undefined ? {} : { terminate: result.terminate }),
+    ...(result.addedToolNames === undefined ? {} : { addedToolNames: [...result.addedToolNames] }),
+    isError,
+    timestamp: Date.now(),
+  };
 }
 
 function isSupportedMessage(message: AgentMessage): message is UserMessage | AssistantMessage {
@@ -292,6 +412,16 @@ function toRuntimeMessage(message: AgentMessage): RuntimeMessage | undefined {
   return {
     role: 'assistant',
     content: contentText(message.content),
+    blocks: message.content.map((part): RuntimeAssistantContentBlock => {
+      if (part.type === 'text') return { type: 'text', text: part.text };
+      if (part.type === 'thinking') return { type: 'thinking', thinking: part.thinking };
+      return {
+        type: 'tool_call',
+        id: part.id,
+        name: part.name,
+        arguments: part.arguments as Readonly<Record<string, unknown>>,
+      };
+    }),
     parts: message.content.flatMap((part) =>
       part.type === 'toolCall'
         ? [
@@ -315,13 +445,34 @@ function toRuntimeMessage(message: AgentMessage): RuntimeMessage | undefined {
 }
 
 function normalizeUsage(message: AssistantMessage): RuntimeUsage {
+  return normalizePiUsage(message.usage);
+}
+
+function normalizePiUsage(usage: Usage): RuntimeUsage {
   return {
-    inputTokens: message.usage.input,
-    outputTokens: message.usage.output,
-    cacheReadTokens: message.usage.cacheRead,
-    cacheWriteTokens: message.usage.cacheWrite,
-    totalTokens: message.usage.totalTokens,
-    costUsd: message.usage.cost.total,
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheWriteTokens: usage.cacheWrite,
+    totalTokens: usage.totalTokens,
+    costUsd: usage.cost.total,
+  };
+}
+
+function toPiUsage(usage: RuntimeUsage): Usage {
+  return {
+    input: usage.inputTokens,
+    output: usage.outputTokens,
+    cacheRead: usage.cacheReadTokens,
+    cacheWrite: usage.cacheWriteTokens,
+    totalTokens: usage.totalTokens,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: usage.costUsd,
+    },
   };
 }
 
@@ -331,14 +482,48 @@ function normalizeStopReason(
   return stopReason === 'toolUse' ? 'tool_use' : stopReason;
 }
 
-function toPiMessage(message: RuntimeMessage): Message {
+function toPiMessage(message: RuntimeTranscriptMessage): Message {
   if (message.role === 'user') {
     return message;
   }
 
+  if (message.role === 'tool') {
+    const toolResult: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId: message.toolCallId,
+      toolName: message.toolName,
+      content: [{ type: 'text', text: message.content }],
+      ...(message.details === undefined ? {} : { details: message.details }),
+      ...(message.usage === undefined ? {} : { usage: toPiUsage(message.usage) }),
+      ...(message.addedToolNames === undefined
+        ? {}
+        : { addedToolNames: [...message.addedToolNames] }),
+      isError: message.isError,
+      timestamp: message.timestamp,
+    };
+    return toolResult;
+  }
+
   return {
     role: 'assistant',
-    content: [{ type: 'text', text: message.content }],
+    content: message.blocks?.map((block) => {
+      if (block.type === 'text') return { type: 'text' as const, text: block.text };
+      if (block.type === 'thinking') return { type: 'thinking' as const, thinking: block.thinking };
+      return {
+        type: 'toolCall' as const,
+        id: block.id,
+        name: block.name,
+        arguments: block.arguments,
+      };
+    }) ?? [
+      { type: 'text' as const, text: message.content },
+      ...(message.parts ?? []).map((part) => ({
+        type: 'toolCall' as const,
+        id: part.id,
+        name: part.name,
+        arguments: part.arguments,
+      })),
+    ],
     api: 'openai-completions',
     provider: message.provider,
     model: message.model,

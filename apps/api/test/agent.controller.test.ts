@@ -60,6 +60,7 @@ describe('AgentController SSE replay', () => {
         mentionTargetIds: [],
         attachmentIds: [],
         skills: [],
+        contextBindings: [],
       },
     ]);
     await expect(

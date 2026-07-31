@@ -1,6 +1,6 @@
 {
-  "id": "983c8ab9-77c5-45a2-a0b4-2794becb08e5",
-  "prevId": "dd2c079f-1663-4f53-b38a-c223e4d3c5f6",
+  "id": "c4fab2db-53db-4b98-875c-f2eb2ea9843d",
+  "prevId": "983c8ab9-77c5-45a2-a0b4-2794becb08e5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5525,6 +5525,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "provider_tool_call_id": {
+          "name": "provider_tool_call_id",
+          "type": "varchar(240)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "tool_id": {
           "name": "tool_id",
           "type": "varchar(180)",
@@ -5633,6 +5639,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tool_calls_run_provider_call_unique": {
+          "name": "tool_calls_run_provider_call_unique",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_tool_call_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tool_calls\".\"provider_tool_call_id\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
