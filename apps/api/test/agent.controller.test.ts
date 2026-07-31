@@ -58,6 +58,7 @@ describe('AgentController SSE replay', () => {
         prompt: '研究 Kafka',
         idempotencyKey: 'request-1',
         mentionTargetIds: [],
+        attachmentIds: [],
         skills: [],
       },
     ]);

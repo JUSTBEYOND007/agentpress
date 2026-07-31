@@ -1,4 +1,10 @@
-export type ContextKind = 'policy' | 'conversation' | 'mention' | 'evidence' | 'memory';
+export type ContextKind =
+  | 'policy'
+  | 'conversation'
+  | 'mention'
+  | 'attachment'
+  | 'evidence'
+  | 'memory';
 export type ContextCandidate = {
   readonly id: string;
   readonly kind: ContextKind;

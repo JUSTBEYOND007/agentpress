@@ -1,9 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { RuntimeTool } from '@agentpress/agent-runtime';
 import {
   agentRuns,
   type AgentPressDatabase,
+  evidenceRecords,
   rootRequests,
   runSkillBindings,
   skillRevisions,
@@ -81,7 +82,34 @@ export class PersistentToolBridge implements RuntimeToolFactory {
               `Tool Call ${proposal.toolCallId} settled as ${result.status}`,
             );
           }
-          return result.output;
+          const evidence = extractToolEvidence(result.output);
+          if (evidence.length === 0) return result.output;
+          const persisted = evidence.map((item) => ({
+            id: randomUUID(),
+            runId,
+            ...(taskId ? { taskId } : {}),
+            sourceType: 'tool',
+            sourceUri: item.sourceUri,
+            title: item.title,
+            excerpt: item.excerpt,
+            sourceRevision: item.sourceRevision,
+            contentHash: createHash('sha256').update(item.excerpt).digest('hex'),
+            metadata: {
+              toolCallId: proposal.toolCallId,
+              toolId: definition.toolId,
+              toolVersion: definition.version,
+            },
+          }));
+          await this.options.database.insert(evidenceRecords).values(persisted);
+          return {
+            output: result.output,
+            evidence: persisted.map(({ id, title, sourceUri, sourceRevision }) => ({
+              evidenceId: id,
+              title,
+              source: sourceUri,
+              sourceRevision,
+            })),
+          };
         },
       }));
   }
@@ -128,6 +156,55 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       ),
     };
   }
+}
+
+type ToolEvidence = {
+  readonly sourceUri: string;
+  readonly title: string;
+  readonly excerpt: string;
+  readonly sourceRevision: string;
+};
+
+function extractToolEvidence(output: unknown): readonly ToolEvidence[] {
+  const root = recordValue(output);
+  const candidates = Array.isArray(root.value)
+    ? root.value
+    : Array.isArray(root.results)
+      ? root.results
+      : Array.isArray(output)
+        ? output
+        : [];
+  return candidates.flatMap((candidate) => {
+    const item = recordValue(candidate);
+    const sourceUri = firstString(item.source, item.url, item.pageUrl, item.uri);
+    const excerpt = firstString(item.excerpt, item.text, item.content, item.snippet);
+    if (!sourceUri || !excerpt) return [];
+    return [
+      {
+        sourceUri,
+        title: firstString(item.title, excerpt.slice(0, 160), sourceUri),
+        excerpt: excerpt.slice(0, 20_000),
+        sourceRevision: firstString(
+          item.revisionHash,
+          item.contentHash,
+          item.updatedAt,
+          createHash('sha256').update(excerpt).digest('hex'),
+        ),
+      },
+    ];
+  });
+}
+
+function recordValue(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function firstString(...values: readonly unknown[]): string {
+  return (
+    values.find((value): value is string => typeof value === 'string' && value.length > 0) ?? ''
+  );
 }
 
 export function runtimeToolName(toolId: string, version: string): string {

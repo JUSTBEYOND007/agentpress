@@ -17,11 +17,27 @@ async function bootstrap(): Promise<void> {
   const app = await core.NestFactory.create<NestFastifyApplication>(
     application.AppModule,
     new fastify.FastifyAdapter({
-      bodyLimit: 1_048_576,
+      bodyLimit: 20 * 1024 * 1024,
       trustProxy: true,
     }),
     { bufferLogs: true },
   );
+
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addContentTypeParser(
+      [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/markdown',
+        'text/plain',
+      ],
+      { parseAs: 'buffer' },
+      (_request: unknown, body: Buffer, done: (error: Error | null, value?: Buffer) => void) => {
+        done(null, body);
+      },
+    );
 
   app.useLogger(app.get(nestPino.Logger));
   app.enableVersioning({

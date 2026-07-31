@@ -17,20 +17,24 @@ import {
   appendCheckpoint,
   appendRunEvent,
   artifacts,
+  artifactEvidence,
   artifactVersions,
   type AgentPressDatabase,
   contextPacks,
+  conversationBranches,
   conversations,
   type DatabaseTransaction,
   executionPlans,
+  evidenceRecords,
   planRevisionTasks,
   planRevisions,
+  runDirectives,
   runQuestions,
   taskBriefs,
   taskResults,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -103,13 +107,7 @@ type PlannedRunExecutorOptions = {
   readonly createId?: () => string;
 };
 
-const specialistRoles = [
-  'researcher',
-  'writer',
-  'editor',
-  'fact_checker',
-  'illustrator',
-] as const;
+const specialistRoles = ['researcher', 'writer', 'editor', 'fact_checker', 'illustrator'] as const;
 const artifactTypes = [
   'ResearchBrief',
   'Outline',
@@ -155,6 +153,15 @@ const taskCompleteSchema = Type.Object(
     ),
     warnings: Type.Array(Type.String({ minLength: 1, maxLength: 2_000 }), { maxItems: 20 }),
     failure: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),
+  },
+  { additionalProperties: false },
+);
+
+const planRevisionSchema = Type.Object(
+  {
+    goal: Type.String({ minLength: 1, maxLength: 4_000 }),
+    retainedTaskIds: Type.Array(Type.String({ format: 'uuid' }), { maxItems: 12 }),
+    tasks: Type.Array(taskSchema, { maxItems: 12 }),
   },
   { additionalProperties: false },
 );
@@ -228,12 +235,30 @@ export class PlannedRunExecutor {
       ? await this.options.runtimeToolFactory.listCapabilities(runId)
       : [];
     let submittedPlan: SubmittedPlan | undefined;
-    let requestedQuestion: { readonly question: string; readonly options: readonly string[] } | undefined;
+    let requestedQuestion:
+      | { readonly question: string; readonly options: readonly string[] }
+      | undefined;
     const tools: RuntimeTool[] = [
+      {
+        name: 'conversation_title_set',
+        label: 'Set conversation title',
+        description: 'Set a concise title for this conversation on the first user turn.',
+        parameters: Type.Object(
+          { title: Type.String({ minLength: 1, maxLength: 80 }) },
+          { additionalProperties: false },
+        ),
+        constrainedSampling: { type: 'json_schema', strict: 'require' },
+        executionMode: 'sequential',
+        execute: async (arguments_) => {
+          const accepted = await this.setConversationTitle(runId, String(arguments_.title), false);
+          return { accepted };
+        },
+      },
       {
         name: 'plan_submit',
         label: 'Submit execution plan',
-        description: 'Submit a concrete task DAG only when the request needs specialist work or tools.',
+        description:
+          'Submit a concrete task DAG only when the request needs specialist work or tools.',
         parameters: Type.Object(
           {
             goal: Type.String({ minLength: 1, maxLength: 4_000 }),
@@ -287,6 +312,7 @@ export class PlannedRunExecutor {
       tools,
       signal,
     );
+    await this.setConversationTitle(runId, prompt.slice(0, 24), true);
     if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
     if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
     if (result.status === 'completed' && findAssistant(result)) return { kind: 'direct', result };
@@ -373,7 +399,10 @@ export class PlannedRunExecutor {
     if (requiredFailure) {
       return {
         degraded: false,
-        result: protocolFailure([], `Required ${requiredFailure.owner} task failed: ${requiredFailure.failure ?? 'unknown failure'}`),
+        result: protocolFailure(
+          [],
+          `Required ${requiredFailure.owner} task failed: ${requiredFailure.failure ?? 'unknown failure'}`,
+        ),
       };
     }
     const completion = await this.runCompletionMain(runId, prompt, settled, signal);
@@ -482,10 +511,17 @@ export class PlannedRunExecutor {
   ): Promise<readonly SettledTask[]> {
     const settled = new Map<string, SettledTask>();
     const pending = new Map(tasks.map((task) => [task.id, task]));
+    const orderedTasks = [...tasks];
     while (pending.size > 0) {
       if (signal?.aborted) {
         for (const task of pending.values()) {
-          settled.set(task.id, { ...task, status: 'cancelled', artifacts: [], warnings: [], failure: 'run_cancelled' });
+          settled.set(task.id, {
+            ...task,
+            status: 'cancelled',
+            artifacts: [],
+            warnings: [],
+            failure: 'run_cancelled',
+          });
         }
         break;
       }
@@ -497,7 +533,13 @@ export class PlannedRunExecutor {
           })
         ) {
           pending.delete(task.id);
-          settled.set(task.id, { ...task, status: 'skipped', artifacts: [], warnings: [], failure: 'dependency_failed' });
+          settled.set(task.id, {
+            ...task,
+            status: 'skipped',
+            artifacts: [],
+            warnings: [],
+            failure: 'dependency_failed',
+          });
           await this.updateTaskStatus(runId, task, 'skipped', 'dependency_failed');
         }
       }
@@ -515,8 +557,36 @@ export class PlannedRunExecutor {
         pending.delete(task.id);
         settled.set(task.id, task);
       }
+      const revision = await this.revisePlanAtBoundary(
+        runId,
+        rootPrompt,
+        orderedTasks,
+        pending,
+        settled,
+        signal,
+      );
+      if (revision) {
+        for (const task of [...pending.values()]) {
+          if (!revision.retainedTaskIds.has(task.id)) {
+            pending.delete(task.id);
+            const cancelled: SettledTask = {
+              ...task,
+              status: 'cancelled',
+              artifacts: [],
+              warnings: ['Replaced by Main Agent plan revision'],
+              failure: 'plan_revised',
+            };
+            settled.set(task.id, cancelled);
+            await this.updateTaskStatus(runId, task, 'skipped', 'plan_revised');
+          }
+        }
+        for (const task of revision.newTasks) {
+          orderedTasks.push(task);
+          pending.set(task.id, task);
+        }
+      }
     }
-    return tasks.map(
+    return orderedTasks.map(
       (task) =>
         settled.get(task.id) ?? {
           ...task,
@@ -526,6 +596,215 @@ export class PlannedRunExecutor {
           failure: 'not_scheduled',
         },
     );
+  }
+
+  private async revisePlanAtBoundary(
+    runId: string,
+    rootPrompt: string,
+    orderedTasks: readonly PlannedTaskSpec[],
+    pending: ReadonlyMap<string, PlannedTaskSpec>,
+    settled: ReadonlyMap<string, SettledTask>,
+    signal?: AbortSignal,
+  ): Promise<
+    | {
+        readonly retainedTaskIds: ReadonlySet<string>;
+        readonly newTasks: readonly PlannedTaskSpec[];
+      }
+    | undefined
+  > {
+    const directives = await this.options.database
+      .select({ id: runDirectives.id, content: runDirectives.content })
+      .from(runDirectives)
+      .where(
+        and(
+          eq(runDirectives.runId, runId),
+          eq(runDirectives.kind, 'steering'),
+          eq(runDirectives.status, 'pending'),
+        ),
+      )
+      .orderBy(asc(runDirectives.sequence));
+    if (directives.length === 0) return undefined;
+    const revisionRows = await this.options.database
+      .select({
+        planId: executionPlans.id,
+        revisionId: planRevisions.id,
+        revisionNumber: planRevisions.revisionNumber,
+      })
+      .from(agentRuns)
+      .innerJoin(planRevisions, eq(planRevisions.id, agentRuns.activePlanRevisionId))
+      .innerJoin(executionPlans, eq(executionPlans.id, planRevisions.planId))
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+    const current = revisionRows[0];
+    if (!current || current.revisionNumber >= 4) {
+      await this.options.database
+        .update(runDirectives)
+        .set({ status: 'consumed', appliedAt: this.now() })
+        .where(
+          inArray(
+            runDirectives.id,
+            directives.map(({ id }) => id),
+          ),
+        );
+      return undefined;
+    }
+    const availableCapabilities = this.options.runtimeToolFactory
+      ? await this.options.runtimeToolFactory.listCapabilities(runId)
+      : [];
+    let submitted:
+      | {
+          readonly goal: string;
+          readonly retainedTaskIds: readonly string[];
+          readonly tasks: readonly PlannedTaskSpec[];
+        }
+      | undefined;
+    const planRevise: RuntimeTool = {
+      name: 'plan_revise',
+      label: 'Revise execution plan',
+      description:
+        'Retain unaffected pending tasks and add only tasks required by the steering input.',
+      parameters: planRevisionSchema,
+      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      executionMode: 'sequential',
+      terminateOnSuccess: true,
+      execute: (arguments_) => {
+        const retainedTaskIds = arguments_.retainedTaskIds as readonly string[];
+        if (retainedTaskIds.some((id) => !pending.has(id))) {
+          throw new Error('plan_revise can retain only currently pending tasks');
+        }
+        const plan = validatePlan(
+          { goal: arguments_.goal, tasks: arguments_.tasks },
+          availableCapabilities,
+          this.createId,
+        );
+        if (retainedTaskIds.length + plan.tasks.length > 12) {
+          throw new Error('Revised plan exceeds 12 active tasks');
+        }
+        submitted = { goal: plan.goal, retainedTaskIds, tasks: plan.tasks };
+        return Promise.resolve({ accepted: true });
+      },
+    };
+    const steering = directives.map(({ content }) => content).join('\n');
+    const envelope = {
+      rootRequest: rootPrompt,
+      steering,
+      pendingTasks: [...pending.values()].map(publicTask),
+      acceptedResults: [...settled.values()]
+        .filter(({ status }) => status === 'succeeded')
+        .map(({ id, owner, summary, artifacts: produced }) => ({
+          taskId: id,
+          owner,
+          summary,
+          artifacts: produced.map(({ type, title, summary: artifactSummary }) => ({
+            type,
+            title,
+            summary: artifactSummary,
+          })),
+        })),
+    };
+    let result = await this.executeWithTranscript(
+      runId,
+      undefined,
+      'main',
+      current.revisionNumber + 1,
+      'main',
+      mainRevisionPrompt(availableCapabilities),
+      [],
+      JSON.stringify(envelope),
+      [planRevise],
+      signal,
+    );
+    for (let repair = 1; !submitted && result.status === 'completed' && repair <= 2; repair += 1) {
+      result = await this.executeWithTranscript(
+        runId,
+        undefined,
+        'main',
+        current.revisionNumber + 1 + repair,
+        'main',
+        mainRevisionPrompt(availableCapabilities),
+        [],
+        'Protocol repair: call plan_revise exactly once with a schema-valid revision.',
+        [planRevise],
+        signal,
+      );
+    }
+    if (!submitted) throw new Error('Main Agent did not call plan_revise for persisted steering');
+    const retained = new Set(submitted.retainedTaskIds);
+    const revisionId = this.createId();
+    const revisionNumber = current.revisionNumber + 1;
+    const revisionEvents = await this.options.database.transaction(async (transaction) => {
+      await transaction.insert(planRevisions).values({
+        id: revisionId,
+        planId: current.planId,
+        revisionNumber,
+        reason: 'steering',
+        summary: submitted?.goal ?? '',
+      });
+      const revisionMembers = orderedTasks.filter(
+        ({ id }) => settled.get(id)?.status === 'succeeded' || retained.has(id),
+      );
+      if (revisionMembers.length > 0) {
+        await transaction.insert(planRevisionTasks).values(
+          revisionMembers.map((task, position) => ({
+            planRevisionId: revisionId,
+            taskId: task.id,
+            position,
+            sourceRevisionId: current.revisionId,
+          })),
+        );
+      }
+      await this.persistRevisionTasks(
+        transaction,
+        runId,
+        revisionId,
+        submitted?.tasks ?? [],
+        rootPrompt,
+        revisionMembers.length,
+      );
+      await transaction
+        .update(agentRuns)
+        .set({
+          activePlanRevisionId: revisionId,
+          updatedAt: this.now(),
+          version: sql`${agentRuns.version} + 1`,
+        })
+        .where(eq(agentRuns.id, runId));
+      await transaction
+        .update(runDirectives)
+        .set({ status: 'consumed', appliedAt: this.now() })
+        .where(
+          inArray(
+            runDirectives.id,
+            directives.map(({ id }) => id),
+          ),
+        );
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'plan_revised',
+        state: { revisionId, revisionNumber, directiveIds: directives.map(({ id }) => id) },
+      });
+      const revised = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'plan.revised',
+        payload: {
+          revisionId,
+          revisionNumber,
+          summary: submitted?.goal,
+          tasks: [...revisionMembers, ...(submitted?.tasks ?? [])].map(publicTask),
+        },
+      });
+      const applied = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'steering.applied',
+        payload: { directiveIds: directives.map(({ id }) => id), revisionNumber },
+      });
+      return [revised, applied].map(toDurableEvent);
+    });
+    await this.publishAll(revisionEvents);
+    return { retainedTaskIds: retained, newTasks: submitted.tasks };
   }
 
   private async executeTask(
@@ -548,13 +827,17 @@ export class PlannedRunExecutor {
     const taskComplete: RuntimeTool = {
       name: 'task_complete',
       label: 'Complete specialist task',
-      description: 'Submit the validated specialist result. This is the only valid completion path.',
+      description:
+        'Submit the validated specialist result. This is the only valid completion path.',
       parameters: taskCompleteSchema,
       constrainedSampling: { type: 'json_schema', strict: 'require' },
       executionMode: 'sequential',
       terminateOnSuccess: true,
-      execute: (arguments_) => {
-        completion = arguments_ as typeof completion & {};
+      execute: async (arguments_) => {
+        const submitted = arguments_ as typeof completion & {};
+        const evidenceIds = submitted.artifacts.flatMap((artifact) => artifact.evidenceIds);
+        await this.assertTaskEvidence(runId, task.id, evidenceIds);
+        completion = submitted;
         return Promise.resolve({ accepted: true });
       },
     };
@@ -563,7 +846,9 @@ export class PlannedRunExecutor {
       : [];
     const upstream = task.dependencyIds.flatMap((id) => {
       const dependency = settled.get(id);
-      return dependency ? [{ taskId: id, status: dependency.status, summary: dependency.summary }] : [];
+      return dependency
+        ? [{ taskId: id, status: dependency.status, summary: dependency.summary }]
+        : [];
     });
     let result = await this.executeWithTranscript(
       runId,
@@ -636,11 +921,18 @@ export class PlannedRunExecutor {
       ...(taskId ? { taskId } : {}),
       kind,
       attempt,
-      logicalKey: taskId ? `${runId}:task:${taskId}:${attempt}` : `${runId}:main:${attempt}`,
+      logicalKey: taskId
+        ? `${runId}:task:${taskId}:${String(attempt)}`
+        : `${runId}:main:${String(attempt)}`,
       model: modelPurpose,
     });
     let sequence = 1;
-    const record = async (role: string, messageType: string, content: Readonly<Record<string, unknown>>, providerToolCallId?: string) => {
+    const record = async (
+      role: string,
+      messageType: string,
+      content: Readonly<Record<string, unknown>>,
+      providerToolCallId?: string,
+    ) => {
       await this.options.database.insert(agentTranscriptEntries).values({
         id: this.createId(),
         sessionId,
@@ -663,7 +955,12 @@ export class PlannedRunExecutor {
           if (event.type === 'message.completed') {
             await record(event.message.role, 'message', { message: event.message });
           } else if (event.type === 'tool.started') {
-            await record('assistant', 'tool_call', { name: event.toolName, arguments: event.arguments }, event.toolCallId);
+            await record(
+              'assistant',
+              'tool_call',
+              { name: event.toolName, arguments: event.arguments },
+              event.toolCallId,
+            );
           } else if (event.type === 'tool.completed') {
             await record('tool', 'tool_result', { result: event.result }, event.result.toolCallId);
           }
@@ -672,7 +969,10 @@ export class PlannedRunExecutor {
         signal,
       );
     } catch (error) {
-      result = protocolFailure([], error instanceof Error ? error.message : 'Unknown Pi runtime error');
+      result = protocolFailure(
+        [],
+        error instanceof Error ? error.message : 'Unknown Pi runtime error',
+      );
     }
     await this.options.database
       .update(agentSessions)
@@ -721,13 +1021,23 @@ export class PlannedRunExecutor {
     await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
   }
 
-  private async persistQuestion(runId: string, question: string, options: readonly string[]): Promise<void> {
+  private async persistQuestion(
+    runId: string,
+    question: string,
+    options: readonly string[],
+  ): Promise<void> {
     const event = await this.options.database.transaction(async (transaction) => {
       const questionId = this.createId();
-      await transaction.insert(runQuestions).values({ id: questionId, runId, prompt: question, options });
+      await transaction
+        .insert(runQuestions)
+        .values({ id: questionId, runId, prompt: question, options });
       await transaction
         .update(agentRuns)
-        .set({ status: 'waiting_for_user', updatedAt: this.now(), version: sql`${agentRuns.version} + 1` })
+        .set({
+          status: 'waiting_for_user',
+          updatedAt: this.now(),
+          version: sql`${agentRuns.version} + 1`,
+        })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'planning')));
       await appendCheckpoint(transaction, {
         id: this.createId(),
@@ -751,6 +1061,7 @@ export class PlannedRunExecutor {
     revisionId: string,
     tasks: readonly PlannedTaskSpec[],
     prompt: string,
+    positionOffset = 0,
   ): Promise<void> {
     await transaction.insert(agentTasks).values(
       tasks.map((task) => ({
@@ -769,12 +1080,17 @@ export class PlannedRunExecutor {
       })),
     );
     await transaction.insert(planRevisionTasks).values(
-      tasks.map((task, position) => ({ planRevisionId: revisionId, taskId: task.id, position })),
+      tasks.map((task, position) => ({
+        planRevisionId: revisionId,
+        taskId: task.id,
+        position: position + positionOffset,
+      })),
     );
     const dependencies = tasks.flatMap((task) =>
       task.dependencyIds.map((dependencyTaskId) => ({ taskId: task.id, dependencyTaskId })),
     );
-    if (dependencies.length > 0) await transaction.insert(agentTaskDependencies).values(dependencies);
+    if (dependencies.length > 0)
+      await transaction.insert(agentTaskDependencies).values(dependencies);
     for (const task of tasks) {
       const content = JSON.stringify({ rootRequest: prompt, task });
       const contentHash = createHash('sha256').update(content).digest('hex');
@@ -799,7 +1115,10 @@ export class PlannedRunExecutor {
     }
   }
 
-  private async loadPlanTasks(runId: string, revisionId: string): Promise<readonly PlannedTaskSpec[]> {
+  private async loadPlanTasks(
+    runId: string,
+    revisionId: string,
+  ): Promise<readonly PlannedTaskSpec[]> {
     const rows = await this.options.database
       .select({
         id: agentTasks.id,
@@ -848,7 +1167,9 @@ export class PlannedRunExecutor {
       for (const artifact of result.artifacts) {
         const artifactId = this.createId();
         const versionId = this.createId();
-        const contentHash = createHash('sha256').update(JSON.stringify(artifact.content)).digest('hex');
+        const contentHash = createHash('sha256')
+          .update(JSON.stringify(artifact.content))
+          .digest('hex');
         await transaction.insert(artifacts).values({
           id: artifactId,
           runId,
@@ -864,6 +1185,16 @@ export class PlannedRunExecutor {
           content: artifact.content,
           contentHash,
         });
+        if (artifact.evidenceIds.length > 0) {
+          await transaction.insert(artifactEvidence).values(
+            artifact.evidenceIds.map((evidenceId, ordinal) => ({
+              artifactVersionId: versionId,
+              evidenceId,
+              claim: artifact.summary,
+              ordinal: ordinal + 1,
+            })),
+          );
+        }
         persistedArtifacts.push({ artifactId, versionId, ...artifact });
       }
       if (result.status !== 'cancelled' && result.status !== 'skipped') {
@@ -873,7 +1204,7 @@ export class PlannedRunExecutor {
           attempt: 1,
           status: result.status,
           artifacts: persistedArtifacts,
-          evidence: [],
+          evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
           usage: result.usage ?? {},
           warnings: result.warnings,
           ...(result.failure ? { failure: { code: result.failure, message: result.failure } } : {}),
@@ -919,7 +1250,9 @@ export class PlannedRunExecutor {
         .update(agentTasks)
         .set({
           status,
-          ...(status === 'running' ? { attempt: sql`${agentTasks.attempt} + 1` } : { completedAt: now }),
+          ...(status === 'running'
+            ? { attempt: sql`${agentTasks.attempt} + 1` }
+            : { completedAt: now }),
           updatedAt: now,
           version: sql`${agentTasks.version} + 1`,
         })
@@ -939,17 +1272,71 @@ export class PlannedRunExecutor {
     artifactIds: readonly string[],
     evidenceIds: readonly string[],
   ): Promise<void> {
-    if (evidenceIds.length > 0) {
-      throw new Error('Evidence references are unavailable until evidence is persisted by a tool');
-    }
-    if (artifactIds.length === 0) return;
-    const rows = await this.options.database
-      .select({ id: artifacts.id })
-      .from(artifacts)
-      .where(and(eq(artifacts.runId, runId), inArray(artifacts.id, artifactIds)));
-    if (new Set(rows.map(({ id }) => id)).size !== new Set(artifactIds).size) {
+    const [artifactRows, evidenceRows] = await Promise.all([
+      artifactIds.length === 0
+        ? Promise.resolve([])
+        : this.options.database
+            .select({ id: artifacts.id })
+            .from(artifacts)
+            .where(and(eq(artifacts.runId, runId), inArray(artifacts.id, artifactIds))),
+      evidenceIds.length === 0
+        ? Promise.resolve([])
+        : this.options.database
+            .select({ id: evidenceRecords.id })
+            .from(evidenceRecords)
+            .where(and(eq(evidenceRecords.runId, runId), inArray(evidenceRecords.id, evidenceIds))),
+    ]);
+    if (new Set(artifactRows.map(({ id }) => id)).size !== new Set(artifactIds).size) {
       throw new Error('run_complete references an artifact outside the current Run');
     }
+    if (new Set(evidenceRows.map(({ id }) => id)).size !== new Set(evidenceIds).size) {
+      throw new Error('run_complete references Evidence outside the current Run');
+    }
+  }
+
+  private async assertTaskEvidence(
+    runId: string,
+    taskId: string,
+    evidenceIds: readonly string[],
+  ): Promise<void> {
+    if (evidenceIds.length === 0) return;
+    const rows = await this.options.database
+      .select({ id: evidenceRecords.id })
+      .from(evidenceRecords)
+      .where(
+        and(
+          eq(evidenceRecords.runId, runId),
+          eq(evidenceRecords.taskId, taskId),
+          inArray(evidenceRecords.id, evidenceIds),
+        ),
+      );
+    if (new Set(rows.map(({ id }) => id)).size !== new Set(evidenceIds).size) {
+      throw new Error('task_complete references Evidence not produced for this task');
+    }
+  }
+
+  private async setConversationTitle(
+    runId: string,
+    rawTitle: string,
+    onlyWhenTemporary: boolean,
+  ): Promise<boolean> {
+    const title = rawTitle.trim().slice(0, 80);
+    if (!title) return false;
+    const runRows = await this.options.database
+      .select({ conversationId: conversations.id, title: conversations.title })
+      .from(agentRuns)
+      .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+    const conversation = runRows[0];
+    if (!conversation || (onlyWhenTemporary && conversation.title !== '新对话')) return false;
+    const updated = await this.options.database
+      .update(conversations)
+      .set({ title, updatedAt: this.now() })
+      .where(eq(conversations.id, conversation.conversationId))
+      .returning({ id: conversations.id });
+    return updated.length === 1;
   }
 
   private async publishRuntimeEvent(runId: string, event: RuntimeEvent): Promise<void> {
@@ -1038,6 +1425,14 @@ Never emit a generic template plan. Never reveal hidden chain of thought.`;
 
 function mainCompletionPrompt(): string {
   return 'You are the AgentPress Main Agent. Synthesize only from validated Task Result Envelopes. You must call run_complete. Do not answer as ordinary text and do not invent Artifact or Evidence IDs.';
+}
+
+function mainRevisionPrompt(capabilities: readonly string[]): string {
+  return `You are the persistent AgentPress Main Agent revising an active plan after user steering.
+You must call plan_revise. Retain every unaffected pending task by its persisted UUID, replace only affected unfinished tasks, and never repeat accepted results.
+New task dependencyKeys may refer only to other new task clientKeys; accepted results are immutable context rather than new dependencies.
+Available capabilities: ${JSON.stringify(capabilities)}.
+Never answer as ordinary text and never reveal hidden chain of thought.`;
 }
 
 function specialistPrompt(role: SpecialistRole): string {

@@ -24,6 +24,8 @@
   "dependencies": {
     "@agentpress/database": "workspace:*",
     "drizzle-orm": "catalog:",
-    "minio": "catalog:"
+    "mammoth": "1.12.0",
+    "minio": "catalog:",
+    "unpdf": "1.8.0"
   }
 }

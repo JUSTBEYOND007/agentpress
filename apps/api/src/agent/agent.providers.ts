@@ -9,6 +9,7 @@ import type { DatabaseConnection } from '@agentpress/database';
 import { AutosaveService, ProposalService, RedisWriterLease } from '@agentpress/editor-application';
 import {
   ArkImageGenerator,
+  AttachmentService,
   MediaService,
   MinioObjectStorage,
   type ImageGenerator,
@@ -98,6 +99,12 @@ export const agentProviders: Provider[] = [
     provide: MediaService,
     useFactory: (connection: DatabaseConnection) =>
       new MediaService({ database: connection.db, storage: objectStorage, imageGenerator }),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: AttachmentService,
+    useFactory: (connection: DatabaseConnection) =>
+      new AttachmentService({ database: connection.db, storage: objectStorage }),
     inject: [DATABASE_CONNECTION],
   },
   {

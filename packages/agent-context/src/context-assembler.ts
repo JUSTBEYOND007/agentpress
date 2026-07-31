@@ -4,8 +4,9 @@ import type { ContextCandidate, ContextKind, ContextPack } from './contracts.js'
 const shares: Readonly<Record<ContextKind, number>> = {
   policy: 0.1,
   conversation: 0.2,
-  mention: 0.3,
-  evidence: 0.3,
+  mention: 0.2,
+  attachment: 0.2,
+  evidence: 0.2,
   memory: 0.1,
 };
 

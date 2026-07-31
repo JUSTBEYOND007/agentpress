@@ -19,15 +19,17 @@ import {
   conversationMessages,
   conversations,
   enqueueOutboxMessage,
+  evidenceRecords,
   rootRequests,
   planRevisions,
+  queuedFollowups,
   runQuestions,
   runDirectives,
   runEvents,
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, desc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -251,6 +253,7 @@ export class DirectRunService {
         workspaceId: branch.workspaceId,
         userId: input.userId,
         mentionTargetIds: input.mentionTargetIds ?? [],
+        attachmentIds: input.attachmentIds ?? [],
         skills: input.skills ?? [],
       });
       const queued = await appendRunEvent(transaction, {
@@ -462,7 +465,22 @@ export class DirectRunService {
   }
 
   public enqueueFollowUp(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
-    return this.enqueueDirective(runId, 'follow_up', content);
+    return this.enqueueQueuedFollowUp(runId, content);
+  }
+
+  public async cancelFollowUp(runId: string, followUpId: string): Promise<boolean> {
+    const rows = await this.options.database
+      .update(queuedFollowups)
+      .set({ status: 'cancelled' })
+      .where(
+        and(
+          eq(queuedFollowups.id, followUpId),
+          eq(queuedFollowups.runId, runId),
+          eq(queuedFollowups.status, 'pending'),
+        ),
+      )
+      .returning({ id: queuedFollowups.id });
+    return rows.length === 1;
   }
 
   public async listEvents(runId: string, afterSequence = 0): Promise<readonly DurableRunEvent[]> {
@@ -492,7 +510,7 @@ export class DirectRunService {
       .limit(1);
     const run = runRows[0];
     if (!run) return undefined;
-    const [events, artifactRows, questionRows, approvalRows] = await Promise.all([
+    const [events, artifactRows, evidenceRows, questionRows, approvalRows] = await Promise.all([
       this.listEvents(runId),
       this.options.database
         .select({
@@ -512,6 +530,16 @@ export class DirectRunService {
           ),
         )
         .where(eq(artifacts.runId, runId)),
+      this.options.database
+        .select({
+          id: evidenceRecords.id,
+          title: evidenceRecords.title,
+          source: evidenceRecords.sourceUri,
+          excerpt: evidenceRecords.excerpt,
+          sourceRevision: evidenceRecords.sourceRevision,
+        })
+        .from(evidenceRecords)
+        .where(eq(evidenceRecords.runId, runId)),
       this.options.database
         .select()
         .from(runQuestions)
@@ -542,7 +570,17 @@ export class DirectRunService {
       status: run.status,
       mode: run.mode,
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
-      parts: events.flatMap(toRunParts),
+      parts: [
+        ...events.flatMap(toRunParts),
+        ...evidenceRows.map((evidence, index) => ({
+          id: evidence.id,
+          runId,
+          sequence: (events.at(-1)?.sequence ?? 0) + index + 1,
+          type: 'evidence' as const,
+          status: 'evidence.available',
+          payload: evidence,
+        })),
+      ],
       artifacts: artifactRows,
       ...(pendingInteraction ? { pendingInteraction } : {}),
       lastEventId: events.at(-1)?.sequence ?? 0,
@@ -566,7 +604,10 @@ export class DirectRunService {
   public async answerQuestion(runId: string, questionId: string, answer: string, userId: string) {
     const value = answer.trim();
     if (!value || value.length > 100_000)
-      throw new AgentApplicationError('invalid_directive', 'Answer must contain 1-100000 characters');
+      throw new AgentApplicationError(
+        'invalid_directive',
+        'Answer must contain 1-100000 characters',
+      );
     const persisted = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
       const rows = await transaction
@@ -580,7 +621,8 @@ export class DirectRunService {
           ),
         )
         .returning({ id: runQuestions.id });
-      if (rows.length === 0) throw new AgentApplicationError('invalid_directive', 'Question is no longer pending');
+      if (rows.length === 0)
+        throw new AgentApplicationError('invalid_directive', 'Question is no longer pending');
       await transaction
         .update(agentRuns)
         .set({ status: 'recovering', updatedAt: now, version: sql`${agentRuns.version} + 1` })
@@ -748,6 +790,71 @@ export class DirectRunService {
     return persisted.result;
   }
 
+  private async enqueueQueuedFollowUp(
+    runId: string,
+    rawContent: string,
+  ): Promise<EnqueueRunDirectiveResult> {
+    const content = rawContent.trim();
+    if (content.length === 0 || content.length > 100_000) {
+      throw new AgentApplicationError(
+        'invalid_directive',
+        'Follow-up must contain between 1 and 100000 characters',
+      );
+    }
+    const persisted = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
+      const rows = await transaction
+        .select({ status: agentRuns.status, userId: rootRequests.requestedByUserId })
+        .from(agentRuns)
+        .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
+        .where(eq(agentRuns.id, runId))
+        .limit(1);
+      const run = rows[0];
+      if (!run)
+        throw new AgentApplicationError('run_not_found', `Agent Run ${runId} does not exist`);
+      if (!run.userId) {
+        throw new AgentApplicationError('unauthorized_user', 'Agent Run has no requesting user');
+      }
+      if (TERMINAL_RUN_STATES.includes(run.status as (typeof TERMINAL_RUN_STATES)[number])) {
+        throw new AgentApplicationError(
+          'invalid_directive',
+          'A terminal Run cannot accept a follow-up',
+        );
+      }
+      const sequences = await transaction
+        .select({ sequence: max(queuedFollowups.sequence) })
+        .from(queuedFollowups)
+        .where(eq(queuedFollowups.runId, runId));
+      const sequence = (sequences[0]?.sequence ?? 0) + 1;
+      const followUpId = this.createId();
+      await transaction.insert(queuedFollowups).values({
+        id: followUpId,
+        runId,
+        sequence,
+        content,
+        requestedByUserId: run.userId,
+      });
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'follow_up.queued',
+        payload: { followUpId, sequence },
+      });
+      return {
+        result: {
+          directiveId: followUpId,
+          runId,
+          kind: 'follow_up' as const,
+          sequence,
+          status: 'pending' as const,
+        },
+        event: toDurableEvent(event),
+      };
+    });
+    await this.options.publisher.publish({ durable: true, event: persisted.event });
+    return persisted.result;
+  }
+
   private async settleRun(
     branchId: string,
     runId: string,
@@ -900,68 +1007,34 @@ export class DirectRunService {
   }
 
   private async activateNextFollowUp(branchId: string): Promise<void> {
-    const claimed = await this.options.database.transaction(async (transaction) => {
-      const directives = await transaction
-        .select({
-          id: runDirectives.id,
-          content: runDirectives.content,
-          branchId: agentRuns.branchId,
-          conversationId: conversations.id,
-          requestedByUserId: sql<string | null>`${rootRequests.requestedByUserId}`,
-        })
-        .from(runDirectives)
-        .innerJoin(agentRuns, eq(agentRuns.id, runDirectives.runId))
-        .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
-        .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
-        .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
-        .where(
-          and(
-            eq(agentRuns.branchId, branchId),
-            eq(runDirectives.kind, 'follow_up'),
-            eq(runDirectives.status, 'pending'),
-          ),
-        )
-        .orderBy(asc(agentRuns.createdAt), asc(runDirectives.sequence))
-        .limit(1);
-      const directive = directives[0];
-      if (!directive) {
-        return undefined;
-      }
-      const updated = await transaction
-        .update(runDirectives)
-        .set({ status: 'applied', appliedAt: this.now() })
-        .where(and(eq(runDirectives.id, directive.id), eq(runDirectives.status, 'pending')))
-        .returning({ id: runDirectives.id });
-      return updated.length === 1 ? directive : undefined;
+    const rows = await this.options.database
+      .select({
+        id: queuedFollowups.id,
+        content: queuedFollowups.content,
+        branchId: agentRuns.branchId,
+        conversationId: conversations.id,
+        requestedByUserId: queuedFollowups.requestedByUserId,
+      })
+      .from(queuedFollowups)
+      .innerJoin(agentRuns, eq(agentRuns.id, queuedFollowups.runId))
+      .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+      .where(and(eq(agentRuns.branchId, branchId), eq(queuedFollowups.status, 'pending')))
+      .orderBy(asc(agentRuns.createdAt), asc(queuedFollowups.sequence))
+      .limit(1);
+    const claimed = rows[0];
+    if (!claimed) return;
+    const created = await this.create({
+      conversationId: claimed.conversationId,
+      branchId: claimed.branchId,
+      userId: claimed.requestedByUserId,
+      prompt: claimed.content,
+      idempotencyKey: `follow-up:${claimed.id}`,
     });
-    if (!claimed) {
-      return;
-    }
-    if (!claimed.requestedByUserId) {
-      throw new AgentApplicationError(
-        'unauthorized_user',
-        'Follow-up Run does not have a bound requesting user',
-      );
-    }
-    try {
-      await this.create({
-        conversationId: claimed.conversationId,
-        branchId: claimed.branchId,
-        userId: claimed.requestedByUserId,
-        prompt: claimed.content,
-        idempotencyKey: `follow-up:${claimed.id}`,
-      });
-      await this.options.database
-        .update(runDirectives)
-        .set({ status: 'consumed', appliedAt: this.now() })
-        .where(eq(runDirectives.id, claimed.id));
-    } catch (error) {
-      await this.options.database
-        .update(runDirectives)
-        .set({ status: 'pending', appliedAt: null })
-        .where(eq(runDirectives.id, claimed.id));
-      throw error;
-    }
+    await this.options.database
+      .update(queuedFollowups)
+      .set({ status: 'consumed', consumedAt: this.now(), createdRunId: created.runId })
+      .where(and(eq(queuedFollowups.id, claimed.id), eq(queuedFollowups.status, 'pending')));
   }
 }
 

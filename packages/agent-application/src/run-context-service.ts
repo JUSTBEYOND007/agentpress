@@ -17,6 +17,7 @@ import {
   memoryCandidates,
   mentionBindings,
   promptRevisions,
+  runAttachments,
   runContextPacks,
   runSkillBindings,
   skillRevisions,
@@ -51,15 +52,19 @@ export class RunContextService {
       readonly workspaceId: string;
       readonly userId: string;
       readonly mentionTargetIds: readonly string[];
+      readonly attachmentIds: readonly string[];
       readonly skills: readonly SelectedSkillInput[];
     },
   ): Promise<ContextPack> {
     const mentions = unique(input.mentionTargetIds);
+    const attachmentIds = unique(input.attachmentIds);
     const selectedSkills = uniqueSkills(input.skills);
     if (mentions.length > 20)
       throw new AgentApplicationError('invalid_context', 'A Run can bind at most 20 Mentions');
     if (selectedSkills.length > 8)
       throw new AgentApplicationError('invalid_context', 'A Run can select at most 8 Skills');
+    if (attachmentIds.length > 10)
+      throw new AgentApplicationError('invalid_context', 'A Run can bind at most 10 attachments');
 
     const mentionRows =
       mentions.length === 0
@@ -81,6 +86,33 @@ export class RunContextService {
         'unauthorized_context',
         'A Mention is missing or outside the current workspace',
       );
+    const attachmentRows =
+      attachmentIds.length === 0
+        ? []
+        : await transaction
+            .select({
+              id: runAttachments.id,
+              filename: runAttachments.filename,
+              content: runAttachments.extractedText,
+              contentHash: runAttachments.contentHash,
+              parseStatus: runAttachments.parseStatus,
+            })
+            .from(runAttachments)
+            .where(
+              and(
+                eq(runAttachments.workspaceId, input.workspaceId),
+                inArray(runAttachments.id, attachmentIds),
+              ),
+            );
+    if (
+      attachmentRows.length !== attachmentIds.length ||
+      attachmentRows.some(({ parseStatus, content }) => parseStatus !== 'ready' || content === null)
+    ) {
+      throw new AgentApplicationError(
+        'unauthorized_context',
+        'An attachment is missing, outside the workspace, or not ready',
+      );
+    }
 
     const requestedSkillIds = unique(selectedSkills.map(({ skillId }) => skillId));
     const availableSkillRows =
@@ -144,6 +176,16 @@ export class RunContextService {
           'mention',
           JSON.stringify(mention.document),
           `${mention.revisionId}:${mention.contentHash}`,
+          1,
+          true,
+        ),
+      ),
+      ...attachmentRows.map((attachment) =>
+        contextCandidate(
+          `attachment:${attachment.id}`,
+          'attachment',
+          attachment.content ?? '',
+          attachment.contentHash,
           1,
           true,
         ),

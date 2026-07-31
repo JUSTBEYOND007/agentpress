@@ -32,11 +32,13 @@ type CreateRunBody = {
   readonly branchId?: unknown;
   readonly prompt?: unknown;
   readonly mentionTargetIds?: unknown;
+  readonly attachmentIds?: unknown;
   readonly skills?: unknown;
 };
 
 type RunDirectiveBody = {
   readonly content?: unknown;
+  readonly answer?: unknown;
 };
 
 type ToolApprovalBody = {
@@ -88,6 +90,7 @@ export class AgentController {
       throw new BadRequestException('branchId and prompt must be strings');
     }
     const mentionTargetIds = parseStringArray(body.mentionTargetIds, 'mentionTargetIds', 20);
+    const attachmentIds = parseStringArray(body.attachmentIds, 'attachmentIds', 10);
     const skills = parseSkills(body.skills);
 
     try {
@@ -98,6 +101,7 @@ export class AgentController {
         prompt: body.prompt,
         idempotencyKey,
         mentionTargetIds,
+        attachmentIds,
         skills,
       });
     } catch (error) {
@@ -115,15 +119,25 @@ export class AgentController {
   }
 
   @Get('runs/:runId')
-  public async getRun(
-    @Param('runId') runId: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  public async getRun(@Param('runId') runId: string, @CurrentUser() user: AuthenticatedUser) {
     await this.authorization?.assertRunAccess(runId, user.id);
     const projection = await this.runs.getProjection(runId);
     if (!projection) throw new NotFoundException(`Agent Run ${runId} does not exist`);
-    const { parts: _parts, artifacts: _artifacts, ...summary } = projection;
-    return summary;
+    return {
+      runId: projection.runId,
+      rootMessageId: projection.rootMessageId,
+      status: projection.status,
+      mode: projection.mode,
+      ...(projection.activePlanRevision
+        ? { activePlanRevision: projection.activePlanRevision }
+        : {}),
+      ...(projection.pendingInteraction
+        ? { pendingInteraction: projection.pendingInteraction }
+        : {}),
+      lastEventId: projection.lastEventId,
+      createdAt: projection.createdAt,
+      ...(projection.completedAt ? { completedAt: projection.completedAt } : {}),
+    };
   }
 
   @Get('runs/:runId/projection')
@@ -138,10 +152,7 @@ export class AgentController {
   }
 
   @Get('runs/:runId/artifacts')
-  public async getArtifacts(
-    @Param('runId') runId: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  public async getArtifacts(@Param('runId') runId: string, @CurrentUser() user: AuthenticatedUser) {
     const projection = await this.getProjection(runId, user);
     return projection.artifacts;
   }
@@ -267,6 +278,17 @@ export class AgentController {
     }
   }
 
+  @Post('runs/:runId/follow-ups/:followUpId/cancel')
+  @HttpCode(200)
+  public async cancelFollowUp(
+    @Param('runId') runId: string,
+    @Param('followUpId') followUpId: string,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    if (this.authorization && user) await this.authorization.assertRunAccess(runId, user.id);
+    return { cancelled: await this.runs.cancelFollowUp(runId, followUpId) };
+  }
+
   @Post('runs/:runId/questions/:questionId/answer')
   @HttpCode(202)
   public async answerQuestion(
@@ -275,9 +297,10 @@ export class AgentController {
     @Body() body: RunDirectiveBody,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    if (typeof body.content !== 'string') throw new BadRequestException('content must be a string');
+    const answer = typeof body.answer === 'string' ? body.answer : body.content;
+    if (typeof answer !== 'string') throw new BadRequestException('answer must be a string');
     await this.authorization?.assertRunAccess(runId, user.id);
-    return this.runs.answerQuestion(runId, questionId, body.content, user.id);
+    return this.runs.answerQuestion(runId, questionId, answer, user.id);
   }
 
   @Post('tool-calls/:toolCallId/approval')

@@ -1,4 +1,4 @@
-import { MediaService } from '@agentpress/media-application';
+import { AttachmentService, MediaService } from '@agentpress/media-application';
 import {
   BadRequestException,
   Body,
@@ -11,6 +11,8 @@ import {
   Post,
   StreamableFile,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
+import { Req } from '@nestjs/common';
 import { PublicRoute } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
@@ -20,8 +22,40 @@ import { AuthorizationService } from '../auth/authorization.service.js';
 export class MediaController {
   public constructor(
     @Inject(MediaService) private readonly media: MediaService,
+    @Inject(AttachmentService) private readonly attachments: AttachmentService,
     @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
   ) {}
+
+  @Post('workspaces/:workspaceId/attachments')
+  public async uploadAttachment(
+    @Param('workspaceId') workspaceId: string,
+    @Req() request: FastifyRequest,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization?.assertWorkspaceMember(workspaceId, user.id);
+    const body = request.body;
+    if (!(body instanceof Buffer) && !(body instanceof Uint8Array)) {
+      throw new BadRequestException('Attachment body must be raw bytes');
+    }
+    const filename = firstHeader(request.headers['x-file-name']);
+    const mimeType = firstHeader(request.headers['content-type']);
+    if (!filename || !mimeType) {
+      throw new BadRequestException('x-file-name and content-type headers are required');
+    }
+    try {
+      return await this.attachments.upload({
+        workspaceId,
+        uploadedByUserId: user.id,
+        filename: decodeURIComponent(filename),
+        mimeType: mimeType.split(';')[0]?.trim() ?? mimeType,
+        bytes: Buffer.from(body),
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Attachment upload failed',
+      );
+    }
+  }
 
   @Get('workspaces/:workspaceId/media')
   public async list(
@@ -52,4 +86,9 @@ export class MediaController {
       length: asset.bytes.byteLength,
     });
   }
+}
+
+function firstHeader(value: string | readonly string[] | undefined): string {
+  if (typeof value === 'string') return value;
+  return value?.[0] ?? '';
 }

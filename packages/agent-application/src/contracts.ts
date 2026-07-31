@@ -53,6 +53,7 @@ export type CreateDirectRunInput = {
   readonly prompt: string;
   readonly idempotencyKey: string;
   readonly mentionTargetIds?: readonly string[];
+  readonly attachmentIds?: readonly string[];
   readonly skills?: readonly SelectedSkillInput[];
 };
 
