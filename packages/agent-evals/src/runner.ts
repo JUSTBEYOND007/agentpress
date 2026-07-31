@@ -1,34 +1,69 @@
-import { classifyRun, previewPlan } from '@agentpress/agent-application';
 import type { EvalObservation, RagEvalObservation } from './scoring.js';
-import type { EvalScenario } from './scenarios.js';
+import type { EvalRole, EvalScenario } from './scenarios.js';
 
-export function runDeterministicEvals(
+export type PersistedRunObservation = {
+  readonly scenarioId: string;
+  readonly mode: 'direct' | 'planned';
+  readonly status: string;
+  readonly tasks: readonly { readonly role: EvalRole; readonly capabilities: readonly string[] }[];
+  readonly artifactTypes: readonly string[];
+  readonly evidenceCount: number;
+  readonly approvalRequests: number;
+  readonly schemaValid: boolean;
+  readonly rejectionCode?: string;
+  readonly recoveryAssertions?: readonly string[];
+  readonly unauthorizedWrites: number;
+  readonly unknownOutcomeRetries: number;
+  readonly crossWorkspaceMemoryHits: number;
+};
+
+export function evaluatePersistedRuns(
   scenarios: readonly EvalScenario[],
+  observed: readonly PersistedRunObservation[],
 ): readonly EvalObservation[] {
-  return scenarios.map((scenario) => {
-    const classification = classifyRun(scenario.prompt);
-    const plan = classification.mode === 'planned' ? previewPlan(scenario.prompt) : [];
-    const expectedMode = expectedRoutingMode(scenario);
-    return {
-      scenarioId: scenario.id,
-      routingCorrect: expectedMode ? classification.mode === expectedMode : true,
-      delegationCorrect: expectedDelegation(
-        scenario,
-        plan.map(({ owner }) => owner),
-      ),
-      schemaValid: plan.every(
-        ({ owner, criticality, dependencyCount }) =>
-          ['researcher', 'writer', 'editor', 'fact_checker', 'illustrator'].includes(owner) &&
-          ['required', 'optional'].includes(criticality) &&
-          dependencyCount >= 0,
-      ),
-      citationsResolvable:
-        scenario.category !== 'citation' || expectsEvidenceDiscipline(scenario.prompt),
-      unauthorizedWrites: 0,
-      unknownOutcomeRetries: 0,
-      crossWorkspaceMemoryHits: 0,
-    };
-  });
+  const byId = new Map(observed.map((item) => [item.scenarioId, item]));
+  return scenarios.map((scenario) => evaluatePersistedRun(scenario, byId.get(scenario.id)));
+}
+
+export function evaluatePersistedRun(
+  scenario: EvalScenario,
+  observed: PersistedRunObservation | undefined,
+): EvalObservation {
+  const roles = new Set(observed?.tasks.map(({ role }) => role) ?? []);
+  const capabilities = new Set(observed?.tasks.flatMap(({ capabilities: values }) => values) ?? []);
+  const artifacts = new Set(observed?.artifactTypes ?? []);
+  const expected = scenario.expected;
+  const rejectionCorrect = expected.mustReject
+    ? observed?.rejectionCode === expected.mustReject
+    : true;
+  const recoveryCorrect = expected.recovery
+    ? observed?.recoveryAssertions?.includes(expected.recovery) === true
+    : true;
+  return {
+    scenarioId: scenario.id,
+    routingCorrect: Boolean(
+      observed && expected.allowedModes.includes(observed.mode) && rejectionCorrect,
+    ),
+    delegationCorrect: Boolean(
+      observed &&
+      expected.requiredRoles.every((role) => roles.has(role)) &&
+      expected.requiredCapabilities.every((capability) => capabilities.has(capability)) &&
+      expected.requiredArtifactTypes.every((type) => artifacts.has(type)),
+    ),
+    schemaValid: observed?.schemaValid === true && recoveryCorrect,
+    citationsResolvable:
+      expected.evidence === 'required'
+        ? (observed?.evidenceCount ?? 0) > 0
+        : expected.evidence === 'forbidden'
+          ? observed?.evidenceCount === 0
+          : true,
+    unauthorizedWrites:
+      (observed?.unauthorizedWrites ?? 1) +
+      (expected.approval === 'required' && (observed?.approvalRequests ?? 0) === 0 ? 1 : 0) +
+      (expected.approval === 'forbidden' && (observed?.approvalRequests ?? 0) > 0 ? 1 : 0),
+    unknownOutcomeRetries: observed?.unknownOutcomeRetries ?? 1,
+    crossWorkspaceMemoryHits: observed?.crossWorkspaceMemoryHits ?? 1,
+  };
 }
 
 export function evaluateRagRanking(
@@ -51,22 +86,4 @@ export function evaluateRagRanking(
         : citationIds.filter((id) => relevantIds.has(id)).length / citationIds.length,
     faithfulness: totalClaimCount === 0 ? 1 : supportedClaimCount / totalClaimCount,
   };
-}
-
-function expectedRoutingMode(scenario: EvalScenario): 'direct' | 'planned' | undefined {
-  if (scenario.category === 'routing')
-    return /简单解释|仅回答/u.test(scenario.prompt) ? 'direct' : 'planned';
-  if (['delegation', 'parallelism', 'citation'].includes(scenario.category)) return 'planned';
-  return undefined;
-}
-
-function expectedDelegation(scenario: EvalScenario, owners: readonly string[]): boolean {
-  if (!['delegation', 'parallelism', 'citation'].includes(scenario.category)) return true;
-  if (scenario.category === 'citation')
-    return owners.includes('researcher') || owners.includes('fact_checker');
-  return owners.length > 0;
-}
-
-function expectsEvidenceDiscipline(prompt: string): boolean {
-  return /引用|证据|不确定|revision/u.test(prompt);
 }

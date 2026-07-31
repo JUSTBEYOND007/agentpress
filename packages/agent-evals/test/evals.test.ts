@@ -2,31 +2,50 @@ import { describe, expect, it } from 'vitest';
 import {
   assertEvalGates,
   EVAL_CATEGORIES,
+  evaluatePersistedRuns,
   evaluateRagRanking,
   evalScenarios,
-  runDeterministicEvals,
   scoreEvals,
 } from '../src/index.js';
+
 describe('Agent eval suite', () => {
-  it('contains at least 40 unique versioned scenarios across every required category', () => {
+  it('contains explicit versioned expectations across every required category', () => {
     expect(evalScenarios.length).toBeGreaterThanOrEqual(40);
     expect(new Set(evalScenarios.map(({ id }) => id)).size).toBe(evalScenarios.length);
     expect(new Set(evalScenarios.map(({ category }) => category))).toEqual(
       new Set(EVAL_CATEGORIES),
     );
+    expect(evalScenarios.every(({ expected }) => expected.allowedModes.length > 0)).toBe(true);
   });
-  it('enforces quality and zero-tolerance security gates', () => {
-    const observation = runDeterministicEvals(evalScenarios);
-    const score = scoreEvals(observation);
-    expect(score.routingAccuracy).toBeGreaterThanOrEqual(0.9);
-    expect(score.delegationAccuracy).toBeGreaterThanOrEqual(0.9);
-    expect(score.schemaValidity).toBeGreaterThanOrEqual(0.9);
-    expect(score.citationsValid).toBe(true);
-    expect(score.securityPassed).toBe(true);
-    const first = observation.at(0);
-    if (!first) throw new Error('Eval fixture is empty');
-    expect(scoreEvals([{ ...first, crossWorkspaceMemoryHits: 1 }]).securityPassed).toBe(false);
+
+  it('scores only supplied persisted facts and fails missing observations', () => {
+    const scenario = evalScenarios[0];
+    if (!scenario) throw new Error('Eval fixture is empty');
+    const observed = [
+      {
+        scenarioId: scenario.id,
+        mode: 'direct' as const,
+        status: 'completed',
+        tasks: [],
+        artifactTypes: [],
+        evidenceCount: 0,
+        approvalRequests: 0,
+        schemaValid: true,
+        unauthorizedWrites: 0,
+        unknownOutcomeRetries: 0,
+        crossWorkspaceMemoryHits: 0,
+      },
+    ];
+    const score = scoreEvals(evaluatePersistedRuns([scenario], observed));
+    expect(score).toMatchObject({
+      routingAccuracy: 1,
+      delegationAccuracy: 1,
+      schemaValidity: 1,
+      securityPassed: true,
+    });
+    expect(scoreEvals(evaluatePersistedRuns([scenario], [])).securityPassed).toBe(false);
   });
+
   it('calculates and enforces RAG ranking, citation and faithfulness gates', () => {
     const rag = evaluateRagRanking(
       ['noise', 'evidence-a', 'evidence-b'],
@@ -41,8 +60,20 @@ describe('Agent eval suite', () => {
       citationPrecision: 1,
       faithfulness: 0.9,
     });
+    const perfect = scoreEvals([
+      {
+        scenarioId: 'x',
+        routingCorrect: true,
+        delegationCorrect: true,
+        schemaValid: true,
+        citationsResolvable: true,
+        unauthorizedWrites: 0,
+        unknownOutcomeRetries: 0,
+        crossWorkspaceMemoryHits: 0,
+      },
+    ]);
     expect(() => {
-      assertEvalGates(scoreEvals(runDeterministicEvals(evalScenarios)), rag);
+      assertEvalGates(perfect, rag);
     }).not.toThrow();
   });
 });

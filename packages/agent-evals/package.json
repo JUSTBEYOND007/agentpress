@@ -16,7 +16,9 @@
   ],
   "dependencies": {
     "@agentpress/agent-application": "workspace:*",
-    "@agentpress/agent-runtime": "workspace:*"
+    "@agentpress/agent-runtime": "workspace:*",
+    "@agentpress/database": "workspace:*",
+    "drizzle-orm": "catalog:"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

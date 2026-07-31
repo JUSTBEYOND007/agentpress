@@ -61,7 +61,6 @@ type DirectRunServiceOptions = {
   readonly publisher: RunEventPublisher;
   readonly systemPrompt: string;
   readonly runtimeToolFactory?: RuntimeToolFactory;
-  readonly reviewGate?: { readonly enabled: boolean; readonly maxRounds?: number };
   readonly now?: () => Date;
   readonly createId?: () => string;
 };
