@@ -45,7 +45,7 @@ Pi `@earendil-works/pi-agent-core@0.82.1` 是唯一 Agent Core，隐藏在 `PiRu
 ## 交付证据
 
 - 100,000 字中文编辑器基准：约 300,085 bytes 文档，插入 `0.57 ms`，序列化 `0.17 ms`，Node 堆 `13.92 MB`。
-- 本地 Agent API/SSE 基准：100 个 Run、1000 个 SSE 客户端；Run 入队 p50/p95/p99 为 `262.74/355.13/355.57 ms`，SSE 建连 p50/p95/p99 为 `684.75/2138.26/2163.62 ms`。这是当前开发机实测，不是生产 SLO。
+- 本地 Agent API/SSE 基准：100 个 Run、1000 个 SSE 客户端；使用真实 Logto JWT 与当前 workspace 隔离，Run 入队 p50/p95/p99 为 `144.75/211.13/212.98 ms`，SSE 建连 p50/p95/p99 为 `524.62/1222.97/2133.32 ms`。这是当前开发机实测，不是生产 SLO。
 - `pnpm local:prepare` 已验证连续运行幂等；Redis/Kafka 停止、等待五秒、重新启动并通过 Compose healthcheck 的故障演练已验证。
 - `kubectl kustomize infra/production/kubernetes` 可生成生产形状清单；Dockerfile 提供 web/API/两个 Worker 四个 target。生产部署仍需自行提供数据库、Kafka、Redis、对象存储、OTLP Collector、Ingress TLS 和 Secret。
 

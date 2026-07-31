@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 
 import { connectDatabase, conversationBranches, conversations } from '@agentpress/database';
 
-import { DEMO_IDS, seedDemo } from './seed-demo.js';
+import { seedDemo } from './seed-demo.js';
 
 const connectionString = requiredEnvironment('DATABASE_URL');
 const apiUrl = (process.env.BENCHMARK_API_URL ?? 'http://localhost:4000/v1').replace(/\/$/, '');
@@ -11,9 +11,18 @@ const bearerToken = requiredEnvironment('BENCHMARK_BEARER_TOKEN');
 const runCount = boundedInteger(process.env.RUN_COUNT, 100, 1, 100);
 const sseClients = boundedInteger(process.env.SSE_CLIENTS, 1_000, 1, 1_000);
 const connection = connectDatabase(connectionString);
+const authHeaders = { authorization: `Bearer ${bearerToken}` };
 
 try {
   await seedDemo(connection.db);
+  const workspaceResponse = await fetch(`${apiUrl}/me/workspace`, { headers: authHeaders });
+  if (!workspaceResponse.ok)
+    throw new Error(`Workspace lookup failed with ${String(workspaceResponse.status)}`);
+  const workspaceValue: unknown = await workspaceResponse.json();
+  if (!isRecord(workspaceValue) || typeof workspaceValue.id !== 'string') {
+    throw new Error('Workspace lookup response omitted id');
+  }
+  const workspaceId = workspaceValue.id;
   const fixtures = Array.from({ length: runCount }, () => ({
     conversationId: randomUUID(),
     branchId: randomUUID(),
@@ -21,7 +30,7 @@ try {
   await connection.db.insert(conversations).values(
     fixtures.map((fixture, index) => ({
       id: fixture.conversationId,
-      workspaceId: DEMO_IDS.workspace,
+      workspaceId,
       title: `Benchmark ${String(index + 1)}`,
     })),
   );
@@ -41,7 +50,7 @@ try {
         headers: {
           'content-type': 'application/json',
           'idempotency-key': `benchmark:${randomUUID()}`,
-          authorization: `Bearer ${bearerToken}`,
+          ...authHeaders,
         },
         body: JSON.stringify({ branchId: fixture.branchId, prompt: 'Benchmark queued run' }),
       });
@@ -64,7 +73,7 @@ try {
         const runId = runs[index % runs.length];
         if (!runId) throw new Error('No Agent Run is available for SSE benchmarking');
         const response = await fetch(`${apiUrl}/runs/${runId}/events`, {
-          headers: { 'last-event-id': '0' },
+          headers: { ...authHeaders, 'last-event-id': '0' },
           signal: controller.signal,
         });
         sseLatencies.push(performance.now() - started);
