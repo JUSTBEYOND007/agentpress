@@ -15,10 +15,12 @@
     "dist"
   ],
   "dependencies": {
-    "@agentpress/agent-application": "workspace:*"
+    "@agentpress/agent-application": "workspace:*",
+    "@agentpress/agent-runtime": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "eval:online": "tsx src/online-cli.ts",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -17,7 +17,7 @@
 | 多级文件夹、回收站、版本、导出 | 内容树、回收站、版本弹窗 | PostgreSQL 目录/软删除/修订、Markdown/HTML/JSON 导出       | API/Web tests             | 登录后黄金路径与下载验证          | 完成       |
 | 完整编辑器工具                 | 工具栏、命令菜单、目录   | 前后端共享 Tiptap schema、自动保存                         | 高级节点 step replay      | 表格/任务插入后刷新恢复           | 完成       |
 | 公开页赞踩、阅读、撤回         | 公开页、发布记录弹窗     | reaction/view/outbox、幂等撤回                             | API/DB integration        | 赞同/阅读/撤回后 SSR 404          | 完成       |
-| 在线 Agent Eval                | 无命令                   | 确定性 eval only                                           | 48 场景                   | 未运行真实模型                    | 未完成     |
+| 在线 Agent Eval                | `pnpm eval:online`       | Pi Ark Runtime、预算/并发、JSON/JSONL 报告                 | 48 场景、严格 schema      | 缺少 Ark 凭据，命令拒绝 Fake 回退 | 待在线验证 |
 | 可观测性、IaC、性能与故障演练  | 运维命令                 | OTel、Kubernetes manifests                                 | quality gate              | 部分本机报告                      | 部分完成   |
 
 后续提交必须同步更新本矩阵，并在 `docs/operations.md` 记录可重复验证命令。

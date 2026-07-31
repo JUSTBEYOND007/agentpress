@@ -444,6 +444,9 @@ importers:
       '@agentpress/agent-application':
         specifier: workspace:*
         version: link:../agent-application
+      '@agentpress/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
 
   packages/agent-runtime:
     dependencies:

@@ -6,6 +6,7 @@ node_modules/
 dist/
 coverage/
 output/playwright/
+.agentpress/evals/
 *.tsbuildinfo
 
 .env

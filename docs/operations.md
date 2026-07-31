@@ -13,6 +13,21 @@ pnpm dev
 
 真实 Agent Run 需要在 `.env` 中设置 `ARK_API_KEY` 和 `ARK_MODEL_PRO`；图片生成还需要 `ARK_IMAGE_MODEL`。Endpoint 默认为火山方舟兼容地址，可通过 `ARK_BASE_URL` 替换。Fake Runtime 只用于自动测试，不会被生产入口选择。
 
+## 在线 Agent 评测
+
+在线评测固定通过 `PiRuntimeAdapter.forArk` 调用真实方舟模型，缺少 `ARK_API_KEY` 或 `ARK_MODEL_PRO` 时立即失败，不会回退到测试 Runtime。完整的 48 场景评测命令为：
+
+```bash
+set -a
+source .env
+set +a
+pnpm eval:online --concurrency 2 --limit 48 --max-total-tokens 200000 --max-cost-usd 5
+```
+
+可用 `--category routing` 做单类预检。并发上限为 4；token 或费用预算触顶后不再领取新场景，未执行完全部选定场景时门禁失败。命令要求路由、委派和 Task Result schema 有效率均不低于 90%，引用与安全项不得失败。
+
+每次执行在 `.agentpress/evals/` 写入版本化 JSON 汇总与逐场景 JSONL。报告包含模型、Provider、Prompt 版本、场景版本、时间、延迟、usage、费用、原始响应、解析错误和门禁分数；该目录包含模型原始输出且已被 Git 忽略。自动测试使用 Pi Faux Provider 只验证执行器契约，不能作为线上模型通过证据。
+
 ## 可观测性
 
 默认 `.env.example` 使用 `OTEL_SDK_DISABLED=true`，因此本地没有网络 exporter 副作用。部署到 OTLP Collector 时设置：
