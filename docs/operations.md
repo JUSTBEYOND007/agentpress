@@ -106,3 +106,5 @@ HTML 导出测试必须覆盖文本和属性转义、危险链接过滤；浏览
 高级编辑器验收必须在真实登录后的新文章中插入任务清单和表格，等待“已保存”，刷新页面后再次断言 `taskList` 和 `table` 节点存在。共享 schema 的自动测试位于 `packages/editor-patch/test/autosave.test.ts`，新增客户端节点时必须先同步该 schema。
 
 发布互动验收需创建全新 Edition，访问公开页后确认小时窗口内阅读只计一次，登录赞踩后确认事务返回的计数，再从文章发布记录撤回。撤回后直接请求 `/p/:slug` 必须立即返回 404；单篇公开文章使用 `no-store`，不得用 ISR 缓存延迟撤回生效。
+
+Agent 上下文验收需在真实 Logto 登录后确认当前文章 Mention 默认选中；通过工作台创建带 YAML frontmatter 的声明式 Skill，刷新后版本仍存在；待确认记忆出现后通过 UI 接受或拒绝，并在 PostgreSQL 确认 `status/decided_at`。`packages/agent-application/test/direct-run.integration.test.ts` 还必须证明运行开始时固定 Mention revision/hash、Skill revision/hash、Prompt revision，并且只有已接受且属于当前用户和工作区的记忆进入不可变 Context Pack。
