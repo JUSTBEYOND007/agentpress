@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  WebSpeechDictationAdapter,
   useExternalStoreRuntime,
   type AppendMessage,
   type ThreadMessageLike,
@@ -8,6 +9,7 @@ import {
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { clearLiveRunContent, updateLiveRunContent, type LiveRunContent } from './agent-streaming';
 import { authenticatedFetch } from './authenticated-fetch';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
@@ -85,6 +87,7 @@ export function useAgentPressAssistantRuntime(
     readonly mentionTargetIds?: readonly string[];
     readonly attachmentIds?: readonly string[];
     readonly skills?: readonly { readonly skillId: string; readonly version: string }[];
+    readonly sendingDisabled?: boolean;
   } = {},
 ) {
   const conversationId = context.conversationId;
@@ -92,23 +95,31 @@ export function useAgentPressAssistantRuntime(
   const mentionTargetIds = context.mentionTargetIds ?? [];
   const attachmentIds = context.attachmentIds ?? [];
   const selectedSkills = context.skills ?? [];
+  const sendingDisabled = context.sendingDisabled ?? false;
   const [stableMessages, setStableMessages] = useState<readonly StableMessage[]>([]);
   const [optimisticMessages, setOptimisticMessages] = useState<readonly AgentMessage[]>([]);
   const [projections, setProjections] = useState<readonly RunProjection[]>([]);
+  const [liveContent, setLiveContent] = useState<readonly LiveRunContent[]>([]);
   const [activeRunId, setActiveRunId] = useState<string>();
   const [readiness, setReadiness] = useState<AgentRuntimeReadiness>({
     status: 'checking',
     missing: [],
   });
   const [panelError, setPanelError] = useState<string>();
+  const [submissionSequence, setSubmissionSequence] = useState(0);
   const lastEventIds = useRef(new Map<string, number>());
+  const runModes = useRef(new Map<string, RunProjection['mode']>());
 
   const refreshProjection = useCallback(async (runId: string): Promise<RunProjection> => {
     const response = await authenticatedFetch(`${apiUrl}/runs/${runId}/projection`);
     if (!response.ok) throw new Error(`运行状态加载失败 (${String(response.status)})`);
     const projection = (await response.json()) as RunProjection;
     lastEventIds.current.set(runId, projection.lastEventId);
+    runModes.current.set(runId, projection.mode);
     setProjections((current) => upsertProjection(current, projection));
+    if (projection.mode === 'planned' || !ACTIVE_RUN_STATES.has(projection.status)) {
+      setLiveContent((current) => clearLiveRunContent(current, runId));
+    }
     return projection;
   }, []);
 
@@ -116,6 +127,7 @@ export function useAgentPressAssistantRuntime(
     if (!conversationId || !branchId) {
       setStableMessages([]);
       setProjections([]);
+      setLiveContent([]);
       setActiveRunId(undefined);
       return;
     }
@@ -139,7 +151,10 @@ export function useAgentPressAssistantRuntime(
         setStableMessages(history);
         setOptimisticMessages([]);
         setProjections(runs);
-        for (const run of runs) lastEventIds.current.set(run.runId, run.lastEventId);
+        for (const run of runs) {
+          lastEventIds.current.set(run.runId, run.lastEventId);
+          runModes.current.set(run.runId, run.mode);
+        }
         const activeRun = [...runs].reverse().find((run) => ACTIVE_RUN_STATES.has(run.status));
         setActiveRunId(activeRun?.runId);
       })
@@ -221,6 +236,23 @@ export function useAgentPressAssistantRuntime(
       onmessage: (event) => {
         if (event.event === 'heartbeat') return;
         const data = parseEventData(event.data);
+        if (
+          event.event === 'content.delta' ||
+          event.event === 'message.started' ||
+          event.event === 'turn.started'
+        ) {
+          setLiveContent((current) =>
+            updateLiveRunContent(current, {
+              runId: activeRunId,
+              mode: runModes.current.get(activeRunId) ?? 'direct',
+              eventType: event.event,
+              ...(stringValue(data.delta) ? { delta: stringValue(data.delta) } : {}),
+            }),
+          );
+        }
+        if (event.event === 'content.delta') {
+          return;
+        }
         const sequence = numberValue(data.sequence);
         const previous = lastEventIds.current.get(activeRunId) ?? 0;
         if (sequence > 0 && sequence <= previous) return;
@@ -246,8 +278,8 @@ export function useAgentPressAssistantRuntime(
   }, [activeRunId, refreshProjection]);
 
   const messages = useMemo(
-    () => [...buildRunTurns(stableMessages, projections), ...optimisticMessages],
-    [optimisticMessages, projections, stableMessages],
+    () => [...buildRunTurns(stableMessages, projections, liveContent), ...optimisticMessages],
+    [liveContent, optimisticMessages, projections, stableMessages],
   );
 
   const onNew = useCallback(
@@ -266,6 +298,7 @@ export function useAgentPressAssistantRuntime(
           await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, {
             content: prompt,
           });
+          setSubmissionSequence((value) => value + 1);
           return;
         }
         const created = await request(
@@ -294,6 +327,7 @@ export function useAgentPressAssistantRuntime(
         ]);
         setOptimisticMessages((current) => current.filter(({ id }) => id !== optimisticId));
         setActiveRunId(runId);
+        setSubmissionSequence((value) => value + 1);
         await refreshProjection(runId);
       } catch (error) {
         setOptimisticMessages((current) => current.filter(({ id }) => id !== optimisticId));
@@ -345,12 +379,17 @@ export function useAgentPressAssistantRuntime(
   );
 
   const isRunning = Boolean(activeProjection && ACTIVE_RUN_STATES.has(activeProjection.status));
+  const dictation = useMemo(
+    () => new WebSpeechDictationAdapter({ language: 'zh-CN', continuous: true }),
+    [],
+  );
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage,
     onNew,
     onCancel,
-    isSendDisabled: readiness.status !== 'ready' || !conversationId || !branchId,
+    adapters: { dictation },
+    isSendDisabled: readiness.status !== 'ready' || !conversationId || !branchId || sendingDisabled,
     isRunning,
   });
 
@@ -364,14 +403,17 @@ export function useAgentPressAssistantRuntime(
     readiness,
     panelError,
     isRunning,
+    submissionSequence,
   };
 }
 
 function buildRunTurns(
   messages: readonly StableMessage[],
   projections: readonly RunProjection[],
+  liveContent: readonly { readonly runId: string; readonly text: string }[],
 ): readonly AgentMessage[] {
   const byRoot = new Map(projections.map((projection) => [projection.rootMessageId, projection]));
+  const liveByRunId = new Map(liveContent.map((content) => [content.runId, content.text]));
   const projectedRunIds = new Set(projections.map(({ runId }) => runId));
   const result: AgentMessage[] = [];
   let skipNextAssistant = false;
@@ -384,10 +426,12 @@ function buildRunTurns(
     if (message.role !== 'user') continue;
     const projection = byRoot.get(message.id);
     if (!projection) continue;
+    const liveText = liveByRunId.get(projection.runId);
     result.push({
       id: `run:${projection.runId}`,
       role: 'assistant',
       projection,
+      ...(liveText ? { text: liveText } : {}),
       status: ACTIVE_RUN_STATES.has(projection.status) ? 'running' : 'complete',
     });
     skipNextAssistant = projectedRunIds.has(projection.runId);
@@ -398,7 +442,7 @@ function buildRunTurns(
 function convertMessage(message: AgentMessage): ThreadMessageLike {
   const projection = message.projection;
   const content = projection
-    ? projectionContent(projection)
+    ? projectionContent(projection, message.text)
     : [{ type: 'text' as const, text: message.text ?? '' }];
   return {
     id: message.id,
@@ -417,7 +461,10 @@ function convertMessage(message: AgentMessage): ThreadMessageLike {
   };
 }
 
-function projectionContent(projection: RunProjection): ThreadMessageLike['content'] {
+function projectionContent(
+  projection: RunProjection,
+  liveText?: string,
+): ThreadMessageLike['content'] {
   const parts: (
     | { readonly type: 'text'; readonly text: string }
     | { readonly type: 'data'; readonly name: string; readonly data: unknown }
@@ -430,6 +477,9 @@ function projectionContent(projection: RunProjection): ThreadMessageLike['conten
       continue;
     }
     parts.push({ type: 'data', name: 'agentpress-run-part', data: part });
+  }
+  if (liveText && !projection.parts.some(({ type }) => type === 'text')) {
+    parts.push({ type: 'text', text: liveText });
   }
   if (
     projection.artifacts.length > 0 &&

@@ -44,7 +44,8 @@ export function AgentWorkbench({
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<readonly string[]>([]);
   const [mentionActiveArticle, setMentionActiveArticle] = useState(true);
   const [attachments, setAttachments] = useState<readonly AttachmentView[]>([]);
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(0);
+  const [attachmentError, setAttachmentError] = useState<string>();
   const [memories, setMemories] = useState<readonly MemoryView[]>([]);
   const [contextError, setContextError] = useState<string>();
   const [conversations, setConversations] = useState<readonly ConversationView[]>([]);
@@ -73,6 +74,7 @@ export function AgentWorkbench({
     readiness,
     panelError,
     isRunning,
+    submissionSequence,
   } = useAgentPressAssistantRuntime(
     sendMode,
     selectedConversation
@@ -82,9 +84,16 @@ export function AgentWorkbench({
           ...(mentionTargetIds.length > 0 ? { mentionTargetIds } : {}),
           ...(attachments.length > 0 ? { attachmentIds: attachments.map(({ id }) => id) } : {}),
           ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
+          sendingDisabled: uploadingAttachments > 0,
         }
       : {},
   );
+
+  useEffect(() => {
+    if (submissionSequence === 0) return;
+    setAttachments([]);
+    setAttachmentError(undefined);
+  }, [submissionSequence]);
 
   useEffect(() => {
     if (!conversationId || !branchId) return;
@@ -213,39 +222,62 @@ export function AgentWorkbench({
             <AgentComposer
               {...(activeArticleTitle ? { activeArticleTitle } : {})}
               attachments={attachments}
+              {...(attachmentError ? { attachmentError } : {})}
+              {...(selectedConversation ? { conversationId: selectedConversation.id } : {})}
               mentionActiveArticle={mentionActiveArticle}
               onAttachmentRemove={(id) => {
                 setAttachments((current) => current.filter((item) => item.id !== id));
               }}
-              onAttachmentUpload={async (file) => {
+              onAttachmentErrorDismiss={() => {
+                setAttachmentError(undefined);
+              }}
+              onAttachmentUpload={async (files) => {
                 if (!workspaceId) throw new Error('工作区尚未加载');
-                setUploadingAttachment(true);
-                try {
-                  const response = await authenticatedFetch(
-                    `${apiUrl}/workspaces/${workspaceId}/attachments`,
-                    {
-                      method: 'POST',
-                      headers: {
-                        'content-type': file.type || 'text/plain',
-                        'x-file-name': encodeURIComponent(file.name),
-                      },
-                      body: file,
-                    },
-                  );
-                  if (!response.ok) throw new Error(await response.text());
-                  const uploaded = (await response.json()) as AttachmentView & {
-                    readonly parseStatus: string;
-                    readonly parseFailure?: string;
-                  };
-                  if (uploaded.parseStatus !== 'ready')
-                    throw new Error(uploaded.parseFailure ?? '附件解析失败');
-                  setAttachments((current) => [...current, uploaded]);
-                  setContextError(undefined);
-                } catch (error) {
-                  setContextError(error instanceof Error ? error.message : '附件上传失败');
-                } finally {
-                  setUploadingAttachment(false);
+                const accepted = files.slice(0, Math.max(0, 10 - attachments.length));
+                if (accepted.length === 0) {
+                  setAttachmentError('每次对话最多添加 10 个附件，请先移除部分文件。');
+                  return;
                 }
+                setUploadingAttachments((count) => count + accepted.length);
+                setAttachmentError(undefined);
+                const results = await Promise.allSettled(
+                  accepted.map(async (file): Promise<AttachmentView> => {
+                    const response = await authenticatedFetch(
+                      `${apiUrl}/workspaces/${workspaceId}/attachments`,
+                      {
+                        method: 'POST',
+                        headers: {
+                          'content-type': file.type || 'text/plain',
+                          'x-file-name': encodeURIComponent(file.name),
+                        },
+                        body: file,
+                      },
+                    );
+                    if (!response.ok) throw new Error(await response.text());
+                    const uploaded = (await response.json()) as AttachmentView & {
+                      readonly parseStatus: string;
+                      readonly parseFailure?: string;
+                    };
+                    if (uploaded.parseStatus !== 'ready')
+                      throw new Error(uploaded.parseFailure ?? `${file.name} 解析失败`);
+                    return uploaded;
+                  }),
+                );
+                const uploaded = results.flatMap((result) =>
+                  result.status === 'fulfilled' ? [result.value] : [],
+                );
+                const failed = results.flatMap((result) =>
+                  result.status === 'rejected'
+                    ? [result.reason instanceof Error ? result.reason.message : '附件上传失败']
+                    : [],
+                );
+                setAttachments((current) => [...current, ...uploaded]);
+                setUploadingAttachments((count) => Math.max(0, count - accepted.length));
+                setAttachmentError(
+                  failed.length > 0
+                    ? `${String(failed.length)} 个附件未能添加，请检查格式或稍后重试。`
+                    : undefined,
+                );
               }}
               onMentionChange={setMentionActiveArticle}
               onSkillChange={setSelectedSkillKeys}
@@ -255,7 +287,7 @@ export function AgentWorkbench({
               sendMode={sendMode}
               setSendMode={setSendMode}
               skills={skills}
-              uploadingAttachment={uploadingAttachment}
+              uploadingAttachments={uploadingAttachments}
             />
           </ThreadPrimitive.Root>
         </aside>
