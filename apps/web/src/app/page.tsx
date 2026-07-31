@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from '
 
 import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
+import { useArticleReview } from '../components/article-review';
 import { AuthProvider } from '../components/auth-provider';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 
@@ -148,6 +149,7 @@ function WorkspacePage(): React.JSX.Element {
   }, [loadArticles]);
 
   const activeArticle = articles.find((article) => article.id === activeArticleId) ?? articles[0];
+  const articleReview = useArticleReview(activeArticle?.id, reloadArticles);
   const filteredArticles = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return query.length === 0
@@ -543,6 +545,16 @@ function WorkspacePage(): React.JSX.Element {
             articleId={activeArticle.id}
             baseRevisionId={activeArticle.revisionId}
             initialDocument={activeArticle.document}
+            {...(articleReview.review
+              ? {
+                  review: articleReview.review,
+                  reviewActiveIndex: articleReview.activeIndex,
+                  onReviewDecisionAll: articleReview.setAll,
+                  onReviewMove: articleReview.moveFocus,
+                  onReviewSubmit: articleReview.submit,
+                  onReviewVisibleChange: articleReview.setVisible,
+                }
+              : {})}
           />
         ) : (
           <section className="workspace-list-view">
@@ -591,6 +603,7 @@ function WorkspacePage(): React.JSX.Element {
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
           onArticleUpdated={reloadArticles}
+          onProposalReady={articleReview.showProposal}
           {...(workspaceId ? { workspaceId } : {})}
           {...(activeArticle
             ? { activeArticleId: activeArticle.id, activeArticleTitle: activeArticle.title }

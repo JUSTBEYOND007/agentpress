@@ -7,7 +7,13 @@ import { AgentComposer } from './agent-composer';
 import { AgentConversationHeader } from './agent-conversation-header';
 import { RunActionsContext, type RunActions } from './agent-run-parts';
 import { AgentThread } from './agent-thread';
-import type { AttachmentView, ConversationView, MemoryView, SkillView } from './agent-view-model';
+import type {
+  AttachmentView,
+  ConversationView,
+  MemoryView,
+  Proposal,
+  SkillView,
+} from './agent-view-model';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
@@ -23,6 +29,7 @@ export function AgentWorkbench({
   workspaceId,
   activeArticleId,
   activeArticleTitle,
+  onProposalReady,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
@@ -30,6 +37,7 @@ export function AgentWorkbench({
   readonly workspaceId?: string;
   readonly activeArticleId?: string;
   readonly activeArticleTitle?: string;
+  readonly onProposalReady?: (proposal: Proposal) => void;
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const [skills, setSkills] = useState<readonly SkillView[]>([]);
@@ -176,8 +184,9 @@ export function AgentWorkbench({
       answerQuestion,
       decideProposal,
       ...(onArticleUpdated ? { onArticleUpdated } : {}),
+      ...(onProposalReady ? { onProposalReady } : {}),
     }),
-    [answerQuestion, decideProposal, decideTool, onArticleUpdated],
+    [answerQuestion, decideProposal, decideTool, onArticleUpdated, onProposalReady],
   );
   const status =
     activeProjection?.status ?? (readiness.status === 'ready' ? 'ready' : readiness.status);

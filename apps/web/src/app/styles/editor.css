@@ -168,69 +168,6 @@
   color: #a56625;
 }
 
-.article-diff {
-  display: grid;
-  gap: 8px;
-}
-
-.diff-operation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  border: 1px solid #e1e1de;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.diff-before,
-.diff-after {
-  padding: 8px 10px;
-}
-
-.diff-before {
-  background: #fff0ef;
-  color: #8e3731;
-}
-
-.diff-after {
-  background: #edf8ef;
-  color: #27643c;
-}
-
-.diff-before span,
-.diff-after span {
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.diff-before p,
-.diff-after p {
-  margin: 3px 0 0;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.diff-actions {
-  display: flex;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 6px;
-}
-
-.diff-actions button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.diff-actions button:hover,
-.diff-actions button.is-selected {
-  background: #e9e9e6;
-}
-
 .article-canvas h1 {
   margin: 0 0 28px;
   color: #202124;
@@ -250,6 +187,165 @@
   font-family: ui-serif, Georgia, 'Noto Serif SC', serif;
   font-size: 17px;
   line-height: 1.85;
+}
+
+.article-review-toolbar {
+  position: sticky;
+  z-index: 8;
+  top: 0;
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e7e0d4;
+  background: rgb(255 252 247 / 96%);
+  padding: 7px max(18px, calc((100% - 780px) / 2));
+  color: #5b513f;
+  font-size: 11px;
+  backdrop-filter: blur(8px);
+}
+
+.article-review-title,
+.article-review-navigation,
+.article-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.article-review-title strong {
+  color: #433d33;
+  font-weight: 600;
+}
+
+.article-review-title span,
+.article-review-navigation span {
+  color: #908577;
+  font-size: 10px;
+}
+
+.article-review-navigation {
+  margin-left: auto;
+}
+
+.article-review-navigation button,
+.article-review-actions button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 0 6px;
+  color: #726858;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.article-review-navigation button:hover,
+.article-review-actions button:hover {
+  background: #f1e9dd;
+}
+
+.article-review-navigation button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.article-review-submit {
+  background: #2f7650 !important;
+  color: #ffffff !important;
+}
+
+.article-review-error {
+  position: absolute;
+  top: 100%;
+  right: max(18px, calc((100% - 780px) / 2));
+  left: max(18px, calc((100% - 780px) / 2));
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid #ecd8d3;
+  background: #fff8f6;
+  padding: 7px 0;
+  color: #a33c35;
+  font-size: 11px;
+}
+
+.article-review-error-standalone {
+  position: relative;
+  top: auto;
+  right: auto;
+  left: auto;
+  width: min(780px, calc(100% - 64px));
+  margin: 8px auto;
+  border: 1px solid #ecd8d3;
+  padding: 8px 10px;
+}
+
+.article-canvas .ai-diff-before {
+  border-radius: 3px;
+  background: #f9e3e0;
+  color: #9d4a43;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.article-canvas .ai-diff-before.is-accepted {
+  opacity: 0.6;
+}
+
+.article-canvas .ai-diff-before.is-focused,
+.article-canvas .ai-diff-after.is-focused {
+  outline: 2px solid rgb(67 126 92 / 30%);
+  outline-offset: 3px;
+}
+
+.article-canvas .ai-diff-after {
+  position: relative;
+  margin: 5px 0;
+  border-left: 3px solid #75ad86;
+  border-radius: 3px;
+  background: #e9f5eb;
+  padding: 4px 36px 4px 10px;
+  color: #2f7650;
+}
+
+.article-canvas .ai-diff-after > * {
+  margin: 0;
+}
+
+.ai-diff-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ai-diff-after:hover .ai-diff-actions,
+.ai-diff-actions.is-focused,
+.ai-diff-before:hover + .ai-diff-actions {
+  opacity: 1;
+}
+
+.ai-diff-actions button {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgb(72 113 84 / 18%);
+  border-radius: 4px;
+  background: #ffffff;
+  color: #397257;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.ai-diff-actions button[data-decision='rejected'] {
+  color: #a33c35;
 }
 
 .article-canvas p {

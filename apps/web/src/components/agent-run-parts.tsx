@@ -15,9 +15,8 @@ import {
   LoaderCircle,
   X,
 } from 'lucide-react';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 
-import { ArticleDiff } from './article-diff';
 import {
   activityLabel,
   friendlyFailure,
@@ -42,6 +41,7 @@ export type RunActions = {
     decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
   ) => Promise<Readonly<Record<string, unknown>>>;
   readonly onArticleUpdated?: () => Promise<void>;
+  readonly onProposalReady?: (proposal: Proposal) => void;
 };
 
 export const RunActionsContext = createContext<RunActions | undefined>(undefined);
@@ -327,66 +327,37 @@ function ArticleChangePart({
   readonly proposal?: Proposal;
 }): React.JSX.Element | null {
   const actions = useRunActions();
-  const [decisions, setDecisions] = useState<Record<string, 'accepted' | 'rejected'>>({});
-  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    if (proposal) actions.onProposalReady?.(proposal);
+  }, [actions, proposal]);
   if (!proposal) return null;
-  const allDecided = proposal.operations.every(({ operationId }) => decisions[operationId]);
-  const decideAll = (decision: 'accepted' | 'rejected'): void => {
-    setDecisions(
-      Object.fromEntries(proposal.operations.map(({ operationId }) => [operationId, decision])),
-    );
-  };
   return (
     <section className="run-part proposal-preview">
       <div className="proposal-heading">
         <div>
           <strong>文章修改</strong>
-          <span>{proposal.operations.length} 项</span>
+          <span>{proposal.operations.length} 处修改将在正文中显示</span>
         </div>
-        <div>
-          <button
-            onClick={() => {
-              decideAll('accepted');
-            }}
-            type="button"
-          >
-            全部接受
-          </button>
-          <button
-            onClick={() => {
-              decideAll('rejected');
-            }}
-            type="button"
-          >
-            全部拒绝
-          </button>
-        </div>
-      </div>
-      <ArticleDiff
-        decisions={decisions}
-        disabled={submitting}
-        entries={proposal.diffs}
-        onDecision={(operationId, decision) => {
-          setDecisions((current) => ({ ...current, [operationId]: decision }));
-        }}
-      />
-      <div className="proposal-submit-row">
-        <span>逐项确认后应用到正文</span>
         <button
-          className="primary-action"
-          disabled={!allDecided || submitting}
+          className="proposal-view-button"
           onClick={() => {
-            setSubmitting(true);
-            void actions
-              .decideProposal(proposal.proposalId, decisions)
-              .then(() => actions.onArticleUpdated?.())
-              .finally(() => {
-                setSubmitting(false);
-              });
+            actions.onProposalReady?.(proposal);
           }}
           type="button"
         >
-          {submitting ? '应用中…' : '应用修改'}
+          查看正文修改
+        </button>
+      </div>
+      <div className="proposal-submit-row">
+        <span>在正文中逐项确认后应用</span>
+        <button
+          className="primary-action"
+          onClick={() => {
+            actions.onProposalReady?.(proposal);
+          }}
+          type="button"
+        >
+          打开正文审阅
         </button>
       </div>
     </section>

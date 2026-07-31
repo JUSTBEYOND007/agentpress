@@ -8,7 +8,10 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { ArticleReviewExtension, articleReviewPluginKey } from './article-review-extension';
+import { ArticleReviewToolbar, type ArticleReviewState } from './article-review';
 import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../lib/autosave-queue';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import { EditorToolbar, slashCommands } from './editor-toolbar';
@@ -42,10 +45,22 @@ export function ArticleCanvas({
   articleId,
   baseRevisionId,
   initialDocument,
+  review,
+  reviewActiveIndex = 0,
+  onReviewDecisionAll,
+  onReviewMove,
+  onReviewSubmit,
+  onReviewVisibleChange,
 }: {
   readonly articleId: string;
   readonly baseRevisionId: string;
   readonly initialDocument: Readonly<Record<string, unknown>>;
+  readonly review?: ArticleReviewState;
+  readonly reviewActiveIndex?: number;
+  readonly onReviewDecisionAll?: (decision: 'accepted' | 'rejected') => void;
+  readonly onReviewMove?: (offset: number) => void;
+  readonly onReviewSubmit?: () => Promise<void>;
+  readonly onReviewVisibleChange?: (visible: boolean) => void;
 }): React.JSX.Element {
   const [saveState, setSaveState] = useState<'connecting' | 'saved' | 'saving' | 'offline'>(
     'connecting',
@@ -60,6 +75,7 @@ export function ArticleCanvas({
   const commitTimer = useRef<number | undefined>(undefined);
   const isRecovering = useRef(false);
   const leaseGeneration = useRef(0);
+  const reviewVisible = useRef(false);
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -89,6 +105,7 @@ export function ArticleCanvas({
             'tableCell',
           ],
         }),
+        ArticleReviewExtension,
       ],
       content: initialDocument,
       editorProps: {
@@ -177,7 +194,7 @@ export function ArticleCanvas({
         throw new Error(await draftResponse.text());
       }
       if (!active) return;
-      editor.setEditable(true);
+      if (!reviewVisible.current) editor.setEditable(true);
       setSaveState('saved');
     };
     void initialize().catch(() => {
@@ -193,6 +210,12 @@ export function ArticleCanvas({
       editor.setEditable(false);
     };
   }, [articleId, editor]);
+  useEffect(() => {
+    if (!editor) return;
+    reviewVisible.current = Boolean(review?.visible);
+    editor.view.dispatch(editor.state.tr.setMeta(articleReviewPluginKey, review ?? null));
+    editor.setEditable(!review?.visible);
+  }, [editor, review]);
   useEffect(() => {
     leaseGeneration.current += 1;
     const generation = leaseGeneration.current;
@@ -219,6 +242,22 @@ export function ArticleCanvas({
   return (
     <section className="article-editor-shell">
       {editor ? <EditorToolbar editor={editor} key={editorVersion} /> : null}
+      {editor && review?.visible ? (
+        <ArticleReviewToolbar
+          activeIndex={reviewActiveIndex}
+          onDecisionAll={(decision) => onReviewDecisionAll?.(decision)}
+          onMove={(offset) => onReviewMove?.(offset)}
+          onSubmit={async () => onReviewSubmit?.()}
+          onVisibleChange={(visible) => onReviewVisibleChange?.(visible)}
+          review={review}
+        />
+      ) : null}
+      {review && !review.visible && review.error ? (
+        <div className="article-review-error article-review-error-standalone" role="alert">
+          <RotateCcw aria-hidden="true" size={12} />
+          {review.error}
+        </div>
+      ) : null}
       <div className={`save-state save-${saveState}`} aria-live="polite">
         {saveState === 'connecting'
           ? '正在恢复'

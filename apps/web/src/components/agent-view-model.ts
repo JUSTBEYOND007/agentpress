@@ -32,6 +32,8 @@ export type ConversationView = {
 
 export type Proposal = {
   readonly proposalId: string;
+  readonly articleId?: string;
+  readonly baseRevisionId?: string;
   readonly operations: readonly EditOperation[];
   readonly diffs: readonly DiffEntry[];
 };
@@ -44,6 +46,10 @@ export function proposalFromPart(part: RunPart): Proposal | undefined {
     return undefined;
   return {
     proposalId,
+    ...(stringValue(value.articleId) ? { articleId: stringValue(value.articleId) } : {}),
+    ...(stringValue(value.baseRevisionId)
+      ? { baseRevisionId: stringValue(value.baseRevisionId) }
+      : {}),
     operations: value.operations as readonly EditOperation[],
     diffs: value.diffs as readonly DiffEntry[],
   };
