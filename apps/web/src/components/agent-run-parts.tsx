@@ -1,25 +1,29 @@
 'use client';
 
-import { MessagePartPrimitive, MessagePrimitive } from '@assistant-ui/react';
+import { ActionBarPrimitive, MessagePartPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import {
   Check,
   CircleAlert,
   Clock3,
   Coins,
+  Copy,
+  ExternalLink,
   FileCheck2,
   FileText,
   RotateCcw,
   Sparkles,
-  Wrench,
+  LoaderCircle,
   X,
 } from 'lucide-react';
 import { createContext, useContext, useState } from 'react';
 
 import { ArticleDiff } from './article-diff';
 import {
-  compactJson,
+  activityLabel,
+  friendlyFailure,
   parseRunPart,
   proposalFromPart,
+  safeExternalUrl,
   statusLabel,
   type Proposal,
 } from './agent-view-model';
@@ -63,6 +67,11 @@ export function AssistantMessage(): React.JSX.Element {
             data: { by_name: { 'agentpress-run-part': RunPartRenderer } },
           }}
         />
+        <ActionBarPrimitive.Root className="message-actions" hideWhenRunning>
+          <ActionBarPrimitive.Copy aria-label="复制回答" title="复制回答">
+            <Copy aria-hidden="true" size={13} />
+          </ActionBarPrimitive.Copy>
+        </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
   );
@@ -97,7 +106,10 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
 function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const tasks = Array.isArray(part.payload.tasks) ? part.payload.tasks.map(recordValue) : [];
   return (
-    <details className="run-part plan-part" open>
+    <details
+      className="run-part plan-part"
+      open={part.status.includes('started') || part.status.includes('running')}
+    >
       <summary>
         <Sparkles size={14} /> {stringValue(part.payload.summary) || '执行计划'}
         <small>v{numberValue(part.payload.revisionNumber) || 1}</small>
@@ -121,20 +133,13 @@ function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
 }
 
 function ActivityPart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const payload = part.payload;
-  const isTool = part.status.startsWith('tool.');
-  const title = isTool
-    ? stringValue(payload.toolId) || stringValue(payload.toolName) || '工具调用'
-    : stringValue(payload.summary) || stringValue(payload.owner) || statusLabel(part.status);
+  const active = part.status.includes('started') || part.status.includes('executing');
   return (
-    <details className="run-part activity-part">
-      <summary>
-        {isTool ? <Wrench size={13} /> : <Clock3 size={13} />}
-        <span>{title}</span>
-        <small>{statusLabel(part.status)}</small>
-      </summary>
-      <pre>{compactJson(payload)}</pre>
-    </details>
+    <div className={`run-part activity-part${active ? ' is-active' : ''}`} role="status">
+      {active ? <LoaderCircle className="activity-spinner" size={13} /> : <Clock3 size={13} />}
+      <span>{activityLabel(part)}</span>
+      <small>{statusLabel(part.status)}</small>
+    </div>
   );
 }
 
@@ -142,19 +147,35 @@ function ApprovalPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const actions = useRunActions();
   const toolCallId = stringValue(part.payload.toolCallId);
   const [decision, setDecision] = useState<'approved' | 'denied'>();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+  const decide = (next: 'approved' | 'denied'): void => {
+    setPending(true);
+    setError(undefined);
+    void actions
+      .decideTool(toolCallId, next)
+      .then(() => {
+        setDecision(next);
+      })
+      .catch((reason: unknown) => {
+        setError(friendlyFailure(reason, '没有完成确认，请重试。'));
+      })
+      .finally(() => {
+        setPending(false);
+      });
+  };
   return (
     <section className="run-part approval-row" aria-label="工具审批">
       <CircleAlert size={16} />
       <div>
         <strong>需要你的确认</strong>
-        <span>{stringValue(part.payload.sideEffect) || stringValue(part.payload.toolId)}</span>
+        <span>{stringValue(part.payload.sideEffect) || '继续前需要确认这项操作'}</span>
       </div>
       <div>
         <button
-          disabled={Boolean(decision)}
+          disabled={Boolean(decision) || pending}
           onClick={() => {
-            setDecision('approved');
-            void actions.decideTool(toolCallId, 'approved');
+            decide('approved');
           }}
           type="button"
         >
@@ -162,10 +183,9 @@ function ApprovalPart({ part }: { readonly part: RunPart }): React.JSX.Element {
           允许
         </button>
         <button
-          disabled={Boolean(decision)}
+          disabled={Boolean(decision) || pending}
           onClick={() => {
-            setDecision('denied');
-            void actions.decideTool(toolCallId, 'denied');
+            decide('denied');
           }}
           type="button"
         >
@@ -173,6 +193,10 @@ function ApprovalPart({ part }: { readonly part: RunPart }): React.JSX.Element {
           拒绝
         </button>
       </div>
+      {decision ? (
+        <p className="interaction-result">{decision === 'approved' ? '已允许' : '已拒绝'}</p>
+      ) : null}
+      {error ? <p className="interaction-error">{error}</p> : null}
     </section>
   );
 }
@@ -181,44 +205,67 @@ function AskUserPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const actions = useRunActions();
   const [answer, setAnswer] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [submittedAnswer, setSubmittedAnswer] = useState('');
+  const [error, setError] = useState<string>();
   const options = Array.isArray(part.payload.options)
     ? part.payload.options.filter((value): value is string => typeof value === 'string')
     : [];
   const submit = (value: string): void => {
     if (!value.trim() || submitted) return;
     setSubmitted(true);
+    setError(undefined);
     void actions
       .answerQuestion(part.runId, stringValue(part.payload.questionId), value)
-      .catch(() => { setSubmitted(false); });
+      .then(() => {
+        setSubmittedAnswer(value.trim());
+      })
+      .catch((reason: unknown) => {
+        setSubmitted(false);
+        setError(friendlyFailure(reason, '回答没有发送成功，请重试。'));
+      });
   };
   return (
     <section className="run-part ask-user-part">
       <strong>{stringValue(part.payload.question) || '需要补充信息'}</strong>
-      {options.length > 0 ? (
+      {submittedAnswer ? (
+        <p className="interaction-result">已回答：{submittedAnswer}</p>
+      ) : options.length > 0 ? (
         <div>
           {options.map((option) => (
-            <button disabled={submitted} key={option} onClick={() => { submit(option); }} type="button">
+            <button
+              disabled={submitted}
+              key={option}
+              onClick={() => {
+                submit(option);
+              }}
+              type="button"
+            >
               {option}
             </button>
           ))}
         </div>
       ) : null}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit(answer);
-        }}
-      >
-        <input
-          aria-label="回答 Agent 的问题"
-          disabled={submitted}
-          onChange={(event) => { setAnswer(event.target.value); }}
-          value={answer}
-        />
-        <button disabled={submitted || !answer.trim()} type="submit">
-          回答
-        </button>
-      </form>
+      {!submittedAnswer ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit(answer);
+          }}
+        >
+          <input
+            aria-label="回答 Agent 的问题"
+            disabled={submitted}
+            onChange={(event) => {
+              setAnswer(event.target.value);
+            }}
+            value={answer}
+          />
+          <button disabled={submitted || !answer.trim()} type="submit">
+            回答
+          </button>
+        </form>
+      ) : null}
+      {error ? <p className="interaction-error">{error}</p> : null}
     </section>
   );
 }
@@ -236,9 +283,18 @@ function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
       {artifacts.map((artifact, index) => (
         <div key={stringValue(artifact.id) || stringValue(artifact.artifactId) || String(index)}>
           <strong>
-            {stringValue(artifact.title) || stringValue(artifact.type) || '结构化产物'}
+            {stringValue(artifact.title) || artifactLabel(stringValue(artifact.type))}
           </strong>
           <span>{stringValue(artifact.summary)}</span>
+          {safeExternalUrl(artifact.url) || safeExternalUrl(artifact.downloadUrl) ? (
+            <a
+              href={safeExternalUrl(artifact.url) ?? safeExternalUrl(artifact.downloadUrl)}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              打开 <ExternalLink aria-hidden="true" size={11} />
+            </a>
+          ) : null}
         </div>
       ))}
     </section>
@@ -246,10 +302,18 @@ function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
 }
 
 function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const href = safeExternalUrl(part.payload.url) ?? safeExternalUrl(part.payload.sourceUrl);
   return (
     <section className="run-part evidence-part">
       <FileCheck2 size={14} />
-      <strong>{stringValue(part.payload.title) || '引用来源'}</strong>
+      {href ? (
+        <a href={href} rel="noopener noreferrer" target="_blank">
+          {stringValue(part.payload.title) || '查看引用来源'}
+          <ExternalLink aria-hidden="true" size={11} />
+        </a>
+      ) : (
+        <strong>{stringValue(part.payload.title) || '引用来源'}</strong>
+      )}
       <span>{stringValue(part.payload.source)}</span>
     </section>
   );
@@ -280,10 +344,20 @@ function ArticleChangePart({
           <span>{proposal.operations.length} 项</span>
         </div>
         <div>
-          <button onClick={() => { decideAll('accepted'); }} type="button">
+          <button
+            onClick={() => {
+              decideAll('accepted');
+            }}
+            type="button"
+          >
             全部接受
           </button>
-          <button onClick={() => { decideAll('rejected'); }} type="button">
+          <button
+            onClick={() => {
+              decideAll('rejected');
+            }}
+            type="button"
+          >
             全部拒绝
           </button>
         </div>
@@ -292,9 +366,9 @@ function ArticleChangePart({
         decisions={decisions}
         disabled={submitting}
         entries={proposal.diffs}
-        onDecision={(operationId, decision) =>
-          { setDecisions((current) => ({ ...current, [operationId]: decision })); }
-        }
+        onDecision={(operationId, decision) => {
+          setDecisions((current) => ({ ...current, [operationId]: decision }));
+        }}
       />
       <div className="proposal-submit-row">
         <span>逐项确认后应用到正文</span>
@@ -306,7 +380,9 @@ function ArticleChangePart({
             void actions
               .decideProposal(proposal.proposalId, decisions)
               .then(() => actions.onArticleUpdated?.())
-              .finally(() => { setSubmitting(false); });
+              .finally(() => {
+                setSubmitting(false);
+              });
           }}
           type="button"
         >
@@ -318,13 +394,18 @@ function ArticleChangePart({
 }
 
 function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const fallback =
+    part.type === 'recovery'
+      ? '连接中断，正在恢复当前工作。'
+      : '这一步没有完成，你可以调整要求后继续。';
   return (
     <div className={`run-part notice-part notice-${part.type}`}>
       <RotateCcw size={13} />
       <span>
-        {stringValue(part.payload.message) ||
-          stringValue(recordValue(part.payload.failure).message) ||
-          statusLabel(part.status)}
+        {friendlyFailure(
+          stringValue(part.payload.message) || recordValue(part.payload.failure),
+          fallback,
+        )}
       </span>
     </div>
   );
@@ -333,15 +414,39 @@ function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Element {
 function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const usage = recordValue(part.payload.usage);
   const tokens = numberValue(usage.inputTokens) + numberValue(usage.outputTokens);
+  const cost = numberValue(part.payload.credits) || numberValue(part.payload.cost);
+  const duration = numberValue(part.payload.durationMs);
   return (
     <details className="run-part usage-part">
       <summary>
         <Coins size={13} />
-        已完成 · {tokens.toLocaleString()} tokens
+        运行详情
       </summary>
-      <pre>{compactJson(part.payload)}</pre>
+      <div>
+        {cost > 0 ? <span>{cost.toLocaleString()} 积分</span> : null}
+        {duration > 0 ? <span>{formatDuration(duration)}</span> : null}
+        {tokens > 0 ? <span>{tokens.toLocaleString()} tokens</span> : null}
+      </div>
     </details>
   );
+}
+
+function artifactLabel(type: string): string {
+  const labels: Record<string, string> = {
+    ResearchBrief: '研究摘要',
+    Outline: '文章大纲',
+    ArticleDraft: '文章草稿',
+    EditProposal: '文章修改',
+    ClaimReview: '事实核查',
+    ImagePlan: '配图方案',
+    AssetProposal: '素材建议',
+  };
+  return labels[type] ?? '结构化产出';
+}
+
+function formatDuration(durationMs: number): string {
+  if (durationMs < 60_000) return `${String(Math.max(1, Math.round(durationMs / 1000)))} 秒`;
+  return `${String(Math.round(durationMs / 60_000))} 分钟`;
 }
 
 function useRunActions(): RunActions {

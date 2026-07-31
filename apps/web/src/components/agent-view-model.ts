@@ -76,11 +76,6 @@ export function parseRunPart(value: unknown): RunPart | undefined {
   };
 }
 
-export function compactJson(value: Readonly<Record<string, unknown>>): string {
-  const text = JSON.stringify(value, null, 2);
-  return text.length > 1200 ? `${text.slice(0, 1197)}...` : text;
-}
-
 export function statusLabel(status: string): string {
   const labels: Record<string, string> = {
     ready: '就绪',
@@ -98,6 +93,15 @@ export function statusLabel(status: string): string {
     cancelled: '已取消',
     'run.started': '已开始',
     'run.queued': '排队中',
+    'run.planning': '正在理解你的需求',
+    'run.running': '正在处理',
+    'run.waiting_for_approval': '等待你的确认',
+    'run.waiting_for_user': '等待你的回答',
+    'run.recovering': '正在恢复连接',
+    'run.completed': '已完成',
+    'run.completed_with_degradation': '已完成，部分内容需要留意',
+    'run.failed': '本次处理未完成',
+    'run.cancelled': '已停止',
     'task.started': '进行中',
     'task.succeeded': '已完成',
     'task.failed': '失败',
@@ -106,7 +110,50 @@ export function statusLabel(status: string): string {
     'tool.succeeded': '已完成',
     'tool.failed': '失败',
   };
-  return labels[status] ?? status.replaceAll('_', ' ');
+  return labels[status] ?? '正在处理';
+}
+
+export function activityLabel(part: RunPart): string {
+  const summary = stringValue(part.payload.summary);
+  if (summary && !looksInternal(summary)) return summary;
+  if (part.status.startsWith('tool.')) {
+    if (part.status === 'tool.executing') return '正在使用所需工具';
+    if (part.status === 'tool.succeeded') return '所需信息已准备好';
+    if (part.status === 'tool.failed') return '这一步未能完成';
+    return '正在准备下一步';
+  }
+  if (part.status.startsWith('task.')) {
+    const objective = stringValue(part.payload.objective);
+    if (objective && !looksInternal(objective)) return objective;
+  }
+  return statusLabel(part.status);
+}
+
+export function safeExternalUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function friendlyFailure(value: unknown, fallback = '操作没有完成，请稍后重试。'): string {
+  const message = typeof value === 'string' ? value : stringValue(recordValue(value).message);
+  if (!message || looksInternal(message)) return fallback;
+  return message;
+}
+
+function looksInternal(value: string): boolean {
+  return (
+    value.includes('{') ||
+    value.includes('toolCallId') ||
+    value.includes('proposalId') ||
+    value.startsWith('run.') ||
+    value.startsWith('task.') ||
+    value.startsWith('tool.')
+  );
 }
 
 export function statusTone(status: string): string {

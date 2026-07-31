@@ -160,6 +160,12 @@
   white-space: nowrap;
 }
 
+.composer-context button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .composer-context button.is-selected {
   border-color: #b9d1c3;
   background: #f2f8f4;
@@ -223,11 +229,10 @@
   padding: 6px;
 }
 
-.composer-menu > strong {
+.composer-menu-label {
   padding: 5px 7px;
   color: #93948f;
   font-size: 10px;
-  text-transform: uppercase;
 }
 
 .composer-menu button {
@@ -241,18 +246,29 @@
   text-align: left;
 }
 
+.composer-menu button > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
 .composer-menu button:hover:not(:disabled) {
   background: #f1f1ef;
 }
 
 .composer-menu button small {
   min-width: 0;
-  margin-left: auto;
+  margin-left: 0;
   overflow: hidden;
   color: #93948f;
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-menu .menu-check {
+  flex: 0 0 auto;
+  color: #397257;
 }
 
 .send-behavior {
@@ -265,6 +281,60 @@
   color: #757670;
   cursor: pointer;
   font-size: 10px;
+}
+
+.send-mode-wrap {
+  position: relative;
+}
+
+.send-mode-menu {
+  position: absolute;
+  z-index: 35;
+  bottom: 34px;
+  left: 0;
+  display: grid;
+  width: 240px;
+  gap: 2px;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgb(20 20 18 / 12%);
+  padding: 5px;
+}
+
+.send-mode-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.send-mode-menu button:hover,
+.send-mode-menu button.is-selected {
+  background: #f1f1ef;
+}
+
+.send-mode-menu span,
+.send-mode-menu strong,
+.send-mode-menu small {
+  display: block;
+}
+
+.send-mode-menu strong {
+  color: #3e3f3b;
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.send-mode-menu small {
+  margin-top: 2px;
+  color: #92938d;
+  font-size: 9px;
 }
 
 .send-mode {

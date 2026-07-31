@@ -59,9 +59,43 @@
   top: 42px;
   left: 10px;
   width: min(300px, calc(100vw - 24px));
-  max-height: 340px;
-  overflow-y: auto;
+  max-height: min(420px, calc(100dvh - 80px));
+  overflow: hidden;
   padding: 5px;
+}
+
+.conversation-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 2px 5px;
+  border-bottom: 1px solid #e8e8e5;
+  padding: 5px 6px 7px;
+  color: #8a8b85;
+}
+
+.conversation-search input,
+.conversation-manage input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  outline: 0;
+  color: #343531;
+  font-size: 12px;
+}
+
+.conversation-list {
+  display: grid;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.conversation-list > p {
+  margin: 16px 8px;
+  color: #92938d;
+  font-size: 11px;
+  text-align: center;
 }
 
 .conversation-menu button {
@@ -77,7 +111,8 @@
   text-align: left;
 }
 
-.conversation-menu button:hover {
+.conversation-menu button:hover,
+.conversation-menu button.is-selected {
   background: #f1f1ef;
 }
 
@@ -98,6 +133,41 @@
   border-radius: 0;
   margin-top: 4px;
   padding-top: 9px;
+}
+
+.conversation-manage {
+  display: flex;
+  gap: 2px;
+  border-top: 1px solid #ececea;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.conversation-manage form,
+.archive-confirm {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+}
+
+.conversation-manage form {
+  border: 1px solid #d9d9d6;
+  border-radius: 5px;
+}
+
+.archive-confirm span {
+  min-width: 0;
+  flex: 1;
+  color: #656660;
+  font-size: 11px;
+}
+
+.conversation-error {
+  margin: 4px 7px 6px;
+  color: #a33c35;
+  font-size: 10px;
 }
 
 .header-icon-button {
@@ -212,6 +282,35 @@
   margin-top: 8px;
 }
 
+.message-actions {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.aui-assistant-message:hover .message-actions,
+.aui-assistant-message:focus-within .message-actions {
+  opacity: 1;
+}
+
+.message-actions button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: #83847e;
+  cursor: pointer;
+}
+
+.message-actions button:hover {
+  background: #eeeeec;
+  color: #444541;
+}
+
 .assistant-avatar {
   display: grid;
   width: 24px;
@@ -296,25 +395,32 @@
 }
 
 .activity-part {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
   border-left: 1px solid #dcdcd8;
-  padding-left: 10px;
+  padding: 5px 0 5px 10px;
+  color: #74756f;
 }
 
-.activity-part pre,
-.usage-part pre {
-  max-height: 160px;
-  overflow: auto;
-  margin: 2px 0 8px;
-  border-radius: 5px;
-  background: #f4f4f2;
-  padding: 7px;
-  color: #676862;
-  font:
-    10px/1.45 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  white-space: pre-wrap;
+.activity-part small {
+  color: #a0a19b;
+  font-size: 10px;
+}
+
+.activity-part.is-active {
+  color: #4f6f9e;
+}
+
+.activity-spinner {
+  animation: activity-spin 900ms linear infinite;
+}
+
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ask-user-part > strong {
@@ -363,6 +469,17 @@
   padding: 5px 0;
 }
 
+.artifact-part a,
+.evidence-part a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 3px;
+  color: #3975b8;
+  font-size: 10px;
+  text-decoration: none;
+}
+
 .evidence-part,
 .notice-part {
   display: flex;
@@ -376,6 +493,15 @@
   color: #8b8c86;
 }
 
+.evidence-part a {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .notice-part {
   color: #805b26;
 }
@@ -386,6 +512,15 @@
 
 .usage-part {
   color: #858680;
+}
+
+.usage-part > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 2px 0 7px 19px;
+  color: #92938d;
+  font-size: 10px;
 }
 
 .run-inspector {
@@ -598,6 +733,20 @@
 .approval-row button:hover,
 .approval-row button.is-selected {
   background: #f1e5d4;
+}
+
+.interaction-result,
+.interaction-error {
+  grid-column: 2 / -1;
+  font-size: 10px;
+}
+
+.interaction-result {
+  color: #397257;
+}
+
+.interaction-error {
+  color: #a33c35;
 }
 
 .evidence-list > div {

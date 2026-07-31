@@ -7,13 +7,7 @@ import { AgentComposer } from './agent-composer';
 import { AgentConversationHeader } from './agent-conversation-header';
 import { RunActionsContext, type RunActions } from './agent-run-parts';
 import { AgentThread } from './agent-thread';
-import {
-  showContextError,
-  type AttachmentView,
-  type ConversationView,
-  type MemoryView,
-  type SkillView,
-} from './agent-view-model';
+import type { AttachmentView, ConversationView, MemoryView, SkillView } from './agent-view-model';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
@@ -194,11 +188,9 @@ export function AgentWorkbench({
         <aside className="agent-panel" aria-label="Agent 工作台">
           <AgentConversationHeader
             conversations={conversations}
-            onCreate={() => void createConversation().catch(showContextError(setContextError))}
+            onCreate={createConversation}
             onSelect={setSelectedConversation}
-            onUpdate={(target, update) =>
-              void updateConversation(target, update).catch(showContextError(setContextError))
-            }
+            onUpdate={updateConversation}
             {...(selectedConversation ? { selected: selectedConversation } : {})}
             status={status}
           />
@@ -213,9 +205,9 @@ export function AgentWorkbench({
               {...(activeArticleTitle ? { activeArticleTitle } : {})}
               attachments={attachments}
               mentionActiveArticle={mentionActiveArticle}
-              onAttachmentRemove={(id) =>
-                { setAttachments((current) => current.filter((item) => item.id !== id)); }
-              }
+              onAttachmentRemove={(id) => {
+                setAttachments((current) => current.filter((item) => item.id !== id));
+              }}
               onAttachmentUpload={async (file) => {
                 if (!workspaceId) throw new Error('工作区尚未加载');
                 setUploadingAttachment(true);
