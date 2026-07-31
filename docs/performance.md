@@ -51,8 +51,11 @@ pnpm benchmark:editor
 运行命令：
 
 ```bash
-pnpm benchmark:agent
+set -a; source .env; set +a
+BENCHMARK_BEARER_TOKEN="$YOUR_LOGTO_ACCESS_TOKEN" pnpm benchmark:agent
 ```
+
+基准脚本明确要求一个短期 Logto access token，并沿用生产 API 的 JWT/工作区授权路径；不能通过关闭认证或伪造用户来获得性能数字。令牌只从环境变量读取，不写入输出。
 
 限制：该脚本测量的是入队与 SSE 建连，不包含方舟 token 首字节、长连接持续时间、Kafka 重平衡或真实浏览器渲染。生产容量规划仍需按目标消息大小、模型延迟、数据库连接池、Kafka 分区数和 ingress timeout 重新压测。
 

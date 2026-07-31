@@ -7,6 +7,7 @@ import { DEMO_IDS, seedDemo } from './seed-demo.js';
 
 const connectionString = requiredEnvironment('DATABASE_URL');
 const apiUrl = (process.env.BENCHMARK_API_URL ?? 'http://localhost:4000/v1').replace(/\/$/, '');
+const bearerToken = requiredEnvironment('BENCHMARK_BEARER_TOKEN');
 const runCount = boundedInteger(process.env.RUN_COUNT, 100, 1, 100);
 const sseClients = boundedInteger(process.env.SSE_CLIENTS, 1_000, 1, 1_000);
 const connection = connectDatabase(connectionString);
@@ -40,6 +41,7 @@ try {
         headers: {
           'content-type': 'application/json',
           'idempotency-key': `benchmark:${randomUUID()}`,
+          authorization: `Bearer ${bearerToken}`,
         },
         body: JSON.stringify({ branchId: fixture.branchId, prompt: 'Benchmark queued run' }),
       });
