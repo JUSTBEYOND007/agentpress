@@ -38,7 +38,6 @@ import {
   type RuntimeToolFactory,
 } from './contracts.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
-import { classifyRun } from './run-classifier.js';
 import { RunContextService } from './run-context-service.js';
 
 const TERMINAL_RUN_STATES = [
@@ -208,7 +207,6 @@ export class DirectRunService {
       const runId = this.createId();
       const outboxId = this.createId();
       const now = this.now();
-      const classification = classifyRun(prompt);
       const userMessage: RuntimeMessage = {
         role: 'user',
         content: prompt,
@@ -237,7 +235,7 @@ export class DirectRunService {
         workspaceId: branch.workspaceId,
         branchId: input.branchId,
         rootRequestId,
-        mode: classification.mode,
+        mode: 'direct',
         status: 'queued',
         createdAt: now,
         updatedAt: now,
@@ -254,8 +252,7 @@ export class DirectRunService {
         runId,
         eventType: 'run.queued',
         payload: {
-          mode: classification.mode,
-          reasons: classification.reasons,
+          mode: 'direct' as const,
           rootRequestId,
           contextManifest: contextPack.manifest,
           contextHash: contextPack.contentHash,
@@ -277,7 +274,7 @@ export class DirectRunService {
           rootRequestId,
           messageId,
           status: 'queued' as const,
-          mode: classification.mode,
+          mode: 'direct' as const,
           created: true,
         },
         event: toDurableEvent(queued),
@@ -305,70 +302,12 @@ export class DirectRunService {
       return { runId, status: 'ignored' };
     }
     const effectivePrompt = withContext(context.prompt, context.contextContent);
-    if (context.mode === 'planned') {
-      const outcome =
-        context.status === 'recovering'
-          ? await this.plannedRuns.recover(runId, effectivePrompt, signal)
-          : await this.plannedRuns.execute(runId, effectivePrompt, signal);
-      if (!outcome) {
-        return { runId, status: 'ignored' };
-      }
-      return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
-    }
-
-    const recovering = context.status === 'recovering';
-    const started = await this.options.database.transaction(async (transaction) => {
-      const updated = await transaction
-        .update(agentRuns)
-        .set({ status: 'running', updatedAt: this.now(), version: sql`${agentRuns.version} + 1` })
-        .where(
-          and(eq(agentRuns.id, runId), eq(agentRuns.status, recovering ? 'recovering' : 'queued')),
-        )
-        .returning({ id: agentRuns.id });
-      if (updated.length === 0) {
-        return undefined;
-      }
-      return appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: recovering ? 'run.recovered' : 'run.started',
-        payload: { mode: 'direct', ...(recovering ? { fromCheckpoint: true } : {}) },
-      });
-    });
-    if (!started) {
-      return { runId, status: 'ignored' };
-    }
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(started) });
-
-    let result: RuntimeResult;
-    try {
-      const runtime = this.options.runtimeFactory.create('direct');
-      result = await runtime.execute(
-        {
-          runId,
-          systemPrompt: this.options.systemPrompt,
-          history: context.history,
-          prompt: effectivePrompt,
-          ...(this.options.runtimeToolFactory
-            ? { tools: await this.options.runtimeToolFactory.createForRun(runId, effectivePrompt) }
-            : {}),
-        },
-        (event) => this.publishRuntimeEvent(runId, event),
-        signal,
-      );
-    } catch (error) {
-      result = {
-        status: 'failed',
-        messages: context.history,
-        error: {
-          code: 'runtime_error',
-          message: error instanceof Error ? error.message : 'Unknown runtime boundary error',
-          retryable: true,
-        },
-      };
-    }
-
-    return this.settleRun(context.branchId, runId, result);
+    const outcome =
+      context.status === 'recovering'
+        ? await this.plannedRuns.recover(runId, effectivePrompt, context.history, signal)
+        : await this.plannedRuns.execute(runId, effectivePrompt, context.history, signal);
+    if (!outcome) return { runId, status: 'ignored' };
+    return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
   }
 
   public async requestCancellation(runId: string): Promise<RequestRunCancellationResult> {

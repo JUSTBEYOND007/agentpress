@@ -33,7 +33,12 @@ export type AgentRuntimeFactory = {
 };
 
 export type RuntimeToolFactory = {
-  createForRun(runId: string, query?: string): Promise<readonly RuntimeTool[]>;
+  createForRun(
+    runId: string,
+    capabilities?: readonly string[],
+    taskId?: string,
+  ): Promise<readonly RuntimeTool[]>;
+  listCapabilities(runId: string): Promise<readonly string[]>;
 };
 
 export type SelectedSkillInput = {

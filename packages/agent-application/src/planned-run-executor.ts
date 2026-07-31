@@ -1,27 +1,36 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { createPromptRevision, runReviewGate } from '@agentpress/agent-context';
 import type {
   RuntimeAssistantMessage,
+  RuntimeEvent,
+  RuntimeMessage,
   RuntimeResult,
+  RuntimeTool,
   RuntimeUsage,
 } from '@agentpress/agent-runtime';
 import {
   agentRuns,
-  appendCheckpoint,
+  agentSessions,
   agentTaskDependencies,
   agentTasks,
+  agentTranscriptEntries,
+  appendCheckpoint,
   appendRunEvent,
+  artifacts,
+  artifactVersions,
   type AgentPressDatabase,
   contextPacks,
+  conversations,
   type DatabaseTransaction,
   executionPlans,
+  planRevisionTasks,
   planRevisions,
-  runDirectives,
+  runQuestions,
   taskBriefs,
   taskResults,
 } from '@agentpress/database';
-import { and, eq, inArray, max, sql } from 'drizzle-orm';
+import { Type } from '@sinclair/typebox';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -29,26 +38,55 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
-import { classifyRun } from './run-classifier.js';
 
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type TaskCriticality = 'required' | 'optional';
+type ArtifactType =
+  | 'ResearchBrief'
+  | 'Outline'
+  | 'ArticleDraft'
+  | 'EditProposal'
+  | 'ClaimReview'
+  | 'ImagePlan'
+  | 'AssetProposal';
 
-type PlannedTaskSpec = {
+export type PlannedTaskSpec = {
   readonly id: string;
+  readonly clientKey: string;
   readonly owner: SpecialistRole;
   readonly objective: string;
   readonly criticality: TaskCriticality;
   readonly acceptanceCriteria: readonly string[];
   readonly dependencyIds: readonly string[];
+  readonly capabilities: readonly string[];
+};
+
+type SubmittedPlan = {
+  readonly goal: string;
+  readonly tasks: readonly PlannedTaskSpec[];
+};
+
+type StructuredArtifact = {
+  readonly type: ArtifactType;
+  readonly title: string;
+  readonly summary: string;
+  readonly content: Readonly<Record<string, unknown>>;
+  readonly evidenceIds: readonly string[];
 };
 
 type SettledTask = PlannedTaskSpec & {
   readonly status: 'succeeded' | 'failed' | 'skipped' | 'cancelled';
-  readonly output?: string;
+  readonly summary?: string;
+  readonly artifacts: readonly StructuredArtifact[];
   readonly usage?: RuntimeUsage;
+  readonly warnings: readonly string[];
   readonly failure?: string;
 };
+
+type ControlDecision =
+  | { readonly kind: 'direct'; readonly result: RuntimeResult }
+  | { readonly kind: 'plan'; readonly plan: SubmittedPlan; readonly result: RuntimeResult }
+  | { readonly kind: 'question'; readonly question: string; readonly options: readonly string[] };
 
 export type PlannedExecutionOutcome = {
   readonly result: RuntimeResult;
@@ -61,10 +99,65 @@ type PlannedRunExecutorOptions = {
   readonly publisher: RunEventPublisher;
   readonly systemPrompt: string;
   readonly runtimeToolFactory?: RuntimeToolFactory;
-  readonly reviewGate?: { readonly enabled: boolean; readonly maxRounds?: number };
   readonly now?: () => Date;
   readonly createId?: () => string;
 };
+
+const specialistRoles = [
+  'researcher',
+  'writer',
+  'editor',
+  'fact_checker',
+  'illustrator',
+] as const;
+const artifactTypes = [
+  'ResearchBrief',
+  'Outline',
+  'ArticleDraft',
+  'EditProposal',
+  'ClaimReview',
+  'ImagePlan',
+  'AssetProposal',
+] as const;
+
+const taskSchema = Type.Object(
+  {
+    clientKey: Type.String({ minLength: 1, maxLength: 80 }),
+    owner: Type.Union(specialistRoles.map((value) => Type.Literal(value))),
+    objective: Type.String({ minLength: 1, maxLength: 4_000 }),
+    criticality: Type.Union([Type.Literal('required'), Type.Literal('optional')]),
+    acceptanceCriteria: Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), {
+      minItems: 1,
+      maxItems: 8,
+    }),
+    dependencyKeys: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { maxItems: 12 }),
+    capabilities: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { maxItems: 16 }),
+  },
+  { additionalProperties: false },
+);
+
+const taskCompleteSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal('succeeded'), Type.Literal('failed')]),
+    summary: Type.String({ minLength: 1, maxLength: 20_000 }),
+    artifacts: Type.Array(
+      Type.Object(
+        {
+          type: Type.Union(artifactTypes.map((value) => Type.Literal(value))),
+          title: Type.String({ minLength: 1, maxLength: 300 }),
+          summary: Type.String({ minLength: 1, maxLength: 4_000 }),
+          content: Type.Record(Type.String(), Type.Unknown()),
+          evidenceIds: Type.Array(Type.String({ format: 'uuid' }), { maxItems: 100 }),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 12 },
+    ),
+    warnings: Type.Array(Type.String({ minLength: 1, maxLength: 2_000 }), { maxItems: 20 }),
+    failure: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),
+  },
+  { additionalProperties: false },
+);
 
 export class PlannedRunExecutor {
   private readonly now: () => Date;
@@ -78,62 +171,165 @@ export class PlannedRunExecutor {
   public async execute(
     runId: string,
     prompt: string,
+    history: readonly RuntimeMessage[] = [],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
-    const tasks = buildPlan(prompt, this.createId);
-    const planId = this.createId();
-    const revisionId = this.createId();
-    const planningEvents = await this.options.database.transaction(async (transaction) => {
-      const claimed = await transaction
-        .update(agentRuns)
-        .set({
-          status: 'planning',
-          updatedAt: this.now(),
-          version: sql`${agentRuns.version} + 1`,
-        })
-        .where(
-          and(
-            eq(agentRuns.id, runId),
-            eq(agentRuns.mode, 'planned'),
-            eq(agentRuns.status, 'queued'),
-          ),
-        )
-        .returning({ id: agentRuns.id });
-      if (claimed.length === 0) {
+    if (!(await this.claimPlanning(runId, 'queued'))) return undefined;
+    const control = await this.runMainControl(runId, prompt, history, signal);
+    if (control.kind === 'direct') {
+      await this.enterRunning(runId, 'direct');
+      return { result: control.result, degraded: false };
+    }
+    if (control.kind === 'question') {
+      await this.persistQuestion(runId, control.question, control.options);
+      return undefined;
+    }
+    return this.persistAndExecutePlan(runId, prompt, control.plan, signal);
+  }
+
+  public async recover(
+    runId: string,
+    prompt: string,
+    history: readonly RuntimeMessage[] = [],
+    signal?: AbortSignal,
+  ): Promise<PlannedExecutionOutcome | undefined> {
+    const rows = await this.options.database
+      .select({ mode: agentRuns.mode, revisionId: agentRuns.activePlanRevisionId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'recovering')))
+      .limit(1);
+    const run = rows[0];
+    if (!run) return undefined;
+    if (!run.revisionId || run.mode === 'direct') {
+      if (!(await this.claimPlanning(runId, 'recovering'))) return undefined;
+      const control = await this.runMainControl(runId, prompt, history, signal);
+      if (control.kind === 'direct') {
+        await this.enterRunning(runId, 'direct');
+        return { result: control.result, degraded: false };
+      }
+      if (control.kind === 'question') {
+        await this.persistQuestion(runId, control.question, control.options);
         return undefined;
       }
+      return this.persistAndExecutePlan(runId, prompt, control.plan, signal);
+    }
+    const tasks = await this.loadPlanTasks(runId, run.revisionId);
+    await this.enterRunning(runId, 'planned');
+    return this.executePlannedWork(runId, prompt, tasks, signal);
+  }
 
+  private async runMainControl(
+    runId: string,
+    prompt: string,
+    history: readonly RuntimeMessage[],
+    signal?: AbortSignal,
+  ): Promise<ControlDecision> {
+    const availableCapabilities = this.options.runtimeToolFactory
+      ? await this.options.runtimeToolFactory.listCapabilities(runId)
+      : [];
+    let submittedPlan: SubmittedPlan | undefined;
+    let requestedQuestion: { readonly question: string; readonly options: readonly string[] } | undefined;
+    const tools: RuntimeTool[] = [
+      {
+        name: 'plan_submit',
+        label: 'Submit execution plan',
+        description: 'Submit a concrete task DAG only when the request needs specialist work or tools.',
+        parameters: Type.Object(
+          {
+            goal: Type.String({ minLength: 1, maxLength: 4_000 }),
+            tasks: Type.Array(taskSchema, { minItems: 1, maxItems: 12 }),
+          },
+          { additionalProperties: false },
+        ),
+        constrainedSampling: { type: 'json_schema', strict: 'require' },
+        executionMode: 'sequential',
+        terminateOnSuccess: true,
+        execute: (arguments_) => {
+          submittedPlan = validatePlan(arguments_, availableCapabilities, this.createId);
+          return Promise.resolve({ accepted: true, taskCount: submittedPlan.tasks.length });
+        },
+      },
+      {
+        name: 'user_request_input',
+        label: 'Request user input',
+        description: 'Pause only when required business information is missing.',
+        parameters: Type.Object(
+          {
+            question: Type.String({ minLength: 1, maxLength: 2_000 }),
+            options: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+              minItems: 2,
+              maxItems: 4,
+            }),
+          },
+          { additionalProperties: false },
+        ),
+        constrainedSampling: { type: 'json_schema', strict: 'require' },
+        executionMode: 'sequential',
+        terminateOnSuccess: true,
+        execute: (arguments_) => {
+          requestedQuestion = {
+            question: String(arguments_.question),
+            options: arguments_.options as readonly string[],
+          };
+          return Promise.resolve({ accepted: true });
+        },
+      },
+    ];
+    const result = await this.executeWithTranscript(
+      runId,
+      undefined,
+      'main',
+      1,
+      'main',
+      mainPlanningPrompt(availableCapabilities),
+      history,
+      prompt,
+      tools,
+      signal,
+    );
+    if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
+    if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
+    if (result.status === 'completed' && findAssistant(result)) return { kind: 'direct', result };
+    return {
+      kind: 'direct',
+      result: protocolFailure(result.messages, 'Main Agent returned no valid control decision'),
+    };
+  }
+
+  private async persistAndExecutePlan(
+    runId: string,
+    prompt: string,
+    plan: SubmittedPlan,
+    signal?: AbortSignal,
+  ): Promise<PlannedExecutionOutcome> {
+    const planId = this.createId();
+    const revisionId = this.createId();
+    const events = await this.options.database.transaction(async (transaction) => {
       await transaction.insert(executionPlans).values({ id: planId, runId });
       await transaction.insert(planRevisions).values({
         id: revisionId,
         planId,
         revisionNumber: 1,
-        reason: 'initial_plan',
-        summary: summarizePlan(tasks),
+        reason: 'main_agent',
+        summary: plan.goal,
       });
       await transaction
         .update(agentRuns)
         .set({
+          mode: 'planned',
           activePlanRevisionId: revisionId,
           updatedAt: this.now(),
           version: sql`${agentRuns.version} + 1`,
         })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'planning')));
-      await this.persistRevisionTasks(transaction, runId, revisionId, tasks, prompt);
+      await this.persistRevisionTasks(transaction, runId, revisionId, plan.tasks, prompt);
       await appendCheckpoint(transaction, {
         id: this.createId(),
         runId,
         reason: 'plan_revised',
         state: { planId, revisionId, revisionNumber: 1 },
       });
-
-      const planning = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'run.planning',
-        payload: {},
-      });
-      const planCreated = await appendRunEvent(transaction, {
+      const planned = await appendRunEvent(transaction, {
         id: this.createId(),
         runId,
         eventType: 'plan.revised',
@@ -141,7 +337,8 @@ export class PlannedRunExecutor {
           planId,
           revisionId,
           revisionNumber: 1,
-          tasks: tasks.map(publicTask),
+          summary: plan.goal,
+          tasks: plan.tasks.map(publicTask),
         },
       });
       await transaction
@@ -154,195 +351,20 @@ export class PlannedRunExecutor {
         eventType: 'run.started',
         payload: { mode: 'planned', revisionId },
       });
-      return [planning, planCreated, started].map(toDurableEvent);
+      return [planned, started].map(toDurableEvent);
     });
-    if (!planningEvents) {
-      return undefined;
-    }
-    await this.publishAll(planningEvents);
-
-    return this.executePlannedWork(runId, planId, revisionId, 1, tasks, prompt, signal);
-  }
-
-  public async recover(
-    runId: string,
-    prompt: string,
-    signal?: AbortSignal,
-  ): Promise<PlannedExecutionOutcome | undefined> {
-    const tasks = buildPlan(prompt, this.createId);
-    const revisionId = this.createId();
-    const recovered = await this.options.database.transaction(async (transaction) => {
-      const rows = await transaction
-        .select({
-          planId: executionPlans.id,
-          previousRevisionId: agentRuns.activePlanRevisionId,
-        })
-        .from(agentRuns)
-        .innerJoin(executionPlans, eq(executionPlans.runId, agentRuns.id))
-        .where(
-          and(
-            eq(agentRuns.id, runId),
-            eq(agentRuns.mode, 'planned'),
-            eq(agentRuns.status, 'recovering'),
-          ),
-        )
-        .limit(1);
-      const existing = rows[0];
-      if (!existing?.previousRevisionId) {
-        return undefined;
-      }
-      const numbers = await transaction
-        .select({ revisionNumber: max(planRevisions.revisionNumber) })
-        .from(planRevisions)
-        .where(eq(planRevisions.planId, existing.planId));
-      const revisionNumber = (numbers[0]?.revisionNumber ?? 0) + 1;
-      await transaction.insert(planRevisions).values({
-        id: revisionId,
-        planId: existing.planId,
-        previousRevisionId: existing.previousRevisionId,
-        revisionNumber,
-        reason: 'worker_recovery',
-        summary: summarizePlan(tasks),
-      });
-      await this.persistRevisionTasks(transaction, runId, revisionId, tasks, prompt);
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'plan_revised',
-        state: { planId: existing.planId, revisionId, revisionNumber, recovery: true },
-      });
-      await transaction
-        .update(agentRuns)
-        .set({
-          activePlanRevisionId: revisionId,
-          status: 'running',
-          updatedAt: this.now(),
-          version: sql`${agentRuns.version} + 1`,
-        })
-        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'recovering')));
-      const revised = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'plan.revised',
-        payload: {
-          planId: existing.planId,
-          revisionId,
-          previousRevisionId: existing.previousRevisionId,
-          revisionNumber,
-          reason: 'worker_recovery',
-          tasks: tasks.map(publicTask),
-        },
-      });
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'run.recovered',
-        payload: { mode: 'planned', revisionId },
-      });
-      return {
-        planId: existing.planId,
-        revisionNumber,
-        events: [revised, event].map(toDurableEvent),
-      };
-    });
-    if (!recovered) {
-      return undefined;
-    }
-    await this.publishAll(recovered.events);
-    return this.executePlannedWork(
-      runId,
-      recovered.planId,
-      revisionId,
-      recovered.revisionNumber,
-      tasks,
-      prompt,
-      signal,
-    );
+    await this.publishAll(events);
+    return this.executePlannedWork(runId, prompt, plan.tasks, signal);
   }
 
   private async executePlannedWork(
     runId: string,
-    planId: string,
-    revisionId: string,
-    initialRevisionNumber: number,
-    tasks: readonly PlannedTaskSpec[],
     prompt: string,
+    tasks: readonly PlannedTaskSpec[],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome> {
-    let activeRevisionId = revisionId;
-    let activePrompt = prompt;
-    let revisionNumber = initialRevisionNumber;
-    let settled = [...(await this.executeDag(runId, revisionId, tasks, prompt, signal))];
-    let steering = await this.consumeSteering(runId);
-    while (steering && revisionNumber < 4 && !signal?.aborted) {
-      const currentSteering = steering;
-      revisionNumber += 1;
-      activePrompt = `${activePrompt}\n\nSteering instruction:\n${currentSteering.content}`;
-      const nextRevisionId = this.createId();
-      const revisedTasks = buildPlan(activePrompt, this.createId);
-      const revisionEvents = await this.options.database.transaction(async (transaction) => {
-        await transaction.insert(planRevisions).values({
-          id: nextRevisionId,
-          planId,
-          previousRevisionId: activeRevisionId,
-          revisionNumber,
-          reason: 'steering',
-          summary: summarizePlan(revisedTasks),
-        });
-        await this.persistRevisionTasks(
-          transaction,
-          runId,
-          nextRevisionId,
-          revisedTasks,
-          activePrompt,
-        );
-        await appendCheckpoint(transaction, {
-          id: this.createId(),
-          runId,
-          reason: 'plan_revised',
-          state: { planId, revisionId: nextRevisionId, revisionNumber },
-        });
-        await transaction
-          .update(agentRuns)
-          .set({
-            activePlanRevisionId: nextRevisionId,
-            updatedAt: this.now(),
-            version: sql`${agentRuns.version} + 1`,
-          })
-          .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
-        await transaction
-          .update(runDirectives)
-          .set({ status: 'applied', appliedAt: this.now() })
-          .where(inArray(runDirectives.id, currentSteering.ids));
-        const applied = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'steering.applied',
-          payload: { directiveIds: currentSteering.ids, revisionNumber },
-        });
-        const revised = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'plan.revised',
-          payload: {
-            planId,
-            revisionId: nextRevisionId,
-            previousRevisionId: activeRevisionId,
-            revisionNumber,
-            tasks: revisedTasks.map(publicTask),
-          },
-        });
-        return [applied, revised].map(toDurableEvent);
-      });
-      await this.publishAll(revisionEvents);
-      settled = [
-        ...settled,
-        ...(await this.executeDag(runId, nextRevisionId, revisedTasks, activePrompt, signal)),
-      ];
-      activeRevisionId = nextRevisionId;
-      steering = await this.consumeSteering(runId);
-    }
-    if (signal?.aborted || settled.some((task) => task.status === 'cancelled')) {
+    const settled = await this.executeDag(runId, tasks, prompt, signal);
+    if (signal?.aborted || settled.some(({ status }) => status === 'cancelled')) {
       return { degraded: false, result: { status: 'cancelled', messages: [] } };
     }
     const requiredFailure = settled.find(
@@ -351,89 +373,376 @@ export class PlannedRunExecutor {
     if (requiredFailure) {
       return {
         degraded: false,
-        result: {
-          status: 'failed',
-          messages: [],
-          error: {
-            code: 'runtime_error',
-            message: `Required ${requiredFailure.owner} task failed: ${requiredFailure.failure ?? 'dependency failed'}`,
-            retryable: false,
-          },
-        },
+        result: protocolFailure([], `Required ${requiredFailure.owner} task failed: ${requiredFailure.failure ?? 'unknown failure'}`),
       };
     }
-
-    const synthesis = await this.synthesize(runId, activePrompt, settled, signal);
-    if (synthesis.status !== 'completed') {
-      return { result: synthesis, degraded: false };
-    }
-    let assistant = findAssistant(synthesis);
-    if (!assistant) {
-      return {
-        degraded: false,
-        result: {
-          status: 'failed',
-          messages: [],
-          error: {
-            code: 'runtime_error',
-            message: 'Main Agent synthesis returned no stable assistant message',
-            retryable: true,
-          },
-        },
-      };
-    }
-    let reviewUsage: RuntimeUsage[] = [];
-    let reviewAccepted = true;
-    if (this.options.reviewGate?.enabled) {
-      const review = await runReviewGate(
-        assistant.content,
-        async (draft, round) => {
-          const editor = await this.reviewDraft(
-            runId,
-            'editor',
-            activePrompt,
-            draft,
-            round,
-            signal,
-          );
-          const factChecker = await this.reviewDraft(
-            runId,
-            'fact_checker',
-            activePrompt,
-            editor.value,
-            round,
-            signal,
-          );
-          reviewUsage = [...reviewUsage, ...editor.usage, ...factChecker.usage];
-          return {
-            accepted: editor.accepted && factChecker.accepted,
-            revision: factChecker.value,
-          };
-        },
-        this.options.reviewGate.maxRounds ?? 2,
-      );
-      reviewAccepted = review.accepted;
-      assistant = { ...assistant, content: review.value };
-      const event = await this.options.database.transaction((transaction) =>
-        appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'review.completed',
-          payload: { rounds: review.rounds, accepted: review.accepted },
-        }),
-      );
-      await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
-    }
-    const aggregateUsage = sumUsage([
-      ...settled.flatMap((task) => (task.usage ? [task.usage] : [])),
-      assistant.usage,
-      ...reviewUsage,
-    ]);
-    const finalAssistant: RuntimeAssistantMessage = { ...assistant, usage: aggregateUsage };
+    const completion = await this.runCompletionMain(runId, prompt, settled, signal);
     return {
-      degraded: settled.some((task) => task.status !== 'succeeded') || !reviewAccepted,
-      result: { status: 'completed', messages: [finalAssistant] },
+      result: completion,
+      degraded: settled.some(({ status }) => status !== 'succeeded'),
     };
+  }
+
+  private async runCompletionMain(
+    runId: string,
+    prompt: string,
+    settled: readonly SettledTask[],
+    signal?: AbortSignal,
+  ): Promise<RuntimeResult> {
+    let finalText: string | undefined;
+    const runComplete: RuntimeTool = {
+      name: 'run_complete',
+      label: 'Complete run',
+      description: 'Complete the run using only persisted task results.',
+      parameters: Type.Object(
+        {
+          answer: Type.String({ minLength: 1, maxLength: 100_000 }),
+          artifactIds: Type.Array(Type.String({ format: 'uuid' }), { maxItems: 100 }),
+          evidenceIds: Type.Array(Type.String({ format: 'uuid' }), { maxItems: 200 }),
+        },
+        { additionalProperties: false },
+      ),
+      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      executionMode: 'sequential',
+      terminateOnSuccess: true,
+      execute: async (arguments_) => {
+        await this.assertRunReferences(
+          runId,
+          arguments_.artifactIds as readonly string[],
+          arguments_.evidenceIds as readonly string[],
+        );
+        finalText = String(arguments_.answer);
+        return { accepted: true };
+      },
+    };
+    const envelope = JSON.stringify(
+      settled.map(({ id, owner, status, summary, warnings, failure, artifacts: produced }) => ({
+        taskId: id,
+        owner,
+        status,
+        summary,
+        warnings,
+        failure,
+        artifacts: produced.map(({ type, title, summary: artifactSummary }) => ({
+          type,
+          title,
+          summary: artifactSummary,
+        })),
+      })),
+    );
+    let result = await this.executeWithTranscript(
+      runId,
+      undefined,
+      'main',
+      2,
+      'synthesis',
+      mainCompletionPrompt(),
+      [],
+      `Root request:\n${prompt}\n\nValidated Task Result Envelopes:\n${envelope}`,
+      [runComplete],
+      signal,
+    );
+    for (let repair = 1; !finalText && result.status === 'completed' && repair <= 2; repair += 1) {
+      result = await this.executeWithTranscript(
+        runId,
+        undefined,
+        'main',
+        2 + repair,
+        'synthesis',
+        mainCompletionPrompt(),
+        [],
+        'Protocol repair: call run_complete exactly once. Do not return a normal text response.',
+        [runComplete],
+        signal,
+      );
+    }
+    if (!finalText) return protocolFailure(result.messages, 'Main Agent did not call run_complete');
+    const assistant = findAssistant(result);
+    return {
+      status: 'completed',
+      messages: [
+        {
+          role: 'assistant',
+          content: finalText,
+          provider: assistant?.provider ?? 'volcengine-ark',
+          model: assistant?.model ?? 'main',
+          stopReason: 'stop',
+          usage: assistant?.usage ?? emptyUsage,
+          timestamp: this.now().getTime(),
+        },
+      ],
+    };
+  }
+
+  private async executeDag(
+    runId: string,
+    tasks: readonly PlannedTaskSpec[],
+    rootPrompt: string,
+    signal?: AbortSignal,
+  ): Promise<readonly SettledTask[]> {
+    const settled = new Map<string, SettledTask>();
+    const pending = new Map(tasks.map((task) => [task.id, task]));
+    while (pending.size > 0) {
+      if (signal?.aborted) {
+        for (const task of pending.values()) {
+          settled.set(task.id, { ...task, status: 'cancelled', artifacts: [], warnings: [], failure: 'run_cancelled' });
+        }
+        break;
+      }
+      for (const task of [...pending.values()]) {
+        if (
+          task.dependencyIds.some((id) => {
+            const dependency = settled.get(id);
+            return dependency && dependency.status !== 'succeeded';
+          })
+        ) {
+          pending.delete(task.id);
+          settled.set(task.id, { ...task, status: 'skipped', artifacts: [], warnings: [], failure: 'dependency_failed' });
+          await this.updateTaskStatus(runId, task, 'skipped', 'dependency_failed');
+        }
+      }
+      const ready = [...pending.values()]
+        .filter((task) => task.dependencyIds.every((id) => settled.get(id)?.status === 'succeeded'))
+        .slice(0, 3);
+      if (ready.length === 0) {
+        if (pending.size === 0) break;
+        throw new Error(`Planned Run ${runId} scheduler made no progress`);
+      }
+      const wave = await Promise.all(
+        ready.map((task) => this.executeTask(runId, task, rootPrompt, settled, signal)),
+      );
+      for (const task of wave) {
+        pending.delete(task.id);
+        settled.set(task.id, task);
+      }
+    }
+    return tasks.map(
+      (task) =>
+        settled.get(task.id) ?? {
+          ...task,
+          status: 'skipped',
+          artifacts: [],
+          warnings: [],
+          failure: 'not_scheduled',
+        },
+    );
+  }
+
+  private async executeTask(
+    runId: string,
+    task: PlannedTaskSpec,
+    rootPrompt: string,
+    settled: ReadonlyMap<string, SettledTask>,
+    signal?: AbortSignal,
+  ): Promise<SettledTask> {
+    await this.updateTaskStatus(runId, task, 'running');
+    let completion:
+      | {
+          readonly status: 'succeeded' | 'failed';
+          readonly summary: string;
+          readonly artifacts: readonly StructuredArtifact[];
+          readonly warnings: readonly string[];
+          readonly failure?: string;
+        }
+      | undefined;
+    const taskComplete: RuntimeTool = {
+      name: 'task_complete',
+      label: 'Complete specialist task',
+      description: 'Submit the validated specialist result. This is the only valid completion path.',
+      parameters: taskCompleteSchema,
+      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      executionMode: 'sequential',
+      terminateOnSuccess: true,
+      execute: (arguments_) => {
+        completion = arguments_ as typeof completion & {};
+        return Promise.resolve({ accepted: true });
+      },
+    };
+    const domainTools = this.options.runtimeToolFactory
+      ? await this.options.runtimeToolFactory.createForRun(runId, task.capabilities, task.id)
+      : [];
+    const upstream = task.dependencyIds.flatMap((id) => {
+      const dependency = settled.get(id);
+      return dependency ? [{ taskId: id, status: dependency.status, summary: dependency.summary }] : [];
+    });
+    let result = await this.executeWithTranscript(
+      runId,
+      task.id,
+      'specialist',
+      1,
+      task.owner,
+      specialistPrompt(task.owner),
+      [],
+      JSON.stringify({ rootRequest: rootPrompt, task, upstream }),
+      [...domainTools, taskComplete],
+      signal,
+    );
+    for (let repair = 1; !completion && result.status === 'completed' && repair <= 2; repair += 1) {
+      result = await this.executeWithTranscript(
+        runId,
+        task.id,
+        'specialist',
+        repair + 1,
+        task.owner,
+        specialistPrompt(task.owner),
+        [],
+        'Protocol repair: call task_complete exactly once with a schema-valid result.',
+        [...domainTools, taskComplete],
+        signal,
+      );
+    }
+    const assistant = findAssistant(result);
+    if (!completion) {
+      const failed: SettledTask = {
+        ...task,
+        status: result.status === 'cancelled' ? 'cancelled' : 'failed',
+        artifacts: [],
+        warnings: [],
+        failure: result.status === 'failed' ? result.error.message : 'protocol_error',
+        ...(assistant ? { usage: assistant.usage } : {}),
+      };
+      await this.persistTaskResult(runId, failed);
+      return failed;
+    }
+    const taskResult: SettledTask = {
+      ...task,
+      status: completion.status,
+      summary: completion.summary,
+      artifacts: completion.artifacts,
+      warnings: completion.warnings,
+      ...(completion.failure ? { failure: completion.failure } : {}),
+      ...(assistant ? { usage: assistant.usage } : {}),
+    };
+    await this.persistTaskResult(runId, taskResult);
+    return taskResult;
+  }
+
+  private async executeWithTranscript(
+    runId: string,
+    taskId: string | undefined,
+    kind: 'main' | 'specialist',
+    attempt: number,
+    modelPurpose: string,
+    systemPrompt: string,
+    history: readonly RuntimeMessage[],
+    prompt: string,
+    tools: readonly RuntimeTool[],
+    signal?: AbortSignal,
+  ): Promise<RuntimeResult> {
+    const sessionId = this.createId();
+    await this.options.database.insert(agentSessions).values({
+      id: sessionId,
+      runId,
+      ...(taskId ? { taskId } : {}),
+      kind,
+      attempt,
+      logicalKey: taskId ? `${runId}:task:${taskId}:${attempt}` : `${runId}:main:${attempt}`,
+      model: modelPurpose,
+    });
+    let sequence = 1;
+    const record = async (role: string, messageType: string, content: Readonly<Record<string, unknown>>, providerToolCallId?: string) => {
+      await this.options.database.insert(agentTranscriptEntries).values({
+        id: this.createId(),
+        sessionId,
+        sequence,
+        role,
+        messageType,
+        content,
+        ...(providerToolCallId ? { providerToolCallId } : {}),
+      });
+      sequence += 1;
+    };
+    await record('system', 'system_prompt', { content: systemPrompt });
+    await record('user', 'prompt', { content: prompt });
+    const runtime = this.options.runtimeFactory.create(modelPurpose);
+    let result: RuntimeResult;
+    try {
+      result = await runtime.execute(
+        { runId: sessionId, systemPrompt, history, prompt, tools },
+        async (event) => {
+          if (event.type === 'message.completed') {
+            await record(event.message.role, 'message', { message: event.message });
+          } else if (event.type === 'tool.started') {
+            await record('assistant', 'tool_call', { name: event.toolName, arguments: event.arguments }, event.toolCallId);
+          } else if (event.type === 'tool.completed') {
+            await record('tool', 'tool_result', { result: event.result }, event.result.toolCallId);
+          }
+          await this.publishRuntimeEvent(runId, event);
+        },
+        signal,
+      );
+    } catch (error) {
+      result = protocolFailure([], error instanceof Error ? error.message : 'Unknown Pi runtime error');
+    }
+    await this.options.database
+      .update(agentSessions)
+      .set({
+        status: result.status === 'completed' ? 'completed' : 'failed',
+        nextSequence: sequence,
+        updatedAt: this.now(),
+      })
+      .where(eq(agentSessions.id, sessionId));
+    return result;
+  }
+
+  private async claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
+    const persisted = await this.options.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .update(agentRuns)
+        .set({ status: 'planning', updatedAt: this.now(), version: sql`${agentRuns.version} + 1` })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, from)))
+        .returning({ id: agentRuns.id });
+      if (rows.length === 0) return undefined;
+      return appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'run.planning',
+        payload: { recovered: from === 'recovering' },
+      });
+    });
+    if (!persisted) return false;
+    await this.options.publisher.publish({ durable: true, event: toDurableEvent(persisted) });
+    return true;
+  }
+
+  private async enterRunning(runId: string, mode: 'direct' | 'planned'): Promise<void> {
+    const event = await this.options.database.transaction(async (transaction) => {
+      await transaction
+        .update(agentRuns)
+        .set({ status: 'running', updatedAt: this.now(), version: sql`${agentRuns.version} + 1` })
+        .where(and(eq(agentRuns.id, runId), inArray(agentRuns.status, ['planning', 'recovering'])));
+      return appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'run.started',
+        payload: { mode },
+      });
+    });
+    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+  }
+
+  private async persistQuestion(runId: string, question: string, options: readonly string[]): Promise<void> {
+    const event = await this.options.database.transaction(async (transaction) => {
+      const questionId = this.createId();
+      await transaction.insert(runQuestions).values({ id: questionId, runId, prompt: question, options });
+      await transaction
+        .update(agentRuns)
+        .set({ status: 'waiting_for_user', updatedAt: this.now(), version: sql`${agentRuns.version} + 1` })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'planning')));
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId,
+        reason: 'waiting_for_user',
+        state: { questionId },
+      });
+      return appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'user.input_requested',
+        payload: { questionId, question, options },
+      });
+    });
+    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
   }
 
   private async persistRevisionTasks(
@@ -452,390 +761,206 @@ export class PlannedRunExecutor {
         criticality: task.criticality,
         owner: task.owner,
         acceptanceCriteria: task.acceptanceCriteria,
-        outputSchema: { type: 'object', required: ['summary'] },
-        toolPolicy: { allow: capabilitiesFor(task.owner) },
-        budget: { maxTurns: 20, maxOutputTokens: 4096 },
+        outputSchema: taskCompleteSchema,
+        toolPolicy: { capabilities: task.capabilities },
+        budget: { maxAttempts: 3, protocolRepairTurns: 2 },
         status: 'pending' as const,
-        maxAttempts: task.criticality === 'required' ? 3 : 1,
+        maxAttempts: 3,
       })),
+    );
+    await transaction.insert(planRevisionTasks).values(
+      tasks.map((task, position) => ({ planRevisionId: revisionId, taskId: task.id, position })),
     );
     const dependencies = tasks.flatMap((task) =>
       task.dependencyIds.map((dependencyTaskId) => ({ taskId: task.id, dependencyTaskId })),
     );
-    if (dependencies.length > 0) {
-      await transaction.insert(agentTaskDependencies).values(dependencies);
-    }
+    if (dependencies.length > 0) await transaction.insert(agentTaskDependencies).values(dependencies);
     for (const task of tasks) {
-      const context = buildContextPack(runId, revisionId, task, prompt);
+      const content = JSON.stringify({ rootRequest: prompt, task });
+      const contentHash = createHash('sha256').update(content).digest('hex');
       await transaction.insert(taskBriefs).values({
         id: this.createId(),
         taskId: task.id,
         objective: task.objective,
-        constraints: ['Return a concise result, not hidden reasoning', 'Do not perform writes'],
-        expectedOutput: { type: 'summary' },
-        contentHash: context.contentHash,
+        constraints: ['Use only the immutable Context Pack', 'Return no hidden chain of thought'],
+        expectedOutput: taskCompleteSchema,
+        contentHash,
       });
       await transaction.insert(contextPacks).values({
         id: this.createId(),
         taskId: task.id,
-        manifest: context.manifest,
-        contentHash: context.contentHash,
-        tokenCount: estimateTokens(context.prompt),
+        manifest: { runId, revisionId, taskId: task.id, capabilities: task.capabilities },
+        content,
+        format: 'json',
+        schemaVersion: 1,
+        contentHash,
+        tokenCount: Math.ceil(content.length / 3),
       });
     }
   }
 
-  private async consumeSteering(
-    runId: string,
-  ): Promise<{ readonly ids: readonly string[]; readonly content: string } | undefined> {
-    const directives = await this.options.database
-      .select({ id: runDirectives.id, content: runDirectives.content })
-      .from(runDirectives)
-      .where(
-        and(
-          eq(runDirectives.runId, runId),
-          eq(runDirectives.kind, 'steering'),
-          eq(runDirectives.status, 'pending'),
-        ),
-      )
-      .orderBy(runDirectives.sequence);
-    return directives.length > 0
-      ? {
-          ids: directives.map(({ id }) => id),
-          content: directives.map(({ content }) => content).join('\n'),
-        }
-      : undefined;
+  private async loadPlanTasks(runId: string, revisionId: string): Promise<readonly PlannedTaskSpec[]> {
+    const rows = await this.options.database
+      .select({
+        id: agentTasks.id,
+        owner: agentTasks.owner,
+        objective: agentTasks.objective,
+        criticality: agentTasks.criticality,
+        acceptanceCriteria: agentTasks.acceptanceCriteria,
+        toolPolicy: agentTasks.toolPolicy,
+      })
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, runId), eq(agentTasks.planRevisionId, revisionId)));
+    const dependencies = await this.options.database
+      .select()
+      .from(agentTaskDependencies)
+      .innerJoin(agentTasks, eq(agentTasks.id, agentTaskDependencies.taskId))
+      .where(eq(agentTasks.planRevisionId, revisionId));
+    return rows.map((row) => ({
+      id: row.id,
+      clientKey: row.id,
+      owner: row.owner as SpecialistRole,
+      objective: row.objective,
+      criticality: row.criticality,
+      acceptanceCriteria: row.acceptanceCriteria,
+      dependencyIds: dependencies
+        .filter(({ agent_task_dependencies: dependency }) => dependency.taskId === row.id)
+        .map(({ agent_task_dependencies: dependency }) => dependency.dependencyTaskId),
+      capabilities: Array.isArray(row.toolPolicy.capabilities)
+        ? row.toolPolicy.capabilities.filter((value): value is string => typeof value === 'string')
+        : [],
+    }));
   }
 
-  private async executeDag(
-    runId: string,
-    revisionId: string,
-    tasks: readonly PlannedTaskSpec[],
-    rootPrompt: string,
-    signal?: AbortSignal,
-  ): Promise<readonly SettledTask[]> {
-    const settled = new Map<string, SettledTask>();
-    const pending = new Map(tasks.map((task) => [task.id, task]));
-
-    while (pending.size > 0) {
-      if (signal?.aborted) {
-        for (const task of pending.values()) {
-          const cancelled = { ...task, status: 'cancelled' as const, failure: 'run_cancelled' };
-          settled.set(task.id, cancelled);
-          await this.persistCancelledTask(runId, cancelled);
-        }
-        break;
-      }
-      const blocked = [...pending.values()].filter((task) =>
-        task.dependencyIds.some((id) => {
-          const dependency = settled.get(id);
-          return dependency && dependency.status !== 'succeeded';
-        }),
-      );
-      for (const task of blocked) {
-        pending.delete(task.id);
-        const skipped = { ...task, status: 'skipped' as const, failure: 'dependency_failed' };
-        settled.set(task.id, skipped);
-        await this.persistSkippedTask(runId, skipped);
-      }
-
-      const ready = [...pending.values()]
-        .filter((task) => task.dependencyIds.every((id) => settled.get(id)?.status === 'succeeded'))
-        .slice(0, 4);
-      if (ready.length === 0) {
-        if (pending.size === 0) {
-          break;
-        }
-        if (blocked.length > 0) {
-          continue;
-        }
-        throw new Error(`Planned Run ${runId} scheduler made no progress`);
-      }
-      const wave = await Promise.all(
-        ready.map((task) => this.executeTask(runId, revisionId, task, rootPrompt, settled, signal)),
-      );
-      for (const task of wave) {
-        pending.delete(task.id);
-        settled.set(task.id, task);
-      }
-    }
-
-    return tasks.map((task) => settled.get(task.id) ?? { ...task, status: 'skipped' });
-  }
-
-  private async executeTask(
-    runId: string,
-    revisionId: string,
-    task: PlannedTaskSpec,
-    rootPrompt: string,
-    settled: ReadonlyMap<string, SettledTask>,
-    signal?: AbortSignal,
-  ): Promise<SettledTask> {
-    const started = await this.options.database.transaction(async (transaction) => {
-      await transaction
-        .update(agentTasks)
-        .set({
-          status: 'running',
-          attempt: sql`${agentTasks.attempt} + 1`,
-          updatedAt: this.now(),
-          version: sql`${agentTasks.version} + 1`,
-        })
-        .where(and(eq(agentTasks.id, task.id), eq(agentTasks.status, 'pending')));
-      return appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'task.started',
-        payload: { taskId: task.id, owner: task.owner, revisionId },
-      });
-    });
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(started) });
-
-    const upstream = task.dependencyIds.flatMap((id) => {
-      const dependency = settled.get(id);
-      return dependency?.output ? [`${dependency.owner}: ${dependency.output}`] : [];
-    });
-    let result: RuntimeResult;
-    try {
-      const runtime = this.options.runtimeFactory.create(task.owner);
-      result = await runtime.execute(
-        {
-          runId: `${runId}:${task.id}`,
-          systemPrompt: specialistSystemPrompt(task.owner),
-          history: [],
-          prompt: [
-            `Task: ${task.objective}`,
-            `Root request: ${rootPrompt}`,
-            `Acceptance criteria: ${task.acceptanceCriteria.join('; ')}`,
-            ...(upstream.length > 0
-              ? [`Upstream accepted artifacts:\n${upstream.join('\n')}`]
-              : []),
-          ].join('\n\n'),
-          ...(this.options.runtimeToolFactory
-            ? { tools: await this.options.runtimeToolFactory.createForRun(runId, task.objective) }
-            : {}),
-        },
-        () => undefined,
-        signal,
-      );
-    } catch (error) {
-      result = {
-        status: 'failed',
-        messages: [],
-        error: {
-          code: 'runtime_error',
-          message: error instanceof Error ? error.message : 'Unknown Specialist runtime error',
-          retryable: true,
-        },
-      };
-    }
-    const assistant = result.status === 'completed' ? findAssistant(result) : undefined;
-    const status = assistant
-      ? ('succeeded' as const)
-      : result.status === 'cancelled'
-        ? ('cancelled' as const)
-        : ('failed' as const);
-    const failure =
-      result.status === 'failed'
-        ? result.error.message
-        : result.status === 'cancelled'
-          ? 'run_cancelled'
-          : assistant
-            ? undefined
-            : 'missing_stable_output';
-    const taskResult: SettledTask = {
-      ...task,
-      status,
-      ...(assistant ? { output: assistant.content, usage: assistant.usage } : {}),
-      ...(failure ? { failure } : {}),
-    };
-    const completed = await this.options.database.transaction(async (transaction) => {
+  private async persistTaskResult(runId: string, result: SettledTask): Promise<void> {
+    const event = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
       await transaction
         .update(agentTasks)
         .set({
-          status,
+          status: result.status,
           updatedAt: now,
           completedAt: now,
           version: sql`${agentTasks.version} + 1`,
         })
-        .where(eq(agentTasks.id, task.id));
-      if (status !== 'cancelled') {
+        .where(eq(agentTasks.id, result.id));
+      const persistedArtifacts = [];
+      for (const artifact of result.artifacts) {
+        const artifactId = this.createId();
+        const versionId = this.createId();
+        const contentHash = createHash('sha256').update(JSON.stringify(artifact.content)).digest('hex');
+        await transaction.insert(artifacts).values({
+          id: artifactId,
+          runId,
+          taskId: result.id,
+          type: artifact.type,
+          title: artifact.title,
+        });
+        await transaction.insert(artifactVersions).values({
+          id: versionId,
+          artifactId,
+          version: 1,
+          summary: artifact.summary,
+          content: artifact.content,
+          contentHash,
+        });
+        persistedArtifacts.push({ artifactId, versionId, ...artifact });
+      }
+      if (result.status !== 'cancelled' && result.status !== 'skipped') {
         await transaction.insert(taskResults).values({
           id: this.createId(),
-          taskId: task.id,
+          taskId: result.id,
           attempt: 1,
-          status,
-          artifacts: assistant ? [{ type: 'text', content: assistant.content }] : [],
+          status: result.status,
+          artifacts: persistedArtifacts,
           evidence: [],
-          usage: assistant ? assistant.usage : {},
-          warnings: task.criticality === 'optional' && failure ? [failure] : [],
-          ...(failure ? { failure: { message: failure } } : {}),
+          usage: result.usage ?? {},
+          warnings: result.warnings,
+          ...(result.failure ? { failure: { code: result.failure, message: result.failure } } : {}),
         });
       }
       await appendCheckpoint(transaction, {
         id: this.createId(),
         runId,
         reason: 'task_settled',
-        state: { taskId: task.id, status, attempt: 1 },
+        state: { taskId: result.id, status: result.status, attempt: 1 },
       });
       return appendRunEvent(transaction, {
         id: this.createId(),
         runId,
-        eventType:
-          status === 'succeeded'
-            ? 'task.succeeded'
-            : status === 'cancelled'
-              ? 'task.cancelled'
-              : 'task.failed',
+        eventType: `task.${result.status}`,
         payload: {
-          taskId: task.id,
-          owner: task.owner,
-          criticality: task.criticality,
-          ...(failure ? { failure } : {}),
-        },
-      });
-    });
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(completed) });
-    return taskResult;
-  }
-
-  private async persistSkippedTask(runId: string, task: SettledTask): Promise<void> {
-    const event = await this.options.database.transaction(async (transaction) => {
-      const now = this.now();
-      await transaction
-        .update(agentTasks)
-        .set({
-          status: 'skipped',
-          updatedAt: now,
-          completedAt: now,
-          version: sql`${agentTasks.version} + 1`,
-        })
-        .where(and(eq(agentTasks.id, task.id), inArray(agentTasks.status, ['pending', 'ready'])));
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'task_settled',
-        state: { taskId: task.id, status: 'skipped', reason: task.failure ?? 'dependency_failed' },
-      });
-      return appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'task.skipped',
-        payload: {
-          taskId: task.id,
-          owner: task.owner,
-          reason: task.failure ?? 'dependency_failed',
+          taskId: result.id,
+          owner: result.owner,
+          criticality: result.criticality,
+          summary: result.summary,
+          artifacts: persistedArtifacts.map(({ artifactId, type, title, summary }) => ({
+            artifactId,
+            type,
+            title,
+            summary,
+          })),
+          ...(result.failure ? { failure: result.failure } : {}),
         },
       });
     });
     await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
   }
 
-  private async persistCancelledTask(runId: string, task: SettledTask): Promise<void> {
-    const event = await this.options.database.transaction(async (transaction) => {
-      const now = this.now();
-      await transaction
-        .update(agentTasks)
-        .set({
-          status: 'cancelled',
-          updatedAt: now,
-          completedAt: now,
-          version: sql`${agentTasks.version} + 1`,
-        })
-        .where(and(eq(agentTasks.id, task.id), inArray(agentTasks.status, ['pending', 'ready'])));
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'task_settled',
-        state: { taskId: task.id, status: 'cancelled', reason: 'run_cancelled' },
-      });
-      return appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'task.cancelled',
-        payload: { taskId: task.id, owner: task.owner, reason: 'run_cancelled' },
-      });
-    });
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
-  }
-
-  private async synthesize(
+  private async updateTaskStatus(
     runId: string,
-    prompt: string,
-    settled: readonly SettledTask[],
-    signal?: AbortSignal,
-  ): Promise<RuntimeResult> {
-    const artifacts = settled
-      .filter((task) => task.output)
-      .map((task) => `${task.owner}: ${task.output ?? ''}`)
-      .join('\n\n');
-    try {
-      return await this.options.runtimeFactory.create('synthesis').execute(
-        {
-          runId: `${runId}:synthesis`,
-          systemPrompt: this.options.systemPrompt,
-          history: [],
-          prompt: `Synthesize the final answer for this request:\n${prompt}\n\nAccepted specialist artifacts:\n${artifacts}`,
-          ...(this.options.runtimeToolFactory
-            ? { tools: await this.options.runtimeToolFactory.createForRun(runId, prompt) }
-            : {}),
-        },
-        async (event) => {
-          if (event.type === 'content.delta' || event.type === 'message.started') {
-            await this.options.publisher.publish({ durable: false, runId, event });
-          }
-        },
-        signal,
-      );
-    } catch (error) {
-      return {
-        status: 'failed',
-        messages: [],
-        error: {
-          code: 'runtime_error',
-          message: error instanceof Error ? error.message : 'Unknown synthesis runtime error',
-          retryable: true,
-        },
-      };
+    task: PlannedTaskSpec,
+    status: 'running' | 'skipped',
+    failure?: string,
+  ): Promise<void> {
+    const event = await this.options.database.transaction(async (transaction) => {
+      const now = this.now();
+      await transaction
+        .update(agentTasks)
+        .set({
+          status,
+          ...(status === 'running' ? { attempt: sql`${agentTasks.attempt} + 1` } : { completedAt: now }),
+          updatedAt: now,
+          version: sql`${agentTasks.version} + 1`,
+        })
+        .where(eq(agentTasks.id, task.id));
+      return appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: `task.${status === 'running' ? 'started' : 'skipped'}`,
+        payload: { taskId: task.id, owner: task.owner, ...(failure ? { failure } : {}) },
+      });
+    });
+    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+  }
+
+  private async assertRunReferences(
+    runId: string,
+    artifactIds: readonly string[],
+    evidenceIds: readonly string[],
+  ): Promise<void> {
+    if (evidenceIds.length > 0) {
+      throw new Error('Evidence references are unavailable until evidence is persisted by a tool');
+    }
+    if (artifactIds.length === 0) return;
+    const rows = await this.options.database
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(and(eq(artifacts.runId, runId), inArray(artifacts.id, artifactIds)));
+    if (new Set(rows.map(({ id }) => id)).size !== new Set(artifactIds).size) {
+      throw new Error('run_complete references an artifact outside the current Run');
     }
   }
 
-  private async reviewDraft(
-    runId: string,
-    role: 'editor' | 'fact_checker',
-    rootPrompt: string,
-    draft: string,
-    round: number,
-    signal?: AbortSignal,
-  ): Promise<{
-    readonly accepted: boolean;
-    readonly value: string;
-    readonly usage: RuntimeUsage[];
-  }> {
-    const result = await this.options.runtimeFactory.create(role).execute(
-      {
-        runId: `${runId}:review:${role}:${String(round)}`,
-        systemPrompt: specialistSystemPrompt(role),
-        history: [],
-        prompt: [
-          'Review the draft against the request and acceptance criteria.',
-          'Return strict JSON only: {"accepted":boolean,"revision":string}.',
-          'When accepted, revision must equal the original draft.',
-          `Request: ${rootPrompt}`,
-          `Draft: ${draft}`,
-        ].join('\n\n'),
-      },
-      () => undefined,
-      signal,
-    );
-    const message = result.status === 'completed' ? findAssistant(result) : undefined;
-    if (!message) return { accepted: false, value: draft, usage: [] };
-    const parsed = parseReview(message.content);
-    return {
-      accepted: parsed?.accepted ?? false,
-      value: parsed?.revision ?? draft,
-      usage: [message.usage],
-    };
+  private async publishRuntimeEvent(runId: string, event: RuntimeEvent): Promise<void> {
+    if (
+      event.type === 'content.delta' ||
+      event.type === 'message.started' ||
+      event.type === 'turn.started' ||
+      event.type === 'tool.updated'
+    ) {
+      await this.options.publisher.publish({ durable: false, runId, event });
+    }
   }
 
   private async publishAll(events: readonly DurableRunEvent[]): Promise<void> {
@@ -845,109 +970,95 @@ export class PlannedRunExecutor {
   }
 }
 
-function parseReview(
-  value: string,
-): { readonly accepted: boolean; readonly revision: string } | undefined {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return typeof parsed === 'object' &&
-      parsed !== null &&
-      'accepted' in parsed &&
-      typeof parsed.accepted === 'boolean' &&
-      'revision' in parsed &&
-      typeof parsed.revision === 'string'
-      ? { accepted: parsed.accepted, revision: parsed.revision }
-      : undefined;
-  } catch {
-    return undefined;
+export function validateSubmittedPlan(
+  value: Readonly<Record<string, unknown>>,
+  availableCapabilities: readonly string[],
+  createId: () => string,
+): SubmittedPlan {
+  const rawTasks = value.tasks as readonly {
+    readonly clientKey: string;
+    readonly owner: SpecialistRole;
+    readonly objective: string;
+    readonly criticality: TaskCriticality;
+    readonly acceptanceCriteria: readonly string[];
+    readonly dependencyKeys: readonly string[];
+    readonly capabilities: readonly string[];
+  }[];
+  const keys = new Set(rawTasks.map(({ clientKey }) => clientKey));
+  if (keys.size !== rawTasks.length) throw new Error('Plan task clientKey values must be unique');
+  const available = new Set(availableCapabilities);
+  for (const task of rawTasks) {
+    if (task.dependencyKeys.some((key) => !keys.has(key) || key === task.clientKey)) {
+      throw new Error(`Task ${task.clientKey} has an invalid dependency`);
+    }
+    if (task.capabilities.some((capability) => !available.has(capability))) {
+      throw new Error(`Task ${task.clientKey} requested an unauthorized capability`);
+    }
   }
-}
-
-export function previewPlan(prompt: string): readonly {
-  readonly owner: SpecialistRole;
-  readonly criticality: TaskCriticality;
-  readonly dependencyCount: number;
-}[] {
-  return buildPlan(
-    prompt,
-    (() => {
-      let sequence = 0;
-      return () => `eval-task-${String(++sequence)}`;
-    })(),
-  ).map((task) => ({
+  const ids = new Map(rawTasks.map(({ clientKey }) => [clientKey, createId()]));
+  const tasks = rawTasks.map((task) => ({
+    id: ids.get(task.clientKey) ?? createId(),
+    clientKey: task.clientKey,
     owner: task.owner,
+    objective: task.objective,
     criticality: task.criticality,
-    dependencyCount: task.dependencyIds.length,
+    acceptanceCriteria: [...task.acceptanceCriteria],
+    dependencyIds: task.dependencyKeys.map((key) => ids.get(key) ?? ''),
+    capabilities: [...task.capabilities],
   }));
+  assertAcyclic(tasks);
+  return { goal: String(value.goal), tasks };
 }
 
-function buildPlan(prompt: string, createId: () => string): readonly PlannedTaskSpec[] {
-  const classification = classifyRun(prompt);
-  const wantsResearch =
-    classification.reasons.includes('retrieval') || /@researcher|@研究员/i.test(prompt);
-  const wantsMedia =
-    classification.reasons.includes('media') || /@illustrator|@插画师/i.test(prompt);
-  const wantsEditing =
-    classification.reasons.includes('article_change') || /@editor|@编辑/i.test(prompt);
-  const wantsFactCheck = wantsResearch || /@fact[_ -]?checker|@事实核查/i.test(prompt);
-  const tasks: PlannedTaskSpec[] = [];
-  const researchId = wantsResearch ? createId() : undefined;
-  if (researchId) {
-    tasks.push({
-      id: researchId,
-      owner: 'researcher',
-      objective: 'Collect relevant evidence and unresolved questions',
-      criticality: 'required',
-      acceptanceCriteria: ['Summarize findings', 'Distinguish evidence from uncertainty'],
-      dependencyIds: [],
-    });
-  }
-  const writerId = createId();
-  tasks.push({
-    id: writerId,
-    owner: 'writer',
-    objective: 'Draft the requested content from the allowed context',
-    criticality: 'required',
-    acceptanceCriteria: ['Address the root request', 'Return a coherent draft'],
-    dependencyIds: researchId ? [researchId] : [],
-  });
-  if (wantsEditing) {
-    tasks.push({
-      id: createId(),
-      owner: 'editor',
-      objective: 'Review the draft for structure, clarity, and style',
-      criticality: 'optional',
-      acceptanceCriteria: [
-        'Identify material issues',
-        'Return an improved version or clear advice',
-      ],
-      dependencyIds: [writerId],
-    });
-  }
-  if (wantsFactCheck) {
-    tasks.push({
-      id: createId(),
-      owner: 'fact_checker',
-      objective: 'Check factual claims against the supplied research artifact',
-      criticality: 'required',
-      acceptanceCriteria: ['Label unsupported claims as uncertain'],
-      dependencyIds: researchId ? [researchId, writerId] : [writerId],
-    });
-  }
-  if (wantsMedia) {
-    tasks.push({
-      id: createId(),
-      owner: 'illustrator',
-      objective: 'Propose visuals that support the draft',
-      criticality: 'optional',
-      acceptanceCriteria: ['Return a concrete image plan with placement intent'],
-      dependencyIds: [writerId],
-    });
-  }
-  return tasks;
+const validatePlan = validateSubmittedPlan;
+
+function assertAcyclic(tasks: readonly PlannedTaskSpec[]): void {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visiting.has(id)) throw new Error('Plan contains a dependency cycle');
+    if (visited.has(id)) return;
+    visiting.add(id);
+    for (const dependency of byId.get(id)?.dependencyIds ?? []) visit(dependency);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  for (const task of tasks) visit(task.id);
 }
 
-function publicTask(task: PlannedTaskSpec): Readonly<Record<string, unknown>> {
+function mainPlanningPrompt(capabilities: readonly string[]): string {
+  return `You are the persistent AgentPress Main Agent. Decide how to handle the user's request.
+Return a normal final answer only when no tools or specialist work are needed.
+For work requiring tools, research, writing pipeline, article changes, or media, call plan_submit with a concrete minimal DAG.
+If required business information is missing, call user_request_input.
+Available capabilities: ${JSON.stringify(capabilities)}.
+Never emit a generic template plan. Never reveal hidden chain of thought.`;
+}
+
+function mainCompletionPrompt(): string {
+  return 'You are the AgentPress Main Agent. Synthesize only from validated Task Result Envelopes. You must call run_complete. Do not answer as ordinary text and do not invent Artifact or Evidence IDs.';
+}
+
+function specialistPrompt(role: SpecialistRole): string {
+  return `You are the AgentPress ${role} Specialist. Work only on the supplied immutable Task Brief. Use only available tools. Submit the final structured result through task_complete and never reveal hidden chain of thought.`;
+}
+
+function protocolFailure(messages: readonly RuntimeMessage[], message: string): RuntimeResult {
+  return {
+    status: 'failed',
+    messages,
+    error: { code: 'protocol_error', message, retryable: true },
+  };
+}
+
+function findAssistant(result: RuntimeResult): RuntimeAssistantMessage | undefined {
+  return result.messages.findLast(
+    (message): message is RuntimeAssistantMessage => message.role === 'assistant',
+  );
+}
+
+function publicTask(task: PlannedTaskSpec) {
   return {
     id: task.id,
     owner: task.owner,
@@ -958,95 +1069,14 @@ function publicTask(task: PlannedTaskSpec): Readonly<Record<string, unknown>> {
   };
 }
 
-function summarizePlan(tasks: readonly PlannedTaskSpec[]): string {
-  return tasks.map((task) => `${task.owner}: ${task.objective}`).join(' -> ');
-}
-
-function capabilitiesFor(role: SpecialistRole): readonly string[] {
-  switch (role) {
-    case 'researcher':
-    case 'fact_checker':
-      return ['web.research', 'workspace.knowledge.read', 'evidence.read'];
-    case 'writer':
-    case 'editor':
-      return ['article.read', 'evidence.read'];
-    case 'illustrator':
-      return ['article.read', 'licensed_media.search'];
-  }
-}
-
-function specialistSystemPrompt(role: SpecialistRole): string {
-  return `You are the AgentPress ${role} specialist. Use only the supplied immutable Context Pack. Return the result, not chain-of-thought. Never apply writes or delegate.`;
-}
-
-function specialistPromptRevision(role: SpecialistRole) {
-  return createPromptRevision(`specialist.${role}`, '1.0.0', specialistSystemPrompt(role));
-}
-
-function buildContextPack(
-  runId: string,
-  revisionId: string,
-  task: PlannedTaskSpec,
-  prompt: string,
-): {
-  readonly manifest: Readonly<Record<string, unknown>>;
-  readonly prompt: string;
-  readonly contentHash: string;
-} {
-  const promptRevision = specialistPromptRevision(task.owner);
-  const manifest = {
-    runId,
-    planRevisionId: revisionId,
-    taskId: task.id,
-    owner: task.owner,
-    rootRequestIncluded: true,
-    conversationHistoryIncluded: false,
-    toolAllowlist: capabilitiesFor(task.owner),
-    promptRevision: {
-      promptId: promptRevision.promptId,
-      version: promptRevision.version,
-      contentHash: promptRevision.contentHash,
-    },
-    skillVersions: {},
-  };
-  const contextPrompt = JSON.stringify({ manifest, objective: task.objective, prompt });
-  return {
-    manifest,
-    prompt: contextPrompt,
-    contentHash: createHash('sha256').update(contextPrompt).digest('hex'),
-  };
-}
-
-function estimateTokens(value: string): number {
-  return Math.ceil(value.length / 3);
-}
-
-function findAssistant(result: RuntimeResult): RuntimeAssistantMessage | undefined {
-  return result.messages.findLast(
-    (message): message is RuntimeAssistantMessage => message.role === 'assistant',
-  );
-}
-
-function sumUsage(usages: readonly RuntimeUsage[]): RuntimeUsage {
-  return usages.reduce<RuntimeUsage>(
-    (total, usage) => ({
-      inputTokens: total.inputTokens + usage.inputTokens,
-      outputTokens: total.outputTokens + usage.outputTokens,
-      cacheReadTokens: total.cacheReadTokens + usage.cacheReadTokens,
-      cacheWriteTokens: total.cacheWriteTokens + usage.cacheWriteTokens,
-      totalTokens: total.totalTokens + usage.totalTokens,
-      costUsd: total.costUsd + usage.costUsd,
-    }),
-    {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      totalTokens: 0,
-      costUsd: 0,
-    },
-  );
-}
+const emptyUsage: RuntimeUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  totalTokens: 0,
+  costUsd: 0,
+};
 
 function toDurableEvent(event: {
   readonly id: string;

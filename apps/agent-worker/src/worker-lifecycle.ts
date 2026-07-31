@@ -93,7 +93,6 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
         });
       },
     },
-    reviewGate: { enabled: true, maxRounds: 2 },
     systemPrompt:
       'You are AgentPress, a precise long-form writing agent. Use available research tools when facts need evidence. Preserve citations and state uncertainty. For illustrated articles, generate an image first, then call article.propose_edits to insert an image block containing assetId, contentUrl as src, prompt, model and provenance. Never claim the article changed until the user accepts the proposal.',
   });
@@ -413,7 +412,8 @@ function createModelPolicies(proModel: string, turboModel?: string): ModelPolicy
     imageModel: 'configured-by-media-provider',
   });
   return new ModelPolicyCatalog([
-    policy('direct', fastModel, fastModel === proModel ? [] : [proModel]),
+    policy('main', proModel, fastModel === proModel ? [] : [fastModel]),
+    policy('direct', proModel, fastModel === proModel ? [] : [fastModel]),
     policy('researcher', fastModel, fastModel === proModel ? [] : [proModel]),
     policy('fact_checker', fastModel, fastModel === proModel ? [] : [proModel]),
     policy('writer', proModel, fastModel === proModel ? [] : [fastModel]),

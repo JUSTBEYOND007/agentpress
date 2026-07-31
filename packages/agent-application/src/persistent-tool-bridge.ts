@@ -9,7 +9,7 @@ import {
   skillRevisions,
   workspaceMembers,
 } from '@agentpress/database';
-import { CapabilityCatalog, ToolRegistry } from '@agentpress/tool-runtime';
+import { ToolRegistry } from '@agentpress/tool-runtime';
 import { and, eq } from 'drizzle-orm';
 
 import type { RuntimeToolFactory } from './contracts.js';
@@ -25,74 +25,36 @@ type PersistentToolBridgeOptions = {
 export class PersistentToolBridge implements RuntimeToolFactory {
   public constructor(private readonly options: PersistentToolBridgeOptions) {}
 
-  public async createForRun(runId: string, query = ''): Promise<readonly RuntimeTool[]> {
-    const rows = await this.options.database
-      .select({
-        userId: rootRequests.requestedByUserId,
-        role: workspaceMembers.role,
-      })
-      .from(agentRuns)
-      .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
-      .leftJoin(
-        workspaceMembers,
-        and(
-          eq(workspaceMembers.workspaceId, agentRuns.workspaceId),
-          eq(workspaceMembers.userId, rootRequests.requestedByUserId),
-        ),
-      )
-      .where(eq(agentRuns.id, runId))
-      .limit(1);
-    const authorization = rows[0];
-    if (!authorization?.userId || !authorization.role) {
-      throw new ToolCallApplicationError(
-        'unauthorized_tool',
-        'Agent Run has no active requesting workspace member',
-      );
-    }
-    const requestedByUserId = authorization.userId;
-    const skillRows = await this.options.database
-      .select({ allowedTools: runSkillBindings.allowedTools })
-      .from(runSkillBindings)
-      .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
-      .where(eq(runSkillBindings.runId, runId));
+  public async listCapabilities(runId: string): Promise<readonly string[]> {
+    const { definitions } = await this.authorize(runId);
+    return [...new Set(definitions.flatMap(({ capabilities }) => capabilities))].sort();
+  }
 
-    const definitions = this.options.registry
-      .list()
-      .filter((definition) => authorization.role !== 'viewer' || definition.risk === 'read_only')
+  public async createForRun(
+    runId: string,
+    capabilities: readonly string[] = [],
+    taskId?: string,
+  ): Promise<readonly RuntimeTool[]> {
+    const { definitions, requestedByUserId, allowedCapabilities } = await this.authorize(runId);
+    const requested = new Set(capabilities);
+    return definitions
       .filter(
         (definition) =>
-          skillRows.length === 0 ||
-          skillRows.every(({ allowedTools }) => allowedTools.includes(definition.toolId)),
-      );
-    const allowedCapabilities = new Set(
-      definitions.flatMap((definition) => [...definition.capabilities]),
-    );
-    const eligibleRegistry = new ToolRegistry();
-    for (const definition of definitions) eligibleRegistry.register(definition);
-    const selected = new CapabilityCatalog(eligibleRegistry).select(
-      query,
-      {
-        platform: allowedCapabilities,
-        workspace: allowedCapabilities,
-        agent: allowedCapabilities,
-        skill: allowedCapabilities,
-        task: allowedCapabilities,
-      },
-      this.options.capabilityLimit ?? 8,
-    );
-    const selectedKeys = new Set(selected.map(({ toolId, version }) => `${toolId}@${version}`));
-
-    return definitions
-      .filter((definition) => selectedKeys.has(`${definition.toolId}@${definition.version}`))
+          requested.size === 0 ||
+          definition.capabilities.every((capability) => requested.has(capability)),
+      )
+      .slice(0, this.options.capabilityLimit ?? 16)
       .map((definition) => ({
         name: runtimeToolName(definition.toolId, definition.version),
         label: definition.toolId,
         description: definition.description,
         parameters: definition.inputSchema,
+        constrainedSampling: { type: 'json_schema' as const, strict: 'require' as const },
         executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
         execute: async (arguments_, context) => {
           const proposal = await this.options.toolCalls.propose({
             runId,
+            ...(taskId ? { taskId } : {}),
             toolId: definition.toolId,
             toolVersion: definition.version,
             arguments: arguments_,
@@ -122,6 +84,49 @@ export class PersistentToolBridge implements RuntimeToolFactory {
           return result.output;
         },
       }));
+  }
+
+  private async authorize(runId: string) {
+    const rows = await this.options.database
+      .select({ userId: rootRequests.requestedByUserId, role: workspaceMembers.role })
+      .from(agentRuns)
+      .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
+      .leftJoin(
+        workspaceMembers,
+        and(
+          eq(workspaceMembers.workspaceId, agentRuns.workspaceId),
+          eq(workspaceMembers.userId, rootRequests.requestedByUserId),
+        ),
+      )
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+    const authorization = rows[0];
+    if (!authorization?.userId || !authorization.role) {
+      throw new ToolCallApplicationError(
+        'unauthorized_tool',
+        'Agent Run has no active requesting workspace member',
+      );
+    }
+    const skillRows = await this.options.database
+      .select({ allowedTools: runSkillBindings.allowedTools })
+      .from(runSkillBindings)
+      .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
+      .where(eq(runSkillBindings.runId, runId));
+    const definitions = this.options.registry
+      .list()
+      .filter((definition) => authorization.role !== 'viewer' || definition.risk === 'read_only')
+      .filter(
+        (definition) =>
+          skillRows.length === 0 ||
+          skillRows.every(({ allowedTools }) => allowedTools.includes(definition.toolId)),
+      );
+    return {
+      definitions,
+      requestedByUserId: authorization.userId,
+      allowedCapabilities: new Set(
+        definitions.flatMap((definition) => [...definition.capabilities]),
+      ),
+    };
   }
 }
 

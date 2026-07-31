@@ -211,7 +211,7 @@ describeWithDatabase('Tool Call application flow', () => {
       registry,
       toolCalls: service,
       capabilityLimit: 1,
-    }).createForRun(runId, 'search the workspace');
+    }).createForRun(runId, ['workspace.knowledge.read']);
     expect(tools.map(({ label }) => label)).toEqual(['workspace.search']);
   });
 
