@@ -16,8 +16,10 @@ import {
   conversationMessages,
   conversations,
   editProposals,
+  mentionBindings,
   outboxMessages,
   rootRequests,
+  toolCalls,
   workspaces,
 } from '@agentpress/database';
 import { ToolRegistry } from '@agentpress/tool-runtime';
@@ -116,6 +118,15 @@ describeWithInfra('editor persistence and recovery', () => {
       mode: 'direct',
       status: 'running',
     });
+    await connection.db.insert(mentionBindings).values({
+      id: randomUUID(),
+      runId: ids.run,
+      targetId: ids.article,
+      targetKind: 'article',
+      revision: ids.revision,
+      contentHash: hashDocument(document),
+      authorizedUserId: ids.user,
+    });
   });
   afterAll(async () => {
     redis.disconnect();
@@ -158,8 +169,20 @@ describeWithInfra('editor persistence and recovery', () => {
 
   it('exposes current block hashes and creates a persisted proposal through Agent tools', async () => {
     const registry = new ToolRegistry();
-    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const proposals = new ProposalService(connection.db);
+    registerArticleTools(registry, connection.db, proposals);
     const context = { runId: ids.run, toolCallId: randomUUID() };
+    await connection.db.insert(toolCalls).values({
+      id: context.toolCallId,
+      runId: ids.run,
+      toolId: 'article.propose_edits',
+      toolVersion: '1.0.0',
+      arguments: {},
+      argumentsHash: 'test',
+      risk: 'draft_write',
+      sideEffect: 'test proposal',
+      status: 'executing',
+    });
     const current = (await registry.execute(
       registry.get('article.read_current', '1.0.0'),
       {},
@@ -202,6 +225,14 @@ describeWithInfra('editor persistence and recovery', () => {
       .from(editProposals)
       .where(eq(editProposals.id, String(created.proposalId)));
     expect(rows[0]).toMatchObject({ articleId: ids.article, runId: ids.run, status: 'pending' });
+    await expect(
+      proposals.decideOperation({
+        proposalId: String(created.proposalId),
+        operationId: 'tool-replace-a',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'rejected' });
   });
 
   it('applies accepted proposal operations into an immutable revision', async () => {
@@ -247,6 +278,91 @@ describeWithInfra('editor persistence and recovery', () => {
       .where(eq(articleRevisions.articleId, ids.article));
     expect(revisions).toHaveLength(2);
     expect(revisions[1]?.source).toBe('proposal');
+  });
+
+  it('persists each operation decision and settles only after every operation is decided', async () => {
+    const service = new ProposalService(connection.db);
+    const currentFirst = paragraph('block-a', 'New');
+    await expect(
+      service.create({
+        articleId: ids.article,
+        baseRevisionId: ids.revision,
+        operations: [
+          {
+            operationId: 'stale-replace',
+            kind: 'replace',
+            blockId: 'block-a',
+            expectedHash: hashBlock(first),
+            block: paragraph('block-a', 'Stale'),
+          },
+        ],
+      }),
+    ).rejects.toThrow('authorized');
+    const proposal = await service.create({
+      articleId: ids.article,
+      operations: [
+        {
+          operationId: 'reject-a',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(currentFirst),
+          block: paragraph('block-a', 'Ignored'),
+        },
+        {
+          operationId: 'reject-b',
+          kind: 'delete',
+          blockId: 'block-b',
+          expectedHash: hashBlock(second),
+        },
+      ],
+    });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-a',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'pending', decisions: { 'reject-a': 'rejected' } });
+    await expect(service.getPending(ids.article)).resolves.toMatchObject({
+      proposalId: proposal.proposalId,
+      decisions: { 'reject-a': 'rejected' },
+    });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-a',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'pending' });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-a',
+        userId: ids.user,
+        decision: 'accepted',
+      }),
+    ).rejects.toThrow('opposite decision');
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'reject-b': 'rejected', 'reject-a': 'accepted' },
+      }),
+    ).rejects.toThrow('opposite decision');
+    await expect(service.getPending(ids.article)).resolves.toMatchObject({
+      proposalId: proposal.proposalId,
+      decisions: { 'reject-a': 'rejected' },
+    });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-b',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'rejected' });
   });
 
   it('atomically promotes an acknowledged draft and schedules its index update', async () => {

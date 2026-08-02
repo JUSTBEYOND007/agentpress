@@ -31,6 +31,7 @@ type AutosaveBody = {
   readonly steps?: unknown;
 };
 type ProposalBody = { readonly decisions?: unknown };
+type OperationDecisionBody = { readonly decision?: unknown };
 type CommitDraftBody = {
   readonly writerLeaseId?: unknown;
   readonly expectedServerSequence?: unknown;
@@ -154,6 +155,39 @@ export class EditorController {
         proposalId,
         userId: user.id,
         decisions: decisions as Record<string, 'accepted' | 'rejected'>,
+      });
+    } catch (error) {
+      throw mapEditorError(error);
+    }
+  }
+
+  @Get('articles/:articleId/edit-proposals/pending')
+  public async pendingProposal(
+    @Param('articleId') articleId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertArticleAccess(articleId, user.id);
+    return { proposal: (await this.proposals.getPending(articleId)) ?? null };
+  }
+
+  @Post('edit-proposals/:proposalId/operations/:operationId/decision')
+  @HttpCode(200)
+  public async decideOperation(
+    @Param('proposalId') proposalId: string,
+    @Param('operationId') operationId: string,
+    @Body() body: OperationDecisionBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (body.decision !== 'accepted' && body.decision !== 'rejected') {
+      throw new BadRequestException('decision must be accepted or rejected');
+    }
+    await this.authorization.assertProposalAccess(proposalId, user.id);
+    try {
+      return await this.proposals.decideOperation({
+        proposalId,
+        operationId,
+        userId: user.id,
+        decision: body.decision,
       });
     } catch (error) {
       throw mapEditorError(error);

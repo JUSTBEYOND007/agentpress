@@ -5,11 +5,12 @@ import {
   agentRuns,
   conversationBranches,
   conversations,
+  mentionBindings,
 } from '@agentpress/database';
 import type { ToolRegistry } from '@agentpress/tool-runtime';
 import { hashBlock, type ArticleDocument } from '@agentpress/editor-patch';
 import { Type } from '@sinclair/typebox';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { ProposalService } from './proposal-service.js';
 
@@ -98,16 +99,20 @@ export function registerArticleTools(
     outputSchema: Type.Any(),
     risk: 'draft_write',
     sideEffect: 'Creates an expiring edit proposal; the article changes only after user decisions',
-    idempotency: 'none',
+    idempotency: 'provider_key',
     timeoutMs: 10_000,
     estimateCost: () => ({}),
     execute: async ({ operations: proposedOperations }, context) => {
       const current = await resolveRunArticle(database, context.runId);
-      return proposals.create({
-        articleId: current.articleId,
-        runId: context.runId,
-        operations: proposedOperations,
-      });
+      return proposals
+        .create({
+          articleId: current.articleId,
+          runId: context.runId,
+          sourceToolCallId: context.toolCallId,
+          baseRevisionId: current.revisionId,
+          operations: proposedOperations,
+        })
+        .then((proposal) => ({ kind: 'article_edit_proposal' as const, ...proposal }));
     },
   });
 }
@@ -124,9 +129,17 @@ async function resolveRunArticle(database: AgentPressDatabase, runId: string) {
     .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
     .innerJoin(articles, eq(articles.id, conversations.articleId))
     .innerJoin(
+      mentionBindings,
+      and(
+        eq(mentionBindings.runId, agentRuns.id),
+        eq(mentionBindings.targetId, articles.id),
+        eq(mentionBindings.targetKind, 'article'),
+      ),
+    )
+    .innerJoin(
       articleRevisions,
       and(
-        eq(articleRevisions.id, articles.currentRevisionId),
+        sql`${articleRevisions.id}::text = ${mentionBindings.revision}`,
         eq(articleRevisions.articleId, articles.id),
       ),
     )

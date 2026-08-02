@@ -1171,12 +1171,27 @@ export const editProposals = pgTable(
       .notNull()
       .references(() => articleRevisions.id, { onDelete: 'restrict' }),
     operations: jsonb('operations').$type<readonly unknown[]>().notNull(),
+    diffs: jsonb('diffs')
+      .$type<readonly unknown[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    sourceToolCallId: uuid('source_tool_call_id').references(() => toolCalls.id, {
+      onDelete: 'set null',
+    }),
     status: editProposalStatusEnum('status').notNull().default('pending'),
     expiresAt: timestamp('expires_at', { withTimezone: true, precision: 3 }).notNull(),
     createdAt,
     updatedAt,
   },
-  (table) => [index('edit_proposals_article_status_idx').on(table.articleId, table.status)],
+  (table) => [
+    index('edit_proposals_article_status_idx').on(table.articleId, table.status),
+    uniqueIndex('edit_proposals_source_tool_call_unique')
+      .on(table.sourceToolCallId)
+      .where(sql`${table.sourceToolCallId} is not null`),
+    uniqueIndex('edit_proposals_one_pending_article_unique')
+      .on(table.articleId)
+      .where(sql`${table.status} = 'pending'`),
+  ],
 );
 
 export const editProposalDecisions = pgTable(
