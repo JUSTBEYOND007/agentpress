@@ -166,6 +166,13 @@ export type RunProjection = {
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
+  readonly pendingDirectives: readonly {
+    readonly id: string;
+    readonly kind: 'steering' | 'follow_up';
+    readonly content: string;
+    readonly sequence: number;
+    readonly createdAt: string;
+  }[];
   readonly lastEventId: number;
   readonly createdAt: string;
   readonly completedAt?: string;

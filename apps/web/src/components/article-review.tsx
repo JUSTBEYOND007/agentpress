@@ -98,6 +98,10 @@ export function useArticleReview(
     setReview((current) => (current ? { ...current, visible } : current));
   }, []);
 
+  const dismissError = useCallback((): void => {
+    setReview((current) => (current ? { ...current, error: undefined } : current));
+  }, []);
+
   const submit = useCallback(async (): Promise<void> => {
     if (!review || review.phase === 'submitting') return;
     const complete = review.proposal.operations.every(
@@ -157,7 +161,17 @@ export function useArticleReview(
     [activeIndex, focus, operationIds],
   );
 
-  return { review, showProposal, onDecision, setAll, setVisible, submit, moveFocus, activeIndex };
+  return {
+    review,
+    showProposal,
+    onDecision,
+    setAll,
+    setVisible,
+    dismissError,
+    submit,
+    moveFocus,
+    activeIndex,
+  };
 }
 
 export function ArticleReviewToolbar({

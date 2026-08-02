@@ -113,6 +113,109 @@
   pointer-events: none;
 }
 
+.composer-shell {
+  position: relative;
+  border-top: 1px solid #ededeb;
+  background: linear-gradient(180deg, rgb(250 250 248 / 72%), #f7f7f5);
+  padding: 10px 12px 12px;
+}
+
+.composer-trigger-menu {
+  position: absolute;
+  z-index: 50;
+  right: 12px;
+  bottom: calc(100% - 2px);
+  left: 12px;
+  max-height: min(360px, calc(100dvh - 180px));
+  overflow-y: auto;
+  border: 1px solid #dededb;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgb(20 20 18 / 14%);
+  padding: 5px;
+}
+
+.composer-trigger-content {
+  display: grid;
+  gap: 2px;
+}
+
+.composer-trigger-heading {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  color: #8a8b85;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.composer-trigger-back {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: #73746e;
+  cursor: pointer;
+}
+
+.composer-trigger-back:hover {
+  background: #eeeeec;
+}
+
+.composer-trigger-list {
+  display: grid;
+  gap: 1px;
+}
+
+.composer-trigger-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 6px 7px;
+  color: #656660;
+  cursor: pointer;
+  text-align: left;
+}
+
+.composer-trigger-item[data-highlighted],
+.composer-trigger-item:hover {
+  background: #f1f1ef;
+  color: #3e3f3b;
+}
+
+.composer-trigger-item > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.composer-trigger-item strong,
+.composer-trigger-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-trigger-item strong {
+  font-size: 11px;
+  font-weight: 540;
+}
+
+.composer-trigger-item small {
+  color: #92938d;
+  font-size: 9px;
+}
+
 .scroll-button {
   display: grid;
   width: 28px;
@@ -129,11 +232,11 @@
 
 .agent-composer {
   position: relative;
-  margin: 12px;
+  margin: 0;
   border: 1px solid #d8d8d4;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
-  box-shadow: 0 4px 16px rgb(20 20 18 / 6%);
+  box-shadow: 0 10px 28px rgb(20 20 18 / 8%);
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease;
@@ -149,11 +252,73 @@
   box-shadow: 0 0 0 2px rgb(63 123 86 / 12%);
 }
 
+.composer-pending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-bottom: 1px solid #eeeeeb;
+  padding: 8px 10px;
+}
+
+.pending-directive {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #dce6df;
+  border-radius: 5px;
+  background: #f5f9f6;
+  padding: 4px 4px 4px 6px;
+  color: #41634d;
+  font-size: 10px;
+}
+
+.pending-follow_up {
+  border-color: #e2e2de;
+  background: #f8f8f6;
+  color: #656660;
+}
+
+.pending-directive > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-directive small {
+  margin-right: 4px;
+  color: #7d8e82;
+  font-size: 9px;
+}
+
+.pending-directive button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pending-directive button:hover:not(:disabled) {
+  background: rgb(45 83 58 / 8%);
+}
+
+.pending-directive button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .composer-context {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  padding: 9px 10px 0;
+  padding: 8px 10px 0;
 }
 
 .composer-context:empty {
@@ -213,9 +378,9 @@
   border: 0;
   background: transparent;
   outline: 0;
-  max-height: 210px;
-  padding: 13px 14px 5px;
-  font-size: 14px;
+  max-height: 150px;
+  padding: 12px 14px 4px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -227,7 +392,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 8px;
+  padding: 6px 8px 7px;
 }
 
 .composer-actions > div {
@@ -249,6 +414,11 @@
   background: transparent;
   color: #696a65;
   cursor: pointer;
+}
+
+.composer-slash-button {
+  font-size: 17px;
+  line-height: 1;
 }
 
 .composer-tool-button:hover {
@@ -491,10 +661,10 @@
 
 .send-button {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 7px;
   background: #202124;
   color: #ffffff;
   cursor: pointer;
@@ -506,6 +676,9 @@
 }
 
 .composer-tool-button:focus-visible,
+.composer-trigger-back:focus-visible,
+.composer-trigger-item:focus-visible,
+.pending-directive button:focus-visible,
 .composer-context-chip > button:focus-visible,
 .composer-inline-notice button:focus-visible,
 .send-behavior:focus-visible,

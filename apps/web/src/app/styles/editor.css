@@ -1,13 +1,14 @@
 .article-canvas {
-  width: min(780px, calc(100% - 64px));
+  width: min(840px, calc(100% - var(--workspace-editor-gutter, 64px) * 2));
   min-height: calc(100dvh - 52px);
   margin: 0 auto;
-  padding: 88px 0 160px;
+  padding: 104px 0 160px;
   outline: none;
 }
 
 .article-editor-shell {
   position: relative;
+  min-width: 0;
 }
 
 .editor-toolbar {
@@ -21,6 +22,7 @@
   gap: 2px;
   border-bottom: 1px solid #eeeeec;
   background: rgb(255 255 255 / 96%);
+  backdrop-filter: blur(10px);
 }
 
 .editor-toolbar button {
@@ -78,10 +80,10 @@
 }
 
 .document-outline {
-  position: fixed;
+  position: absolute;
   z-index: 7;
-  top: 112px;
-  right: 448px;
+  top: 86px;
+  right: max(14px, calc((100% - 840px) / 2 - 194px));
   width: 170px;
   border: 1px solid #e8e8e6;
   border-radius: 6px;
@@ -158,7 +160,7 @@
 
 .save-state {
   position: absolute;
-  top: 18px;
+  top: 54px;
   right: 24px;
   color: #898a85;
   font-size: 12px;
@@ -171,7 +173,7 @@
 .article-canvas h1 {
   margin: 0 0 28px;
   color: #202124;
-  font-size: 44px;
+  font-size: clamp(38px, 3vw, 48px);
   font-weight: 720;
   line-height: 1.16;
 }
@@ -277,10 +279,32 @@
   top: auto;
   right: auto;
   left: auto;
-  width: min(780px, calc(100% - 64px));
-  margin: 8px auto;
+  width: min(840px, calc(100% - var(--workspace-editor-gutter, 64px) * 2));
+  margin: 14px auto 0;
   border: 1px solid #ecd8d3;
-  padding: 8px 10px;
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+
+.article-review-error-standalone > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.article-review-error-standalone button {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.article-review-error-standalone button:hover {
+  background: #f2e2dd;
 }
 
 .article-canvas .ai-diff-before {

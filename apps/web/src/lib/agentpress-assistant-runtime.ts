@@ -45,10 +45,31 @@ export type RunProjection = {
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
+  readonly pendingDirectives: readonly PendingDirective[];
   readonly lastEventId: number;
   readonly createdAt: string;
   readonly completedAt?: string;
 };
+
+export type PendingDirective = {
+  readonly id: string;
+  readonly kind: 'steering' | 'follow_up';
+  readonly content: string;
+  readonly sequence: number;
+  readonly createdAt: string;
+};
+
+export type AgentContextBinding =
+  | { readonly type: 'mention'; readonly targetId: string }
+  | { readonly type: 'attachment'; readonly attachmentId: string }
+  | { readonly type: 'evidence'; readonly evidenceId: string }
+  | {
+      readonly type: 'article_selection';
+      readonly articleId: string;
+      readonly revisionId: string;
+      readonly blocks: readonly { readonly blockId: string; readonly contentHash: string }[];
+    }
+  | { readonly type: 'skill'; readonly skillId: string; readonly version: string };
 
 type StableMessage = {
   readonly id: string;
@@ -87,6 +108,7 @@ export function useAgentPressAssistantRuntime(
     readonly mentionTargetIds?: readonly string[];
     readonly attachmentIds?: readonly string[];
     readonly skills?: readonly { readonly skillId: string; readonly version: string }[];
+    readonly contextBindings?: readonly AgentContextBinding[];
     readonly sendingDisabled?: boolean;
   } = {},
 ) {
@@ -95,6 +117,7 @@ export function useAgentPressAssistantRuntime(
   const mentionTargetIds = context.mentionTargetIds ?? [];
   const attachmentIds = context.attachmentIds ?? [];
   const selectedSkills = context.skills ?? [];
+  const contextBindings = context.contextBindings ?? [];
   const sendingDisabled = context.sendingDisabled ?? false;
   const [stableMessages, setStableMessages] = useState<readonly StableMessage[]>([]);
   const [optimisticMessages, setOptimisticMessages] = useState<readonly AgentMessage[]>([]);
@@ -298,7 +321,9 @@ export function useAgentPressAssistantRuntime(
           await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, {
             content: prompt,
           });
+          setOptimisticMessages((current) => current.filter(({ id }) => id !== optimisticId));
           setSubmissionSequence((value) => value + 1);
+          await refreshProjection(activeProjection.runId);
           return;
         }
         const created = await request(
@@ -307,6 +332,7 @@ export function useAgentPressAssistantRuntime(
             branchId,
             prompt,
             contextBindings: [
+              ...contextBindings,
               ...mentionTargetIds.map((targetId) => ({ type: 'mention', targetId })),
               ...attachmentIds.map((attachmentId) => ({ type: 'attachment', attachmentId })),
               ...selectedSkills.map(({ skillId, version }) => ({
@@ -339,6 +365,7 @@ export function useAgentPressAssistantRuntime(
       attachmentIds,
       branchId,
       conversationId,
+      contextBindings,
       mentionTargetIds,
       refreshProjection,
       selectedSkills,
@@ -349,6 +376,19 @@ export function useAgentPressAssistantRuntime(
   const onCancel = useCallback(async () => {
     if (activeRunId) await request(`${apiUrl}/runs/${activeRunId}/cancel`, {});
   }, [activeRunId]);
+
+  const cancelDirective = useCallback(
+    async (directive: PendingDirective): Promise<void> => {
+      if (!activeRunId) return;
+      const endpoint =
+        directive.kind === 'steering'
+          ? `steering/${directive.id}/cancel`
+          : `follow-ups/${directive.id}/cancel`;
+      await request(`${apiUrl}/runs/${activeRunId}/${endpoint}`, {});
+      await refreshProjection(activeRunId);
+    },
+    [activeRunId, refreshProjection],
+  );
 
   const decideTool = useCallback(
     async (toolCallId: string, decision: 'approved' | 'denied') => {
@@ -400,6 +440,7 @@ export function useAgentPressAssistantRuntime(
     decideTool,
     answerQuestion,
     decideProposal,
+    cancelDirective,
     readiness,
     panelError,
     isRunning,

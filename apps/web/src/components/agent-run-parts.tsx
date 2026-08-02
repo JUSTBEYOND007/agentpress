@@ -10,8 +10,8 @@ import {
   ExternalLink,
   FileCheck2,
   FileText,
+  ListChecks,
   RotateCcw,
-  Sparkles,
   LoaderCircle,
   X,
 } from 'lucide-react';
@@ -57,9 +57,6 @@ export function UserMessage(): React.JSX.Element {
 export function AssistantMessage(): React.JSX.Element {
   return (
     <MessagePrimitive.Root className="aui-message aui-assistant-message">
-      <div className="assistant-avatar" aria-hidden="true">
-        <Sparkles size={13} />
-      </div>
       <div className="assistant-content">
         <MessagePrimitive.Parts
           components={{
@@ -105,14 +102,13 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
 
 function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const tasks = Array.isArray(part.payload.tasks) ? part.payload.tasks.map(recordValue) : [];
+  const taskCount = tasks.length;
   return (
-    <details
-      className="run-part plan-part"
-      open={part.status.includes('started') || part.status.includes('running')}
-    >
+    <details className="run-part plan-part">
       <summary>
-        <Sparkles size={14} /> {stringValue(part.payload.summary) || '执行计划'}
-        <small>v{numberValue(part.payload.revisionNumber) || 1}</small>
+        <ListChecks size={14} />
+        <span>{stringValue(part.payload.summary) || '执行计划'}</span>
+        <small>{taskCount > 0 ? `${String(taskCount)} 项任务` : '查看计划'}</small>
       </summary>
       <ol>
         {tasks.map((task, index) => (
@@ -120,10 +116,6 @@ function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
             <span className="task-state" />
             <div>
               <strong>{stringValue(task.objective) || stringValue(task.label)}</strong>
-              <small>
-                {stringValue(task.owner) || 'Specialist'} ·{' '}
-                {task.criticality === 'optional' ? '可选' : '必需'}
-              </small>
             </div>
           </li>
         ))}
@@ -345,21 +337,10 @@ function ArticleChangePart({
           }}
           type="button"
         >
-          查看正文修改
+          审阅修改
         </button>
       </div>
-      <div className="proposal-submit-row">
-        <span>在正文中逐项确认后应用</span>
-        <button
-          className="primary-action"
-          onClick={() => {
-            actions.onProposalReady?.(proposal);
-          }}
-          type="button"
-        >
-          打开正文审阅
-        </button>
-      </div>
+      <p className="proposal-guidance">在正文中逐项接受或拒绝后再应用。</p>
     </section>
   );
 }

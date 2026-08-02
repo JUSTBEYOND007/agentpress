@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from '
 import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
 import { useArticleReview } from '../components/article-review';
+import type { ArticleSelectionView } from '../components/article-selection';
 import { AuthProvider } from '../components/auth-provider';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 
@@ -101,6 +102,7 @@ function WorkspacePage(): React.JSX.Element {
   const [publishedSlug, setPublishedSlug] = useState<string>();
   const [publicationHistory, setPublicationHistory] = useState<readonly ArticlePublication[]>([]);
   const [error, setError] = useState<string>();
+  const [agentSelection, setAgentSelection] = useState<ArticleSelectionView>();
 
   const loadArticles = useCallback(async (id: string): Promise<void> => {
     const [articleResponse, folderResponse, trashResponse] = await Promise.all([
@@ -265,6 +267,7 @@ function WorkspacePage(): React.JSX.Element {
   }
 
   function selectArticle(articleId: string): void {
+    setAgentSelection(undefined);
     setActiveArticleId(articleId);
     setView('workspace');
     setSearchQuery('');
@@ -545,11 +548,13 @@ function WorkspacePage(): React.JSX.Element {
             articleId={activeArticle.id}
             baseRevisionId={activeArticle.revisionId}
             initialDocument={activeArticle.document}
+            onSelectionChange={setAgentSelection}
             {...(articleReview.review
               ? {
                   review: articleReview.review,
                   reviewActiveIndex: articleReview.activeIndex,
                   onReviewDecisionAll: articleReview.setAll,
+                  onReviewErrorDismiss: articleReview.dismissError,
                   onReviewMove: articleReview.moveFocus,
                   onReviewSubmit: articleReview.submit,
                   onReviewVisibleChange: articleReview.setVisible,
@@ -603,6 +608,8 @@ function WorkspacePage(): React.JSX.Element {
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
           onArticleUpdated={reloadArticles}
+          articles={articles.map(({ id, revisionId, title }) => ({ id, revisionId, title }))}
+          {...(agentSelection ? { articleSelection: agentSelection } : {})}
           onProposalReady={articleReview.showProposal}
           {...(workspaceId ? { workspaceId } : {})}
           {...(activeArticle

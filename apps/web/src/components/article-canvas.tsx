@@ -8,10 +8,11 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ArticleReviewExtension, articleReviewPluginKey } from './article-review-extension';
 import { ArticleReviewToolbar, type ArticleReviewState } from './article-review';
+import { readArticleSelection, type ArticleSelectionView } from './article-selection';
 import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../lib/autosave-queue';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import { EditorToolbar, slashCommands } from './editor-toolbar';
@@ -49,8 +50,10 @@ export function ArticleCanvas({
   reviewActiveIndex = 0,
   onReviewDecisionAll,
   onReviewMove,
+  onReviewErrorDismiss,
   onReviewSubmit,
   onReviewVisibleChange,
+  onSelectionChange,
 }: {
   readonly articleId: string;
   readonly baseRevisionId: string;
@@ -59,8 +62,10 @@ export function ArticleCanvas({
   readonly reviewActiveIndex?: number;
   readonly onReviewDecisionAll?: (decision: 'accepted' | 'rejected') => void;
   readonly onReviewMove?: (offset: number) => void;
+  readonly onReviewErrorDismiss?: () => void;
   readonly onReviewSubmit?: () => Promise<void>;
   readonly onReviewVisibleChange?: (visible: boolean) => void;
+  readonly onSelectionChange?: (selection?: ArticleSelectionView) => void;
 }): React.JSX.Element {
   const [saveState, setSaveState] = useState<'connecting' | 'saved' | 'saving' | 'offline'>(
     'connecting',
@@ -76,6 +81,7 @@ export function ArticleCanvas({
   const isRecovering = useRef(false);
   const leaseGeneration = useRef(0);
   const reviewVisible = useRef(false);
+  const selectionGeneration = useRef(0);
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -116,8 +122,9 @@ export function ArticleCanvas({
           return false;
         },
       },
-      onSelectionUpdate: () => {
+      onSelectionUpdate: ({ editor: currentEditor }) => {
         setEditorVersion((value) => value + 1);
+        void publishSelection(currentEditor, revisionId.current);
       },
       onTransaction: ({ transaction }) => {
         if (!transaction.docChanged || isRecovering.current) return;
@@ -255,7 +262,16 @@ export function ArticleCanvas({
       {review && !review.visible && review.error ? (
         <div className="article-review-error article-review-error-standalone" role="alert">
           <RotateCcw aria-hidden="true" size={12} />
-          {review.error}
+          <span>{review.error}</span>
+          <button
+            aria-label="关闭正文修改提示"
+            onClick={() => {
+              onReviewErrorDismiss?.();
+            }}
+            type="button"
+          >
+            <X aria-hidden="true" size={13} />
+          </button>
         </div>
       ) : null}
       <div className={`save-state save-${saveState}`} aria-live="polite">
@@ -310,12 +326,22 @@ export function ArticleCanvas({
           if (!response.ok) throw new Error(await response.text());
           const committed = (await response.json()) as { readonly revisionId: string };
           revisionId.current = committed.revisionId;
+          if (editor) await publishSelection(editor, committed.revisionId);
           setSaveState('saved');
         })
         .catch(() => {
           setSaveState('offline');
         });
     }, 1_200);
+  }
+
+  async function publishSelection(
+    currentEditor: NonNullable<ReturnType<typeof useEditor>>,
+    currentRevisionId: string,
+  ): Promise<void> {
+    const generation = ++selectionGeneration.current;
+    const selection = await readArticleSelection(currentEditor, articleId, currentRevisionId);
+    if (generation === selectionGeneration.current) onSelectionChange?.(selection);
   }
 }
 

@@ -4,6 +4,7 @@ import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AgentComposer } from './agent-composer';
+import type { ArticleSelectionView } from './article-selection';
 import { AgentConversationHeader } from './agent-conversation-header';
 import { RunActionsContext, type RunActions } from './agent-run-parts';
 import { AgentThread } from './agent-thread';
@@ -17,6 +18,8 @@ import type {
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
+  type AgentContextBinding,
+  type PendingDirective,
   type AgentSendMode,
 } from '../lib/agentpress-assistant-runtime';
 
@@ -29,6 +32,8 @@ export function AgentWorkbench({
   workspaceId,
   activeArticleId,
   activeArticleTitle,
+  articleSelection,
+  articles,
   onProposalReady,
 }: {
   readonly conversationId?: string;
@@ -37,12 +42,16 @@ export function AgentWorkbench({
   readonly workspaceId?: string;
   readonly activeArticleId?: string;
   readonly activeArticleTitle?: string;
+  readonly articleSelection?: ArticleSelectionView;
+  readonly articles: readonly { readonly id: string; readonly revisionId: string; readonly title: string }[];
   readonly onProposalReady?: (proposal: Proposal) => void;
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const [skills, setSkills] = useState<readonly SkillView[]>([]);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<readonly string[]>([]);
   const [mentionActiveArticle, setMentionActiveArticle] = useState(true);
+  const [selectedArticleIds, setSelectedArticleIds] = useState<readonly string[]>([]);
+  const [selectionIncluded, setSelectionIncluded] = useState(Boolean(articleSelection));
   const [attachments, setAttachments] = useState<readonly AttachmentView[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(0);
   const [attachmentError, setAttachmentError] = useState<string>();
@@ -61,9 +70,44 @@ export function AgentWorkbench({
         .map(({ skillId, version }) => ({ skillId, version })),
     [selectedSkillKeys, skills],
   );
-  const mentionTargetIds = useMemo(
-    () => (mentionActiveArticle && activeArticleId ? [activeArticleId] : []),
-    [activeArticleId, mentionActiveArticle],
+  useEffect(() => {
+    setSelectionIncluded(Boolean(articleSelection));
+  }, [articleSelection]);
+  useEffect(() => {
+    setSelectedArticleIds((current) => current.filter((id) => id !== activeArticleId));
+  }, [activeArticleId]);
+  const contextBindings = useMemo<readonly AgentContextBinding[]>(
+    () => [
+      ...(mentionActiveArticle && activeArticleId
+        ? [{ type: 'mention' as const, targetId: activeArticleId }]
+        : []),
+      ...selectedArticleIds.map((targetId) => ({ type: 'mention' as const, targetId })),
+      ...(selectionIncluded && articleSelection
+        ? [
+            {
+              type: 'article_selection' as const,
+              articleId: articleSelection.articleId,
+              revisionId: articleSelection.revisionId,
+              blocks: articleSelection.blocks,
+            },
+          ]
+        : []),
+      ...attachments.map(({ id }) => ({ type: 'attachment' as const, attachmentId: id })),
+      ...selectedSkills.map(({ skillId, version }) => ({
+        type: 'skill' as const,
+        skillId,
+        version,
+      })),
+    ],
+    [
+      activeArticleId,
+      articleSelection,
+      attachments,
+      mentionActiveArticle,
+      selectedArticleIds,
+      selectedSkills,
+      selectionIncluded,
+    ],
   );
   const {
     runtime,
@@ -71,6 +115,7 @@ export function AgentWorkbench({
     decideTool,
     answerQuestion,
     decideProposal,
+    cancelDirective,
     readiness,
     panelError,
     isRunning,
@@ -81,9 +126,7 @@ export function AgentWorkbench({
       ? {
           conversationId: selectedConversation.id,
           branchId: selectedConversation.branchId,
-          ...(mentionTargetIds.length > 0 ? { mentionTargetIds } : {}),
-          ...(attachments.length > 0 ? { attachmentIds: attachments.map(({ id }) => id) } : {}),
-          ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}),
+          contextBindings,
           sendingDisabled: uploadingAttachments > 0,
         }
       : {},
@@ -221,10 +264,14 @@ export function AgentWorkbench({
             <AgentThread memories={memories} onMemoryDecision={decideMemory} />
             <AgentComposer
               {...(activeArticleTitle ? { activeArticleTitle } : {})}
+              {...(activeArticleId ? { activeArticleId } : {})}
+              {...(articleSelection ? { articleSelection } : {})}
+              articles={articles}
               attachments={attachments}
               {...(attachmentError ? { attachmentError } : {})}
               {...(selectedConversation ? { conversationId: selectedConversation.id } : {})}
               mentionActiveArticle={mentionActiveArticle}
+              onArticleMentionChange={setSelectedArticleIds}
               onAttachmentRemove={(id) => {
                 setAttachments((current) => current.filter((item) => item.id !== id));
               }}
@@ -280,6 +327,13 @@ export function AgentWorkbench({
                 );
               }}
               onMentionChange={setMentionActiveArticle}
+              onPendingDirectiveCancel={async (directive: PendingDirective) => {
+                await cancelDirective(directive);
+              }}
+              onSelectionIncludedChange={setSelectionIncluded}
+              pendingDirectives={activeProjection?.pendingDirectives ?? []}
+              selectedArticleIds={selectedArticleIds}
+              selectionIncluded={selectionIncluded}
               onSkillChange={setSelectedSkillKeys}
               readiness={readiness.status}
               running={isRunning}

@@ -448,8 +448,19 @@ describeWithDatabase('Direct Run application flow', () => {
     });
 
     const directive = await service.enqueueSteering(run.runId, '改变方向');
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({
+      pendingDirectives: [
+        {
+          id: directive.directiveId,
+          kind: 'steering',
+          content: '改变方向',
+          sequence: 1,
+        },
+      ],
+    });
     await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(true);
     await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(false);
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({ pendingDirectives: [] });
   });
 
   it('fails the Run when a Required Specialist fails', async () => {
@@ -931,6 +942,22 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const firstDirective = await followUpService.enqueueFollowUp(run.runId, '继续补充');
     const secondDirective = await followUpService.enqueueFollowUp(run.runId, '再给一个例子');
+    await expect(followUpService.getProjection(run.runId)).resolves.toMatchObject({
+      pendingDirectives: [
+        {
+          id: firstDirective.directiveId,
+          kind: 'follow_up',
+          content: '继续补充',
+          sequence: 1,
+        },
+        {
+          id: secondDirective.directiveId,
+          kind: 'follow_up',
+          content: '再给一个例子',
+          sequence: 2,
+        },
+      ],
+    });
     await followUpService.execute(run.runId);
 
     const queuedRuns = await connection.db

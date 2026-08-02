@@ -576,7 +576,15 @@ export class DirectRunService {
       .limit(1);
     const run = runRows[0];
     if (!run) return undefined;
-    const [events, artifactRows, evidenceRows, questionRows, approvalRows] = await Promise.all([
+    const [
+      events,
+      artifactRows,
+      evidenceRows,
+      questionRows,
+      approvalRows,
+      steeringRows,
+      followUpRows,
+    ] = await Promise.all([
       this.listEvents(runId),
       this.options.database
         .select({
@@ -624,6 +632,26 @@ export class DirectRunService {
         .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
         .where(and(eq(toolCalls.runId, runId), eq(approvals.decision, 'pending')))
         .orderBy(asc(approvals.createdAt)),
+      this.options.database
+        .select({
+          id: runDirectives.id,
+          content: runDirectives.content,
+          sequence: runDirectives.sequence,
+          createdAt: runDirectives.createdAt,
+        })
+        .from(runDirectives)
+        .where(and(eq(runDirectives.runId, runId), eq(runDirectives.status, 'pending')))
+        .orderBy(asc(runDirectives.sequence)),
+      this.options.database
+        .select({
+          id: queuedFollowups.id,
+          content: queuedFollowups.content,
+          sequence: queuedFollowups.sequence,
+          createdAt: queuedFollowups.createdAt,
+        })
+        .from(queuedFollowups)
+        .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')))
+        .orderBy(asc(queuedFollowups.sequence)),
     ]);
     const question = questionRows[0];
     const pendingInteraction = question
@@ -680,6 +708,18 @@ export class DirectRunService {
       ],
       artifacts: artifactRows,
       ...(pendingInteraction ? { pendingInteraction } : {}),
+      pendingDirectives: [
+        ...steeringRows.map((directive) => ({
+          ...directive,
+          kind: 'steering' as const,
+          createdAt: directive.createdAt.toISOString(),
+        })),
+        ...followUpRows.map((directive) => ({
+          ...directive,
+          kind: 'follow_up' as const,
+          createdAt: directive.createdAt.toISOString(),
+        })),
+      ].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
       lastEventId: events.at(-1)?.sequence ?? 0,
       createdAt: run.createdAt.toISOString(),
       ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),

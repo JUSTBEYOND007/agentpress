@@ -2,9 +2,10 @@
   position: relative;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr);
+  min-width: 0;
   max-height: 100dvh;
   border-left: 1px solid #e8e8e6;
-  background: #fafafa;
+  background: linear-gradient(180deg, #ffffff 0%, #fafafa 42%, #f7f7f5 100%);
 }
 
 .agent-header {
@@ -12,7 +13,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 14px 0 16px;
   border-bottom: 1px solid #ededeb;
   background: #ffffff;
 }
@@ -236,21 +237,23 @@
   display: grid;
   min-height: 0;
   grid-template-rows: minmax(0, 1fr) auto;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0%) 0%, #fafafa 100%),
+    #ffffff;
 }
 
 .agent-thread {
   position: relative;
   min-height: 0;
   overflow-y: auto;
-  padding: 22px 18px;
-  scroll-padding-bottom: 72px;
+  padding: 18px 18px 10px;
+  scroll-padding-bottom: 136px;
 }
 
 .aui-message {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   color: #454642;
   font-size: 14px;
   line-height: 1.6;
@@ -262,11 +265,13 @@
 
 .aui-user-message {
   width: fit-content;
-  max-width: 88%;
+  max-width: 82%;
   margin-left: auto;
-  border-radius: 8px;
-  background: #ececea;
-  padding: 10px 12px;
+  border-radius: 15px 15px 4px;
+  background: #efefed;
+  padding: 8px 11px;
+  color: #30312d;
+  font-size: 13px;
 }
 
 .aui-assistant-message {
@@ -279,12 +284,12 @@
 }
 
 .assistant-content > * + * {
-  margin-top: 8px;
+  margin-top: 7px;
 }
 
 .message-actions {
   display: flex;
-  min-height: 24px;
+  min-height: 18px;
   align-items: center;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -309,18 +314,6 @@
 .message-actions button:hover {
   background: #eeeeec;
   color: #444541;
-}
-
-.assistant-avatar {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #dededb;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #555650;
 }
 
 .message-text {
@@ -357,9 +350,10 @@
 .artifact-part,
 .proposal-preview,
 .ask-user-part {
-  border-top: 1px solid #e5e5e2;
-  border-bottom: 1px solid #e5e5e2;
-  padding: 8px 0;
+  border: 1px solid #e5e5e2;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 9px 10px;
 }
 
 .plan-part ol {
@@ -385,7 +379,7 @@
 
 .plan-part li strong {
   font-size: 12px;
-  font-weight: 560;
+  font-weight: 520;
 }
 
 .plan-part li small,
@@ -399,9 +393,11 @@
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
-  border-left: 1px solid #dcdcd8;
-  padding: 5px 0 5px 10px;
-  color: #74756f;
+  margin-left: 4px;
+  border-left: 1px solid #e3e3df;
+  padding: 3px 0 3px 10px;
+  color: #858680;
+  font-size: 11px;
 }
 
 .activity-part small {
@@ -410,7 +406,7 @@
 }
 
 .activity-part.is-active {
-  color: #4f6f9e;
+  color: #4f725c;
 }
 
 .activity-spinner {
@@ -771,20 +767,13 @@
   color: #92938e;
 }
 
-.proposal-preview {
-  border-top: 1px solid #e7e7e4;
-  padding: 13px 0;
-}
-
 .proposal-heading,
-.proposal-heading > div,
-.proposal-submit-row {
+.proposal-heading > div {
   display: flex;
   align-items: center;
 }
 
-.proposal-heading,
-.proposal-submit-row {
+.proposal-heading {
   justify-content: space-between;
   gap: 8px;
 }
@@ -803,7 +792,7 @@
 }
 
 .proposal-heading span,
-.proposal-submit-row span {
+.proposal-guidance {
   color: #858680;
   font-size: 10px;
 }
@@ -823,20 +812,13 @@
   color: #397257 !important;
 }
 
-.proposal-heading button:disabled,
-.proposal-submit-row button:disabled {
+.proposal-heading button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.proposal-submit-row {
-  margin-top: 9px;
-}
-
-.proposal-submit-row .primary-action {
-  min-width: 76px;
-  padding: 6px 9px;
-  font-size: 11px;
+.proposal-guidance {
+  margin: 0;
 }
 
 .proposal-error {
