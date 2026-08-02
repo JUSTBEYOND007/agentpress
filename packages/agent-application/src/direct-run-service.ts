@@ -20,6 +20,7 @@ import {
   conversations,
   enqueueOutboxMessage,
   evidenceRecords,
+  editProposals,
   rootRequests,
   planRevisions,
   queuedFollowups,
@@ -47,6 +48,7 @@ import {
 } from './contracts.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import { RunContextService } from './run-context-service.js';
+import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -582,6 +584,7 @@ export class DirectRunService {
       evidenceRows,
       questionRows,
       approvalRows,
+      proposalRows,
       steeringRows,
       followUpRows,
     ] = await Promise.all([
@@ -634,6 +637,14 @@ export class DirectRunService {
         .orderBy(asc(approvals.createdAt)),
       this.options.database
         .select({
+          id: editProposals.id,
+          status: editProposals.status,
+          expiresAt: editProposals.expiresAt,
+        })
+        .from(editProposals)
+        .where(eq(editProposals.runId, runId)),
+      this.options.database
+        .select({
           id: runDirectives.id,
           content: runDirectives.content,
           sequence: runDirectives.sequence,
@@ -654,6 +665,14 @@ export class DirectRunService {
         .orderBy(asc(queuedFollowups.sequence)),
     ]);
     const question = questionRows[0];
+    const proposalStatuses = new Map<string, ProposalProjectionStatus>(
+      proposalRows.map((proposal) => [
+        proposal.id,
+        proposal.status === 'pending' && proposal.expiresAt <= this.now()
+          ? 'expired'
+          : proposal.status,
+      ]),
+    );
     const pendingInteraction = question
       ? { type: 'ask-user', id: question.id, question: question.prompt, options: question.options }
       : approvalRows.length > 0
@@ -666,7 +685,7 @@ export class DirectRunService {
       mode: run.mode,
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
       parts: [
-        ...events.flatMap(toRunParts),
+        ...projectRunParts(events, proposalStatuses),
         ...evidenceRows.map((evidence) => {
           const toolCallId =
             typeof evidence.metadata.toolCallId === 'string'
@@ -1234,40 +1253,4 @@ function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {
     payload: event.payload,
     createdAt: event.createdAt,
   };
-}
-
-function toRunParts(event: DurableRunEvent): readonly import('./contracts.js').RunPart[] {
-  const type = event.eventType;
-  const partType =
-    type === 'message.completed'
-      ? 'text'
-      : type.startsWith('plan.')
-        ? 'plan'
-        : type === 'tool.approval_requested'
-          ? 'tool-approval'
-          : type === 'user.input_requested'
-            ? 'ask-user'
-            : type.includes('artifact')
-              ? 'artifact'
-              : type.startsWith('run.recover')
-                ? 'recovery'
-                : type === 'run.completed_with_degradation' || type === 'run.failed'
-                  ? 'warning'
-                  : type.startsWith('tool.') || type.startsWith('task.')
-                    ? 'activity'
-                    : type.startsWith('run.completed')
-                      ? 'usage'
-                      : undefined;
-  return partType
-    ? [
-        {
-          id: event.id,
-          runId: event.runId,
-          sequence: event.sequence,
-          type: partType,
-          status: type,
-          payload: event.payload,
-        },
-      ]
-    : [];
 }

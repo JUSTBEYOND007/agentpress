@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { activityLabel, safeExternalUrl, statusLabel } from './agent-view-model';
+import { activityLabel, proposalFromPart, safeExternalUrl, statusLabel } from './agent-view-model';
 
 describe('agent view model', () => {
   it('turns internal run states into consumer-facing copy', () => {
@@ -26,5 +26,23 @@ describe('agent view model', () => {
     expect(safeExternalUrl('https://example.com/source')).toBe('https://example.com/source');
     expect(safeExternalUrl('javascript:alert(1)')).toBeUndefined();
     expect(safeExternalUrl('not a link')).toBeUndefined();
+  });
+
+  it('only opens proposals whose persisted status is pending', () => {
+    const part = {
+      id: 'part-1',
+      runId: 'run-1',
+      sequence: 1,
+      type: 'activity' as const,
+      status: 'tool.succeeded',
+      payload: {
+        proposalStatus: 'pending',
+        output: { proposalId: 'proposal-1', operations: [], diffs: [] },
+      },
+    };
+    expect(proposalFromPart(part)).toMatchObject({ proposalId: 'proposal-1', status: 'pending' });
+    expect(
+      proposalFromPart({ ...part, payload: { ...part.payload, proposalStatus: 'accepted' } }),
+    ).toBeUndefined();
   });
 });

@@ -32,6 +32,7 @@ export type ConversationView = {
 
 export type Proposal = {
   readonly proposalId: string;
+  readonly status: 'pending';
   readonly articleId?: string;
   readonly baseRevisionId?: string;
   readonly operations: readonly EditOperation[];
@@ -42,10 +43,16 @@ export function proposalFromPart(part: RunPart): Proposal | undefined {
   const output = recordValue(part.payload.output);
   const value = Object.keys(output).length > 0 ? output : part.payload;
   const proposalId = stringValue(value.proposalId);
-  if (!proposalId || !Array.isArray(value.operations) || !Array.isArray(value.diffs))
+  if (
+    !proposalId ||
+    stringValue(part.payload.proposalStatus) !== 'pending' ||
+    !Array.isArray(value.operations) ||
+    !Array.isArray(value.diffs)
+  )
     return undefined;
   return {
     proposalId,
+    status: 'pending',
     ...(stringValue(value.articleId) ? { articleId: stringValue(value.articleId) } : {}),
     ...(stringValue(value.baseRevisionId)
       ? { baseRevisionId: stringValue(value.baseRevisionId) }

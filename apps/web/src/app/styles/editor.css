@@ -254,11 +254,6 @@
   opacity: 0.4;
 }
 
-.article-review-submit {
-  background: #2f7650 !important;
-  color: #ffffff !important;
-}
-
 .article-review-error {
   position: absolute;
   top: 100%;

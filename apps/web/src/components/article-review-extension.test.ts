@@ -27,6 +27,7 @@ describe('article review decorations', () => {
     const review: ArticleReviewState = {
       proposal: {
         proposalId: 'proposal-1',
+        status: 'pending',
         operations: [
           {
             operationId: 'operation-1',

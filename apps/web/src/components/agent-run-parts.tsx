@@ -340,7 +340,7 @@ function ArticleChangePart({
           审阅修改
         </button>
       </div>
-      <p className="proposal-guidance">在正文中逐项接受或拒绝后再应用。</p>
+      <p className="proposal-guidance">在正文中逐项审阅修改。</p>
     </section>
   );
 }
