@@ -556,7 +556,6 @@ function WorkspacePage(): React.JSX.Element {
                   onReviewDecisionAll: articleReview.setAll,
                   onReviewErrorDismiss: articleReview.dismissError,
                   onReviewMove: articleReview.moveFocus,
-                  onReviewSubmit: articleReview.submit,
                   onReviewVisibleChange: articleReview.setVisible,
                 }
               : {})}

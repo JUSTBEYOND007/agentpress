@@ -1,0 +1,49 @@
+import { describe, expect, it } from 'vitest';
+
+import type { DurableRunEvent } from '../src/contracts.js';
+import { projectRunParts } from '../src/run-projection.js';
+
+describe('run projection', () => {
+  it('folds tool and task lifecycle events into their latest durable state', () => {
+    const parts = projectRunParts([
+      event(1, 'task.started', { taskId: 'task-1' }),
+      event(2, 'tool.executing', { toolCallId: 'tool-1' }),
+      event(3, 'tool.succeeded', { toolCallId: 'tool-1' }),
+      event(4, 'task.succeeded', { taskId: 'task-1' }),
+    ]);
+
+    expect(parts).toHaveLength(2);
+    expect(parts.map(({ status }) => status)).toEqual(['task.succeeded', 'tool.succeeded']);
+    expect(parts.every(({ status }) => !status.includes('executing'))).toBe(true);
+  });
+
+  it('annotates proposal output with its current persisted status', () => {
+    const parts = projectRunParts(
+      [
+        event(1, 'tool.succeeded', {
+          toolCallId: 'tool-1',
+          output: { proposalId: 'proposal-1', operations: [], diffs: [] },
+        }),
+      ],
+      new Map([['proposal-1', 'accepted']]),
+    );
+
+    expect(parts[0]?.payload).toMatchObject({ proposalStatus: 'accepted' });
+  });
+});
+
+function event(
+  sequence: number,
+  eventType: string,
+  payload: Readonly<Record<string, unknown>>,
+): DurableRunEvent {
+  return {
+    id: `event-${String(sequence)}`,
+    runId: 'run-1',
+    sequence,
+    eventType,
+    eventVersion: 1,
+    payload,
+    createdAt: new Date(sequence),
+  };
+}

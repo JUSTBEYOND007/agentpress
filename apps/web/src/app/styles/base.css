@@ -78,9 +78,10 @@
 html,
 body {
   margin: 0;
+  height: 100%;
   min-height: 100%;
   width: 100%;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 button,
@@ -107,8 +108,9 @@ button {
     var(--workspace-sidebar-width)
     minmax(0, 1fr)
     var(--workspace-agent-width);
-  width: auto;
+  width: 100vw;
   height: 100dvh;
+  max-width: 100vw;
   min-height: 0;
   overflow: hidden;
   background: #ffffff;

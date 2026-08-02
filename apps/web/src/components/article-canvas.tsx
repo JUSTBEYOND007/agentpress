@@ -51,7 +51,6 @@ export function ArticleCanvas({
   onReviewDecisionAll,
   onReviewMove,
   onReviewErrorDismiss,
-  onReviewSubmit,
   onReviewVisibleChange,
   onSelectionChange,
 }: {
@@ -63,7 +62,6 @@ export function ArticleCanvas({
   readonly onReviewDecisionAll?: (decision: 'accepted' | 'rejected') => void;
   readonly onReviewMove?: (offset: number) => void;
   readonly onReviewErrorDismiss?: () => void;
-  readonly onReviewSubmit?: () => Promise<void>;
   readonly onReviewVisibleChange?: (visible: boolean) => void;
   readonly onSelectionChange?: (selection?: ArticleSelectionView) => void;
 }): React.JSX.Element {
@@ -254,7 +252,6 @@ export function ArticleCanvas({
           activeIndex={reviewActiveIndex}
           onDecisionAll={(decision) => onReviewDecisionAll?.(decision)}
           onMove={(offset) => onReviewMove?.(offset)}
-          onSubmit={async () => onReviewSubmit?.()}
           onVisibleChange={(visible) => onReviewVisibleChange?.(visible)}
           review={review}
         />

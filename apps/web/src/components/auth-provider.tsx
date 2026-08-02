@@ -29,11 +29,13 @@ const PublicAuthContext = createContext<PublicAuthState>({
 export function AuthProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   if (!logtoConfig) {
     return (
-      <main className="auth-screen">
+      <main className="auth-screen" role="alert">
         <div className="auth-panel">
           <h1>AgentPress</h1>
-          <p>身份服务尚未配置。</p>
-          <code>NEXT_PUBLIC_LOGTO_ENDPOINT / NEXT_PUBLIC_LOGTO_APP_ID</code>
+          <p>身份服务暂不可用，请检查本地服务状态后重试。</p>
+          <button type="button" onClick={() => window.location.reload()}>
+            重新加载
+          </button>
         </div>
       </main>
     );

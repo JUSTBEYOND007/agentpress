@@ -328,7 +328,7 @@ function ArticleChangePart({
       <div className="proposal-heading">
         <div>
           <strong>文章修改</strong>
-          <span>{proposal.operations.length} 处修改将在正文中显示</span>
+          <span>{proposal.operations.length} 处修改</span>
         </div>
         <button
           className="proposal-view-button"
@@ -337,10 +337,9 @@ function ArticleChangePart({
           }}
           type="button"
         >
-          审阅修改
+          显示修改
         </button>
       </div>
-      <p className="proposal-guidance">在正文中逐项接受或拒绝后再应用。</p>
     </section>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, ChevronLeft, ChevronRight, EyeOff, RotateCcw, Sparkles, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import { friendlyFailure } from './agent-view-model';
@@ -25,11 +25,80 @@ export function useArticleReview(
 ) {
   const [review, setReview] = useState<ArticleReviewState>();
   const [resolved, setResolved] = useState<ReadonlySet<string>>(new Set());
+  const reviewRef = useRef<ArticleReviewState | undefined>(undefined);
 
   useEffect(() => {
+    reviewRef.current = review;
+  }, [review]);
+
+  useEffect(() => {
+    reviewRef.current = undefined;
     setReview(undefined);
     setResolved(new Set());
   }, [articleId]);
+
+  const submitDecisions = useCallback(
+    async (
+      proposal: Proposal,
+      decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
+    ): Promise<void> => {
+      setReview((current) =>
+        current?.proposal.proposalId === proposal.proposalId
+          ? { ...current, decisions, phase: 'submitting', error: undefined }
+          : current,
+      );
+      try {
+        const response = await authenticatedFetch(
+          `${apiUrl}/edit-proposals/${proposal.proposalId}/decisions`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ decisions }),
+          },
+        );
+        if (!response.ok) throw new Error(await response.text());
+      } catch (reason) {
+        const failed: ArticleReviewState = {
+          ...(reviewRef.current ?? {
+            proposal,
+            decisions,
+            visible: false,
+            phase: 'conflict' as const,
+            onDecision: () => undefined,
+          }),
+          phase: 'conflict',
+          visible: false,
+          error: friendlyFailure(
+            reason,
+            '正文已经更新，这批修改无法应用。请让助手基于最新正文重新修改。',
+          ),
+        };
+        reviewRef.current = failed;
+        setReview(failed);
+        return;
+      }
+      setResolved((current) => new Set([...current, proposal.proposalId]));
+      reviewRef.current = undefined;
+      setReview(undefined);
+      await onArticleUpdated().catch(() => undefined);
+    },
+    [onArticleUpdated],
+  );
+
+  const onDecision = useCallback(
+    (operationId: string, decision: 'accepted' | 'rejected'): void => {
+      const current = reviewRef.current;
+      if (!current || current.phase === 'submitting') return;
+      const decisions = { ...current.decisions, [operationId]: decision };
+      const next = { ...current, decisions, error: undefined };
+      reviewRef.current = next;
+      setReview(next);
+      if (current.proposal.operations.every(({ operationId: id }) => decisions[id])) {
+        void submitDecisions(current.proposal, decisions);
+      }
+    },
+    [submitDecisions],
+  );
 
   const showProposal = useCallback(
     (proposal: Proposal): void => {
@@ -41,49 +110,26 @@ export function useArticleReview(
         return;
       setReview((current) =>
         current?.proposal.proposalId === proposal.proposalId
-          ? { ...current, visible: true }
-          : {
-              proposal,
-              decisions: {},
-              visible: true,
-              activeOperationId: proposal.operations[0]?.operationId,
-              phase: 'pending',
-              onDecision: () => undefined,
-            },
+          ? { ...current, visible: true, onDecision }
+          : createArticleReviewState(proposal, onDecision),
       );
     },
-    [articleId, resolved],
+    [articleId, onDecision, resolved],
   );
 
-  const onDecision = useCallback((operationId: string, decision: 'accepted' | 'rejected'): void => {
-    setReview((current) =>
-      current
-        ? {
-            ...current,
-            decisions: { ...current.decisions, [operationId]: decision },
-            error: undefined,
-          }
-        : current,
-    );
-  }, []);
-
-  useEffect(() => {
-    setReview((current) => (current ? { ...current, onDecision } : current));
-  }, [onDecision]);
-
-  const setAll = useCallback((decision: 'accepted' | 'rejected'): void => {
-    setReview((current) =>
-      current
-        ? {
-            ...current,
-            decisions: Object.fromEntries(
-              current.proposal.operations.map(({ operationId }) => [operationId, decision]),
-            ),
-            error: undefined,
-          }
-        : current,
-    );
-  }, []);
+  const setAll = useCallback(
+    (decision: 'accepted' | 'rejected'): void => {
+      const current = reviewRef.current;
+      if (!current || current.phase === 'submitting') return;
+      const decisions = Object.fromEntries(
+        current.proposal.operations.map(({ operationId }) => [operationId, decision]),
+      );
+      reviewRef.current = { ...current, decisions, error: undefined };
+      setReview(reviewRef.current);
+      void submitDecisions(current.proposal, decisions);
+    },
+    [submitDecisions],
+  );
 
   const focus = useCallback((operationId: string): void => {
     setReview((current) => (current ? { ...current, activeOperationId: operationId } : current));
@@ -101,48 +147,6 @@ export function useArticleReview(
   const dismissError = useCallback((): void => {
     setReview((current) => (current ? { ...current, error: undefined } : current));
   }, []);
-
-  const submit = useCallback(async (): Promise<void> => {
-    if (!review || review.phase === 'submitting') return;
-    const complete = review.proposal.operations.every(
-      ({ operationId }) => review.decisions[operationId],
-    );
-    if (!complete) {
-      setReview((current) => (current ? { ...current, error: '请先处理每一处修改。' } : current));
-      return;
-    }
-    setReview((current) =>
-      current ? { ...current, phase: 'submitting', error: undefined } : current,
-    );
-    try {
-      const response = await authenticatedFetch(
-        `${apiUrl}/edit-proposals/${review.proposal.proposalId}/decisions`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ decisions: review.decisions }),
-        },
-      );
-      if (!response.ok) throw new Error(await response.text());
-      setResolved((current) => new Set([...current, review.proposal.proposalId]));
-      setReview(undefined);
-      await onArticleUpdated();
-    } catch (reason) {
-      setReview((current) =>
-        current
-          ? {
-              ...current,
-              phase: 'conflict',
-              visible: false,
-              error: friendlyFailure(
-                reason,
-                '正文已经更新，这批修改无法应用。请让助手基于最新正文重新修改。',
-              ),
-            }
-          : current,
-      );
-    }
-  }, [onArticleUpdated, review]);
 
   const operationIds = useMemo(
     () => review?.proposal.operations.map(({ operationId }) => operationId) ?? [],
@@ -168,7 +172,6 @@ export function useArticleReview(
     setAll,
     setVisible,
     dismissError,
-    submit,
     moveFocus,
     activeIndex,
   };
@@ -179,14 +182,12 @@ export function ArticleReviewToolbar({
   activeIndex,
   onDecisionAll,
   onMove,
-  onSubmit,
   onVisibleChange,
 }: {
   readonly review: ArticleReviewState;
   readonly activeIndex: number;
   readonly onDecisionAll: (decision: 'accepted' | 'rejected') => void;
   readonly onMove: (offset: number) => void;
-  readonly onSubmit: () => Promise<void>;
   readonly onVisibleChange: (visible: boolean) => void;
 }): React.JSX.Element {
   const count = review.proposal.operations.length;
@@ -195,15 +196,13 @@ export function ArticleReviewToolbar({
     <section className="article-review-toolbar" aria-label="AI 修改审阅" aria-live="polite">
       <div className="article-review-title">
         <Sparkles aria-hidden="true" size={14} />
-        <strong>AI 修改</strong>
-        <span>
-          {selected}/{count} 处已处理
-        </span>
+        <strong>建议修改</strong>
+        <span>{count} 处</span>
       </div>
       <div className="article-review-navigation">
         <button
           aria-label="上一处修改"
-          disabled={count < 2}
+          disabled={count < 2 || review.phase === 'submitting'}
           onClick={() => {
             onMove(-1);
           }}
@@ -213,11 +212,11 @@ export function ArticleReviewToolbar({
           <ChevronLeft size={14} />
         </button>
         <span>
-          {activeIndex + 1} / {count}
+          {activeIndex + 1}/{count}
         </span>
         <button
           aria-label="下一处修改"
-          disabled={count < 2}
+          disabled={count < 2 || review.phase === 'submitting'}
           onClick={() => {
             onMove(1);
           }}
@@ -229,6 +228,8 @@ export function ArticleReviewToolbar({
       </div>
       <div className="article-review-actions">
         <button
+          className="article-review-accept"
+          disabled={review.phase === 'submitting'}
           onClick={() => {
             onDecisionAll('accepted');
           }}
@@ -238,6 +239,8 @@ export function ArticleReviewToolbar({
           全部接受
         </button>
         <button
+          className="article-review-reject"
+          disabled={review.phase === 'submitting'}
           onClick={() => {
             onDecisionAll('rejected');
           }}
@@ -245,16 +248,6 @@ export function ArticleReviewToolbar({
         >
           <X size={13} />
           全部拒绝
-        </button>
-        <button
-          className="article-review-submit"
-          disabled={review.phase === 'submitting'}
-          onClick={() => {
-            void onSubmit();
-          }}
-          type="button"
-        >
-          {review.phase === 'submitting' ? '应用中…' : '应用修改'}
         </button>
         <button
           aria-label="隐藏修改"
@@ -267,6 +260,9 @@ export function ArticleReviewToolbar({
           <EyeOff size={14} />
         </button>
       </div>
+      <span className="article-review-progress" aria-hidden="true">
+        {selected > 0 ? `${String(selected)} 处已处理` : null}
+      </span>
       {review.error ? (
         <p className="article-review-error">
           <RotateCcw size={12} />
@@ -275,4 +271,18 @@ export function ArticleReviewToolbar({
       ) : null}
     </section>
   );
+}
+
+export function createArticleReviewState(
+  proposal: Proposal,
+  onDecision: ArticleReviewState['onDecision'],
+): ArticleReviewState {
+  return {
+    proposal,
+    decisions: {},
+    visible: true,
+    activeOperationId: proposal.operations[0]?.operationId,
+    phase: 'pending',
+    onDecision,
+  };
 }

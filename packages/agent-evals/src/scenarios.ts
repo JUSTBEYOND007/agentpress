@@ -30,6 +30,13 @@ export type EvalScenario = {
   readonly version: 2;
   readonly category: EvalCategory;
   readonly prompt: string;
+  readonly setup?: {
+    readonly bindArticle?: boolean;
+    readonly priorTurns?: readonly {
+      readonly user: string;
+      readonly assistant: string;
+    }[];
+  };
   readonly expected: EvalExpectation;
   readonly source: 'anonymous_interview_research' | 'product_spec';
 };
@@ -65,6 +72,30 @@ export const evalScenarios: readonly EvalScenario[] = [
     ),
   ),
   scenario('routing-05', 'routing', '仅回答当前会话问题：Kafka 的消费者组有什么作用？', direct),
+  scenario('routing-06', 'routing', '你好', direct, {
+    bindArticle: true,
+    priorTurns: [
+      {
+        user: '续写当前文章的下一段',
+        assistant: '已完成续写，并生成了一项正文修改提案。',
+      },
+    ],
+  }),
+  scenario(
+    'routing-07',
+    'routing',
+    '继续上一段',
+    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
+    {
+      bindArticle: true,
+      priorTurns: [
+        {
+          user: '续写当前文章的下一段',
+          assistant: '已完成第一段续写。',
+        },
+      ],
+    },
+  ),
   scenario(
     'delegation-01',
     'delegation',
@@ -298,12 +329,14 @@ function scenario(
   category: EvalCategory,
   prompt: string,
   expected: EvalExpectation,
+  setup?: EvalScenario['setup'],
 ): EvalScenario {
   return {
     id: `agentpress-${id}`,
     version: 2,
     category,
     prompt,
+    ...(setup ? { setup } : {}),
     expected,
     source: id.endsWith('01') ? 'anonymous_interview_research' : 'product_spec',
   };
