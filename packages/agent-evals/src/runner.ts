@@ -9,6 +9,7 @@ export type PersistedRunObservation = {
   readonly artifactTypes: readonly string[];
   readonly evidenceCount: number;
   readonly approvalRequests: number;
+  readonly actionProposals?: number;
   readonly schemaValid: boolean;
   readonly rejectionCode?: string;
   readonly recoveryAssertions?: readonly string[];
@@ -39,6 +40,12 @@ export function evaluatePersistedRun(
   const recoveryCorrect = expected.recovery
     ? observed?.recoveryAssertions?.includes(expected.recovery) === true
     : true;
+  const actionProposalCorrect =
+    expected.actionProposal === 'required'
+      ? (observed?.actionProposals ?? 0) > 0
+      : expected.actionProposal === 'forbidden'
+        ? observed?.actionProposals === 0
+        : true;
   return {
     scenarioId: scenario.id,
     routingCorrect: Boolean(
@@ -48,7 +55,8 @@ export function evaluatePersistedRun(
       observed &&
       expected.requiredRoles.every((role) => roles.has(role)) &&
       expected.requiredCapabilities.every((capability) => capabilities.has(capability)) &&
-      expected.requiredArtifactTypes.every((type) => artifacts.has(type)),
+      expected.requiredArtifactTypes.every((type) => artifacts.has(type)) &&
+      actionProposalCorrect,
     ),
     schemaValid: observed?.schemaValid === true && recoveryCorrect,
     citationsResolvable:

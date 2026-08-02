@@ -24,6 +24,7 @@ export type EvalExpectation = {
   readonly approval: 'required' | 'forbidden' | 'optional';
   readonly recovery?: 'checkpoint' | 'outcome_unknown' | 'event_replay';
   readonly mustReject?: 'unauthorized_context' | 'stale_edit' | 'approval_mismatch';
+  readonly actionProposal?: 'required' | 'forbidden' | 'optional';
 };
 export type EvalScenario = {
   readonly id: string;
@@ -32,6 +33,7 @@ export type EvalScenario = {
   readonly prompt: string;
   readonly setup?: {
     readonly bindArticle?: boolean;
+    readonly confirmedArticleEdit?: boolean;
     readonly priorTurns?: readonly {
       readonly user: string;
       readonly assistant: string;
@@ -56,7 +58,8 @@ export const evalScenarios: readonly EvalScenario[] = [
     'routing-03',
     'routing',
     '将当前文章标题修改为《真实 Pi Agent 实践指南》',
-    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
+    expectation(['direct'], [], [], [], 'optional', 'optional', undefined, undefined, 'required'),
+    { bindArticle: true },
   ),
   scenario(
     'routing-04',
@@ -85,7 +88,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     'routing-07',
     'routing',
     '继续上一段',
-    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
+    expectation(['direct'], [], [], [], 'optional', 'optional', undefined, undefined, 'required'),
     {
       bindArticle: true,
       priorTurns: [
@@ -95,6 +98,13 @@ export const evalScenarios: readonly EvalScenario[] = [
         },
       ],
     },
+  ),
+  scenario(
+    'routing-08',
+    'routing',
+    '继续上一段',
+    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
+    { bindArticle: true, confirmedArticleEdit: true },
   ),
   scenario(
     'delegation-01',
@@ -112,7 +122,8 @@ export const evalScenarios: readonly EvalScenario[] = [
     'delegation-02',
     'delegation',
     '只润色当前段落',
-    expectation(['planned'], ['editor'], ['article.propose'], ['EditProposal']),
+    expectation(['direct'], [], [], [], 'optional', 'optional', undefined, undefined, 'required'),
+    { bindArticle: true },
   ),
   scenario(
     'delegation-03',
@@ -270,6 +281,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       undefined,
       'stale_edit',
     ),
+    { bindArticle: true, confirmedArticleEdit: true },
   ),
   scenario(
     'stale-edit-02',
@@ -285,6 +297,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       undefined,
       'stale_edit',
     ),
+    { bindArticle: true, confirmedArticleEdit: true },
   ),
   scenario(
     'stale-edit-03',
@@ -299,6 +312,7 @@ export const evalScenarios: readonly EvalScenario[] = [
       'required',
       'checkpoint',
     ),
+    { bindArticle: true, confirmedArticleEdit: true },
   ),
 ];
 
@@ -311,6 +325,7 @@ function expectation(
   approval: EvalExpectation['approval'] = 'optional',
   recovery?: EvalExpectation['recovery'],
   mustReject?: EvalExpectation['mustReject'],
+  actionProposal: EvalExpectation['actionProposal'] = 'optional',
 ): EvalExpectation {
   return {
     allowedModes,
@@ -321,6 +336,7 @@ function expectation(
     approval,
     ...(recovery ? { recovery } : {}),
     ...(mustReject ? { mustReject } : {}),
+    actionProposal,
   };
 }
 

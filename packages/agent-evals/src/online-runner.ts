@@ -45,7 +45,7 @@ export type OnlineEvalReport = {
   readonly schemaVersion: 2;
   readonly promptVersion: typeof ONLINE_EVAL_PROMPT_VERSION;
   readonly model: string;
-  readonly provider: 'volcengine-ark';
+  readonly provider: 'volcengine-ark' | 'openai-compatible';
   readonly startedAt: string;
   readonly completedAt: string;
   readonly limits: OnlineEvalLimits;
@@ -62,6 +62,7 @@ export type OnlineEvalReport = {
 export type RunOnlineEvalsOptions = {
   readonly orchestrator: OrchestratorEvalHarness;
   readonly model: string;
+  readonly provider?: OnlineEvalReport['provider'];
   readonly scenarios: readonly EvalScenario[];
   readonly limits: OnlineEvalLimits;
   readonly now?: () => Date;
@@ -143,7 +144,7 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
     schemaVersion: 2,
     promptVersion: ONLINE_EVAL_PROMPT_VERSION,
     model: options.model,
-    provider: 'volcengine-ark',
+    provider: options.provider ?? 'volcengine-ark',
     startedAt,
     completedAt: now().toISOString(),
     limits: options.limits,

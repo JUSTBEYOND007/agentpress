@@ -21,6 +21,7 @@ describe('Agent eval suite', () => {
   it('covers both sides of the cross-turn intent boundary', () => {
     const greeting = evalScenarios.find(({ id }) => id === 'agentpress-routing-06');
     const continuation = evalScenarios.find(({ id }) => id === 'agentpress-routing-07');
+    const confirmed = evalScenarios.find(({ id }) => id === 'agentpress-routing-08');
 
     expect(greeting).toMatchObject({
       prompt: '你好',
@@ -30,7 +31,12 @@ describe('Agent eval suite', () => {
     expect(greeting?.setup?.priorTurns).toHaveLength(1);
     expect(continuation).toMatchObject({
       prompt: '继续上一段',
+      expected: { allowedModes: ['direct'], actionProposal: 'required' },
+    });
+    expect(confirmed).toMatchObject({
+      prompt: '继续上一段',
       expected: { allowedModes: ['planned'], requiredRoles: ['editor'] },
+      setup: { confirmedArticleEdit: true },
     });
   });
 
