@@ -1,7 +1,7 @@
 import { Extension } from '@tiptap/core';
 import { DOMSerializer, Node } from '@tiptap/pm/model';
 import { EditorState, Plugin, PluginKey } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 
 import type { ArticleReviewState } from './article-review';
 
@@ -11,30 +11,30 @@ export const ArticleReviewExtension = Extension.create({
   name: 'articleReview',
 
   addProseMirrorPlugins() {
-    return [
-      new Plugin<ArticleReviewState | null>({
-        key: articleReviewPluginKey,
-        state: {
-          init: () => null,
-          apply(transaction, value) {
-            return (
-              (transaction.getMeta(articleReviewPluginKey) as
-                | ArticleReviewState
-                | null
-                | undefined) ?? value
-            );
-          },
-        },
-        props: {
-          decorations(state) {
-            const review = articleReviewPluginKey.getState(state);
-            return review?.visible ? buildReviewDecorations(state, review) : null;
-          },
-        },
-      }),
-    ];
+    return [createArticleReviewPlugin()];
   },
 });
+
+export function createArticleReviewPlugin(): Plugin<ArticleReviewState | null> {
+  return new Plugin<ArticleReviewState | null>({
+    key: articleReviewPluginKey,
+    state: {
+      init: () => null,
+      apply(transaction, value) {
+        return (
+          (transaction.getMeta(articleReviewPluginKey) as ArticleReviewState | null | undefined) ??
+          value
+        );
+      },
+    },
+    props: {
+      decorations(state) {
+        const review = articleReviewPluginKey.getState(state);
+        return review?.visible ? buildReviewDecorations(state, review) : null;
+      },
+    },
+  });
+}
 
 export function buildReviewDecorations(
   state: EditorState,
@@ -70,10 +70,12 @@ export function buildReviewDecorations(
       decorations.push(
         Decoration.widget(
           anchor,
-          () => createAfterWidget(state, review, diff.operationId, diff.kind, diff.after, focus),
+          (view) => createAfterWidget(view, review, diff.operationId, diff.kind, diff.after, focus),
           {
-            key: `${review.proposal.proposalId}:${diff.operationId}`,
+            key: widgetKey(review, diff.operationId),
             side: 1,
+            stopEvent: () => true,
+            ignoreSelection: true,
           },
         ),
       );
@@ -81,10 +83,12 @@ export function buildReviewDecorations(
       decorations.push(
         Decoration.widget(
           current.to,
-          () => createActionWidget(review, diff.operationId, focus, 'inline'),
+          (view) => createActionWidget(view, review, diff.operationId, focus, 'inline'),
           {
-            key: `${review.proposal.proposalId}:${diff.operationId}:actions`,
+            key: `${widgetKey(review, diff.operationId)}:actions`,
             side: 1,
+            stopEvent: () => true,
+            ignoreSelection: true,
           },
         ),
       );
@@ -105,7 +109,7 @@ function insertPosition(
 }
 
 function createAfterWidget(
-  state: EditorState,
+  view: EditorView,
   review: ArticleReviewState,
   operationId: string,
   kind: string,
@@ -117,18 +121,19 @@ function createAfterWidget(
   wrapper.dataset.aiDiffId = operationId;
   wrapper.contentEditable = 'false';
   try {
-    const node = Node.fromJSON(state.schema, block);
-    wrapper.appendChild(DOMSerializer.fromSchema(state.schema).serializeNode(node));
+    const node = Node.fromJSON(view.state.schema, block);
+    wrapper.appendChild(DOMSerializer.fromSchema(view.state.schema).serializeNode(node));
   } catch {
     const fallback = document.createElement('span');
     fallback.textContent = '新的内容';
     wrapper.appendChild(fallback);
   }
-  wrapper.appendChild(createActionWidget(review, operationId, focus));
+  wrapper.appendChild(createActionWidget(view, review, operationId, focus));
   return wrapper;
 }
 
 function createActionWidget(
+  view: EditorView,
   review: ArticleReviewState,
   operationId: string,
   focus: boolean,
@@ -138,8 +143,8 @@ function createActionWidget(
   actions.className = `ai-diff-actions is-${placement} ${focus ? 'is-focused' : ''}`;
   actions.contentEditable = 'false';
   actions.append(
-    buttonFor('接受修改', 'accepted', review, operationId),
-    buttonFor('拒绝修改', 'rejected', review, operationId),
+    buttonFor('接受修改', 'accepted', view, review, operationId),
+    buttonFor('拒绝修改', 'rejected', view, review, operationId),
   );
   return actions;
 }
@@ -147,6 +152,7 @@ function createActionWidget(
 function buttonFor(
   label: string,
   decision: 'accepted' | 'rejected',
+  view: EditorView,
   review: ArticleReviewState,
   operationId: string,
 ): HTMLButtonElement {
@@ -161,7 +167,32 @@ function buttonFor(
     event.preventDefault();
   });
   button.addEventListener('click', () => {
-    review.onDecision(operationId, decision);
+    dispatchReviewDecision(view.state, operationId, decision);
   });
   return button;
+}
+
+export function dispatchReviewDecision(
+  state: EditorState,
+  operationId: string,
+  decision: 'accepted' | 'rejected',
+): boolean {
+  const review = articleReviewPluginKey.getState(state);
+  if (
+    !review?.visible ||
+    review.phase === 'submitting' ||
+    !review.proposal.operations.some(({ operationId: id }) => id === operationId)
+  )
+    return false;
+  review.onDecision(operationId, decision);
+  return true;
+}
+
+function widgetKey(review: ArticleReviewState, operationId: string): string {
+  return [
+    review.proposal.proposalId,
+    operationId,
+    review.decisions[operationId] ?? 'pending',
+    review.phase,
+  ].join(':');
 }

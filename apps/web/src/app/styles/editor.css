@@ -357,7 +357,7 @@
   margin: 3px -4px;
   border-radius: 2px;
   background: #edf6ed;
-  padding: 2px 58px 2px 4px;
+  padding: 2px 4px;
   color: #2b593f;
 }
 
@@ -367,8 +367,8 @@
 
 .ai-diff-actions {
   position: absolute;
-  top: 50%;
-  right: 6px;
+  top: 0;
+  right: -62px;
   display: flex;
   gap: 1px;
   border: 1px solid #dededb;
@@ -379,7 +379,6 @@
     0 3px 8px rgb(15 15 15 / 6%);
   opacity: 0;
   overflow: hidden;
-  transform: translateY(-50%);
   transition: opacity 100ms ease;
 }
 
@@ -395,7 +394,6 @@
   right: auto;
   margin-left: 6px;
   opacity: 1;
-  transform: none;
   vertical-align: middle;
 }
 
@@ -454,6 +452,8 @@
   }
 
   .ai-diff-actions {
+    top: 6px;
+    right: 6px;
     opacity: 1;
   }
 
