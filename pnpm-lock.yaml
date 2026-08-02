@@ -423,6 +423,9 @@ importers:
       '@agentpress/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
+      '@agentpress/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@agentpress/database':
         specifier: workspace:*
         version: link:../database
@@ -468,6 +471,9 @@ importers:
 
   packages/agent-runtime:
     dependencies:
+      '@agentpress/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@earendil-works/pi-agent-core':
         specifier: 'catalog:'
         version: 0.82.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.1)(zod@4.4.3)

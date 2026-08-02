@@ -1,0 +1,2 @@
+ALTER TABLE "agent_sessions" DROP CONSTRAINT "agent_sessions_status_check";--> statement-breakpoint
+ALTER TABLE "agent_sessions" ADD CONSTRAINT "agent_sessions_status_check" CHECK ("agent_sessions"."status" in ('active', 'completed', 'failed', 'interrupted'));

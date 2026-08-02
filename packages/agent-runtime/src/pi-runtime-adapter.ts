@@ -37,6 +37,7 @@ import type {
   RuntimeUserMessage,
   RuntimeUsage,
 } from './contracts.js';
+import { convertAgentPressMessages } from './current-turn.js';
 
 type PiBackend = {
   readonly models: Models;
@@ -113,6 +114,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
         thinkingLevel: 'off',
       },
       streamFn: this.backend.models.streamSimple.bind(this.backend.models),
+      convertToLlm: convertAgentPressMessages,
       sessionId: request.runId,
       maxRetryDelayMs: 10_000,
       ...(request.beforeToolCall || request.maxToolCalls !== undefined
@@ -222,7 +224,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
       if (request.continuation) {
         await agent.continue();
       } else {
-        await agent.prompt(request.prompt);
+        await agent.prompt(request.currentTurn);
       }
 
       if (state.failure) {

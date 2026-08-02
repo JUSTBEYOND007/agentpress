@@ -25,6 +25,7 @@
   "dependencies": {
     "@agentpress/agent-context": "workspace:*",
     "@agentpress/agent-runtime": "workspace:*",
+    "@agentpress/contracts": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/editor-patch": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",

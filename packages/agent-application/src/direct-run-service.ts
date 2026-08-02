@@ -6,6 +6,8 @@ import type {
   RuntimeMessage,
   RuntimeResult,
 } from '@agentpress/agent-runtime';
+import { RUNTIME_CURRENT_TURN_VERSION } from '@agentpress/agent-runtime';
+import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {
   agentRuns,
   agentTasks,
@@ -313,8 +315,13 @@ export class DirectRunService {
       return { runId, status: 'ignored' };
     }
     const currentTurn = {
+      type: 'agentpress_current_turn' as const,
+      version: RUNTIME_CURRENT_TURN_VERSION,
+      source: 'user' as const,
       request: context.prompt,
-      frozenContext: context.contextContent,
+      actionEnvelope: context.actionEnvelope,
+      context: context.contextPack,
+      timestamp: context.timestamp,
     };
     const outcome =
       context.status === 'recovering'
@@ -816,6 +823,15 @@ export class DirectRunService {
         readonly status: string;
         readonly mode: 'direct' | 'planned';
         readonly contextContent: string;
+        readonly actionEnvelope: ActionEnvelopeV1;
+        readonly contextPack: {
+          readonly content: string;
+          readonly contentHash: string;
+          readonly format: string;
+          readonly schemaVersion: number;
+          readonly manifest: Readonly<Record<string, unknown>>;
+        };
+        readonly timestamp: number;
       }
     | undefined
   > {
@@ -826,6 +842,7 @@ export class DirectRunService {
         mode: agentRuns.mode,
         messageSequence: conversationMessages.sequence,
         content: conversationMessages.content,
+        actionEnvelope: rootRequests.actionEnvelope,
       })
       .from(agentRuns)
       .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
@@ -876,6 +893,15 @@ export class DirectRunService {
       status: run.status,
       mode: run.mode,
       contextContent: contextPack.content,
+      actionEnvelope: parseActionEnvelope(run.actionEnvelope),
+      contextPack: {
+        content: contextPack.content,
+        contentHash: contextPack.contentHash,
+        format: 'json',
+        schemaVersion: 1,
+        manifest: contextPack.manifest,
+      },
+      timestamp: rootMessage.timestamp,
     };
   }
 

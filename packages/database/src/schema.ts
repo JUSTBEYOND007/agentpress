@@ -591,7 +591,10 @@ export const agentSessions = pgTable(
     unique('agent_sessions_logical_key_unique').on(table.logicalKey),
     index('agent_sessions_run_idx').on(table.runId, table.createdAt),
     check('agent_sessions_kind_check', sql`${table.kind} in ('main', 'specialist')`),
-    check('agent_sessions_status_check', sql`${table.status} in ('active', 'completed', 'failed')`),
+    check(
+      'agent_sessions_status_check',
+      sql`${table.status} in ('active', 'completed', 'failed', 'interrupted')`,
+    ),
     check('agent_sessions_attempt_check', sql`${table.attempt} > 0`),
   ],
 );

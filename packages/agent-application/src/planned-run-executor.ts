@@ -4,6 +4,7 @@ import type {
   RuntimeAssistantMessage,
   RuntimeEvent,
   RuntimeMessage,
+  RuntimeCurrentTurn,
   RuntimeResult,
   RuntimeTool,
   RuntimeTranscriptMessage,
@@ -44,11 +45,7 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
-import {
-  CURRENT_TURN_AUTHORITY_POLICY,
-  type CurrentTurnInput,
-  serializeCurrentTurn,
-} from './current-turn-contract.js';
+import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type TaskCriticality = 'required' | 'optional';
@@ -201,6 +198,7 @@ const planRevisionSchema = Type.Object(
 export class PlannedRunExecutor {
   private readonly now: () => Date;
   private readonly createId: () => string;
+  private readonly transcripts: AgentTranscriptProjector;
   private readonly activeMainRuntimes = new Map<
     string,
     ReturnType<AgentRuntimeFactory['create']>
@@ -209,6 +207,7 @@ export class PlannedRunExecutor {
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
+    this.transcripts = new AgentTranscriptProjector(options.database, this.now);
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
@@ -218,7 +217,7 @@ export class PlannedRunExecutor {
 
   public async execute(
     runId: string,
-    turn: CurrentTurnInput,
+    turn: RuntimeCurrentTurn,
     history: readonly RuntimeMessage[] = [],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
@@ -232,15 +231,16 @@ export class PlannedRunExecutor {
       await this.persistQuestion(runId, control.question, control.options);
       return undefined;
     }
-    return this.persistAndExecutePlan(runId, serializeCurrentTurn(turn), control.plan, signal);
+    return this.persistAndExecutePlan(runId, turn, control.plan, signal);
   }
 
   public async recover(
     runId: string,
-    turn: CurrentTurnInput,
+    turn: RuntimeCurrentTurn,
     history: readonly RuntimeMessage[] = [],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
+    await this.transcripts.interruptActive(runId);
     const rows = await this.options.database
       .select({ mode: agentRuns.mode, revisionId: agentRuns.activePlanRevisionId })
       .from(agentRuns)
@@ -259,17 +259,17 @@ export class PlannedRunExecutor {
         await this.persistQuestion(runId, control.question, control.options);
         return undefined;
       }
-      return this.persistAndExecutePlan(runId, serializeCurrentTurn(turn), control.plan, signal);
+      return this.persistAndExecutePlan(runId, turn, control.plan, signal);
     }
     const tasks = await this.loadPlanTasks(runId, run.revisionId);
     const settled = await this.loadPersistedTaskResults(tasks);
     await this.enterRunning(runId, 'planned');
-    return this.executePlannedWork(runId, serializeCurrentTurn(turn), tasks, signal, settled);
+    return this.executePlannedWork(runId, turn, tasks, signal, settled);
   }
 
   private async runMainControl(
     runId: string,
-    turn: CurrentTurnInput,
+    turn: RuntimeCurrentTurn,
     history: readonly RuntimeMessage[],
     signal?: AbortSignal,
   ): Promise<ControlDecision> {
@@ -350,7 +350,7 @@ export class PlannedRunExecutor {
       'main',
       mainPlanningPrompt(availableCapabilities),
       history,
-      serializeCurrentTurn(turn),
+      turn,
       tools,
       signal,
     );
@@ -366,7 +366,7 @@ export class PlannedRunExecutor {
 
   private async persistAndExecutePlan(
     runId: string,
-    prompt: string,
+    prompt: RuntimeCurrentTurn,
     plan: SubmittedPlan,
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome> {
@@ -427,7 +427,7 @@ export class PlannedRunExecutor {
 
   private async executePlannedWork(
     runId: string,
-    prompt: string,
+    prompt: RuntimeCurrentTurn,
     tasks: readonly PlannedTaskSpec[],
     signal?: AbortSignal,
     initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
@@ -457,7 +457,7 @@ export class PlannedRunExecutor {
 
   private async runCompletionMain(
     runId: string,
-    prompt: string,
+    prompt: RuntimeCurrentTurn,
     settled: readonly SettledTask[],
     signal?: AbortSignal,
   ): Promise<RuntimeResult> {
@@ -510,7 +510,10 @@ export class PlannedRunExecutor {
       'synthesis',
       mainCompletionPrompt(),
       [],
-      `Root request:\n${prompt}\n\nValidated Task Result Envelopes:\n${envelope}`,
+      applicationTurn(
+        prompt,
+        JSON.stringify({ rootRequest: prompt, validatedTaskResults: envelope }),
+      ),
       [runComplete],
       signal,
     );
@@ -523,7 +526,10 @@ export class PlannedRunExecutor {
         'synthesis',
         mainCompletionPrompt(),
         [],
-        'Protocol repair: call run_complete exactly once. Do not return a normal text response.',
+        applicationTurn(
+          prompt,
+          'Protocol repair: call run_complete exactly once. Do not return a normal text response.',
+        ),
         [runComplete],
         signal,
       );
@@ -549,7 +555,7 @@ export class PlannedRunExecutor {
   private async executeDag(
     runId: string,
     tasks: readonly PlannedTaskSpec[],
-    rootPrompt: string,
+    rootPrompt: RuntimeCurrentTurn,
     signal?: AbortSignal,
     initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
   ): Promise<readonly SettledTask[]> {
@@ -646,7 +652,7 @@ export class PlannedRunExecutor {
 
   private async revisePlanAtBoundary(
     runId: string,
-    rootPrompt: string,
+    rootPrompt: RuntimeCurrentTurn,
     orderedTasks: readonly PlannedTaskSpec[],
     pending: ReadonlyMap<string, PlannedTaskSpec>,
     settled: ReadonlyMap<string, SettledTask>,
@@ -756,7 +762,7 @@ export class PlannedRunExecutor {
       'main',
       mainRevisionPrompt(availableCapabilities),
       [],
-      JSON.stringify(envelope),
+      applicationTurn(rootPrompt, JSON.stringify(envelope)),
       [planRevise],
       signal,
     );
@@ -769,7 +775,10 @@ export class PlannedRunExecutor {
         'main',
         mainRevisionPrompt(availableCapabilities),
         [],
-        'Protocol repair: call plan_revise exactly once with a schema-valid revision.',
+        applicationTurn(
+          rootPrompt,
+          'Protocol repair: call plan_revise exactly once with a schema-valid revision.',
+        ),
         [planRevise],
         signal,
       );
@@ -856,7 +865,7 @@ export class PlannedRunExecutor {
   private async executeTask(
     runId: string,
     task: PlannedTaskSpec,
-    rootPrompt: string,
+    rootPrompt: RuntimeCurrentTurn,
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
@@ -914,7 +923,7 @@ export class PlannedRunExecutor {
           task.owner,
           specialistPrompt(task.owner),
           recoveredHistory,
-          '',
+          applicationTurn(rootPrompt, ''),
           [...domainTools, taskComplete],
           signal,
           true,
@@ -927,7 +936,7 @@ export class PlannedRunExecutor {
           task.owner,
           specialistPrompt(task.owner),
           [],
-          JSON.stringify({ rootRequest: rootPrompt, task, upstream }),
+          applicationTurn(rootPrompt, JSON.stringify({ rootRequest: rootPrompt, task, upstream })),
           [...domainTools, taskComplete],
           signal,
         );
@@ -940,7 +949,10 @@ export class PlannedRunExecutor {
         task.owner,
         specialistPrompt(task.owner),
         [],
-        'Protocol repair: call task_complete exactly once with a schema-valid result.',
+        applicationTurn(
+          rootPrompt,
+          'Protocol repair: call task_complete exactly once with a schema-valid result.',
+        ),
         [...domainTools, taskComplete],
         signal,
       );
@@ -979,7 +991,7 @@ export class PlannedRunExecutor {
     modelPurpose: string,
     systemPrompt: string,
     history: readonly RuntimeTranscriptMessage[],
-    prompt: string,
+    currentTurn: RuntimeCurrentTurn,
     tools: readonly RuntimeTool[],
     signal?: AbortSignal,
     continuation = false,
@@ -1052,7 +1064,7 @@ export class PlannedRunExecutor {
         message.role === 'tool' ? message.toolCallId : undefined,
       );
     }
-    await record('user', 'prompt', { content: prompt });
+    await record('application', 'current_turn', { currentTurn });
     const runtime = this.options.runtimeFactory.create(modelPurpose);
     if (kind === 'main') this.activeMainRuntimes.set(runId, runtime);
     let result: RuntimeResult;
@@ -1062,7 +1074,7 @@ export class PlannedRunExecutor {
           runId: sessionId,
           systemPrompt,
           history,
-          prompt,
+          currentTurn,
           tools,
           continuation,
           ...(kind === 'specialist' ? { maxToolCalls: 12, maxFailedCompletionCalls: 2 } : {}),
@@ -1178,7 +1190,7 @@ export class PlannedRunExecutor {
     runId: string,
     revisionId: string,
     tasks: readonly PlannedTaskSpec[],
-    prompt: string,
+    prompt: RuntimeCurrentTurn,
     positionOffset = 0,
   ): Promise<void> {
     await transaction.insert(agentTasks).values(
@@ -1651,9 +1663,9 @@ export function mainPlanningPrompt(capabilities: readonly string[]): string {
     responsibility: specialistResponsibilities[role],
     allowedCapabilities: [...specialistCapabilityPolicy[role]],
   }));
-  return `You are the AgentPress Main Agent handling exactly one current turn. Decide how to handle its authoritative current request.
+  return `You are the AgentPress Main Agent handling exactly one typed current-turn message. Decide how to handle its currentRequest.
 Current date: ${new Date().toISOString().slice(0, 10)}.
-${CURRENT_TURN_AUTHORITY_POLICY}
+Conversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The actionEnvelope describes host-granted capabilities; never claim or infer additional grants.
 Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.
 Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.
 Keep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.
@@ -1663,6 +1675,15 @@ Request article.read or article.propose only when the frozen root context contai
 If required business information is missing, call user_request_input.
 Available capabilities: ${JSON.stringify(capabilities)}.
 Never emit a generic template plan. Never reveal hidden chain of thought.`;
+}
+
+function applicationTurn(parent: RuntimeCurrentTurn, request: string): RuntimeCurrentTurn {
+  return {
+    ...parent,
+    source: 'application',
+    request,
+    timestamp: Date.now(),
+  };
 }
 
 function mainCompletionPrompt(): string {

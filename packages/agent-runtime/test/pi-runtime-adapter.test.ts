@@ -2,7 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 
-import { createArkBackend, PiRuntimeAdapter, type RuntimeEvent } from '../src/index.js';
+import {
+  createArkBackend,
+  PiRuntimeAdapter,
+  RUNTIME_CURRENT_TURN_VERSION,
+  type RuntimeCurrentTurn,
+  type RuntimeEvent,
+} from '../src/index.js';
+
+function currentTurn(request: string): RuntimeCurrentTurn {
+  return {
+    type: 'agentpress_current_turn',
+    version: RUNTIME_CURRENT_TURN_VERSION,
+    source: 'user',
+    request,
+    actionEnvelope: { version: 1, source: 'free_text', grantedCapabilities: [] },
+    timestamp: 1,
+  };
+}
 
 describe('PiRuntimeAdapter', () => {
   it('registers explicit Ark credentials with the Pi model registry', async () => {
@@ -21,7 +38,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-1',
         systemPrompt: 'You are a writing assistant.',
         history: [],
-        prompt: '第一问',
+        currentTurn: currentTurn('第一问'),
       },
       (event) => {
         firstEvents.push(event);
@@ -42,7 +59,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-2',
         systemPrompt: 'You are a writing assistant.',
         history: first.messages,
-        prompt: '第二问',
+        currentTurn: currentTurn('第二问'),
       },
       () => undefined,
     );
@@ -64,7 +81,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-cancel',
         systemPrompt: 'You are a writing assistant.',
         history: [],
-        prompt: '开始',
+        currentTurn: currentTurn('开始'),
       },
       (event) => {
         if (event.type === 'content.delta') {
@@ -99,7 +116,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-tool',
         systemPrompt: 'Use tools when evidence is required.',
         history: [],
-        prompt: '查找 Kafka 资料',
+        currentTurn: currentTurn('查找 Kafka 资料'),
         tools: [
           {
             name: 'workspace_search',
@@ -165,7 +182,7 @@ describe('PiRuntimeAdapter', () => {
             timestamp: 2,
           },
         ],
-        prompt: '',
+        currentTurn: currentTurn(''),
         continuation: true,
       },
       () => undefined,
@@ -186,7 +203,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'session-steering',
         systemPrompt: 'Apply user steering after the current safe turn.',
         history: [],
-        prompt: '开始任务',
+        currentTurn: currentTurn('开始任务'),
       },
       (event) => {
         if (event.type === 'content.delta' && !steered) {
@@ -216,7 +233,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-hook',
         systemPrompt: 'Respect tool policy hooks.',
         history: [],
-        prompt: '尝试工具',
+        currentTurn: currentTurn('尝试工具'),
         tools: [
           {
             name: 'blocked_tool',
@@ -262,7 +279,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-after-hook',
         systemPrompt: 'Use sanitized tool results.',
         history: [],
-        prompt: '执行工具',
+        currentTurn: currentTurn('执行工具'),
         tools: [
           {
             name: 'allowed_tool',
@@ -313,7 +330,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-tool-budget',
         systemPrompt: 'Respect the domain tool budget and complete through task_complete.',
         history: [],
-        prompt: '执行受限任务',
+        currentTurn: currentTurn('执行受限任务'),
         maxToolCalls: 1,
         tools: [
           {
@@ -367,7 +384,7 @@ describe('PiRuntimeAdapter', () => {
         runId: 'run-invalid-completion-budget',
         systemPrompt: 'Complete through task_complete.',
         history: [],
-        prompt: '完成任务',
+        currentTurn: currentTurn('完成任务'),
         maxFailedCompletionCalls: 2,
         tools: [
           {
