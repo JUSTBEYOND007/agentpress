@@ -23,9 +23,19 @@ describe('runWithKafkaHeartbeat', () => {
   it('does not replace the operation result when a heartbeat fails', async () => {
     const errors: unknown[] = [];
     const result = await runWithKafkaHeartbeat(
-      () => new Promise<string>((resolve) => setTimeout(() => resolve('completed'), 20)),
+      () =>
+        new Promise<string>((resolve) =>
+          setTimeout(() => {
+            resolve('completed');
+          }, 20),
+        ),
       () => Promise.reject(new Error('rebalance')),
-      { intervalMs: 5, onHeartbeatError: (error) => errors.push(error) },
+      {
+        intervalMs: 5,
+        onHeartbeatError: (error) => {
+          errors.push(error);
+        },
+      },
     );
 
     expect(result).toBe('completed');

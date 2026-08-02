@@ -149,11 +149,12 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     }
     await this.consumer.run({
       partitionsConsumedConcurrently: AGENT_RUN_PARTITIONS,
-      eachMessage: async ({ topic, partition, message, heartbeat }) => {
+      eachMessage: async (payload) => {
+        const { topic, partition, message } = payload;
         await runWithKafkaHeartbeat(
           () =>
             this.handleCommand(topic, partition, Number(message.offset), message.value?.toString()),
-          heartbeat,
+          () => payload.heartbeat(),
           {
             onHeartbeatError: (error) => {
               this.logger.warn({ err: error, topic, partition }, 'Kafka heartbeat failed');
@@ -165,7 +166,8 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     if (this.articleIndexer) {
       await this.indexConsumer.run({
         partitionsConsumedConcurrently: ARTICLE_INDEX_PARTITIONS,
-        eachMessage: async ({ topic, partition, message, heartbeat }) => {
+        eachMessage: async (payload) => {
+          const { topic, partition, message } = payload;
           await runWithKafkaHeartbeat(
             () =>
               this.handleIndexCommand(
@@ -174,7 +176,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
                 Number(message.offset),
                 message.value?.toString(),
               ),
-            heartbeat,
+            () => payload.heartbeat(),
             {
               onHeartbeatError: (error) => {
                 this.logger.warn({ err: error, topic, partition }, 'Kafka heartbeat failed');
