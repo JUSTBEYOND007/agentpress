@@ -1,0 +1,705 @@
+.context-controls {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 4px;
+  border-top: 1px solid #e7e7e4;
+  padding-top: 12px;
+}
+
+.context-controls > strong {
+  color: #656660;
+  font-size: 11px;
+}
+
+.context-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #555650;
+  font-size: 11px;
+}
+
+.context-controls input {
+  accent-color: #2f7650;
+}
+
+.memory-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #e8dcc9;
+  border-radius: 5px;
+  background: #fffaf3;
+  padding: 6px;
+  color: #765020;
+  font-size: 10px;
+}
+
+.memory-candidate button {
+  border-radius: 4px;
+  background: #f2e7d6;
+  padding: 3px 5px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.context-controls > p {
+  margin: 0;
+  color: #a33c35;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.context-secondary-action {
+  width: fit-content;
+  border-radius: 4px;
+  background: #f1f1ee;
+  padding: 4px 6px;
+  color: #5f605a;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.skill-editor {
+  display: grid;
+  gap: 5px;
+}
+
+.skill-editor textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #dededb;
+  border-radius: 5px;
+  background: #ffffff;
+  padding: 7px;
+  color: #454642;
+  font:
+    10px/1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+
+.skill-editor button {
+  justify-self: end;
+  border-radius: 4px;
+  background: #2f7650;
+  padding: 5px 7px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.skill-editor button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.run-metadata {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid #e7e7e4;
+  padding-top: 12px;
+  color: #858680;
+  font-size: 10px;
+}
+
+.thread-footer {
+  position: sticky;
+  bottom: 4px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.composer-shell {
+  position: relative;
+  border-top: 1px solid #ededeb;
+  background: linear-gradient(180deg, rgb(250 250 248 / 72%), #f7f7f5);
+  padding: 10px 12px 12px;
+}
+
+.composer-trigger-menu {
+  position: absolute;
+  z-index: 50;
+  right: 12px;
+  bottom: calc(100% - 2px);
+  left: 12px;
+  max-height: min(360px, calc(100dvh - 180px));
+  overflow-y: auto;
+  border: 1px solid #dededb;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgb(20 20 18 / 14%);
+  padding: 5px;
+}
+
+.composer-trigger-content {
+  display: grid;
+  gap: 2px;
+}
+
+.composer-trigger-heading {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  color: #8a8b85;
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.composer-trigger-back {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: #73746e;
+  cursor: pointer;
+}
+
+.composer-trigger-back:hover {
+  background: #eeeeec;
+}
+
+.composer-trigger-list {
+  display: grid;
+  gap: 1px;
+}
+
+.composer-trigger-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 6px 7px;
+  color: #656660;
+  cursor: pointer;
+  text-align: left;
+}
+
+.composer-trigger-item[data-highlighted],
+.composer-trigger-item:hover {
+  background: #f1f1ef;
+  color: #3e3f3b;
+}
+
+.composer-trigger-item > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.composer-trigger-item strong,
+.composer-trigger-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-trigger-item strong {
+  font-size: 11px;
+  font-weight: 540;
+}
+
+.composer-trigger-item small {
+  color: #92938d;
+  font-size: 9px;
+}
+
+.scroll-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #dededb;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgb(20 20 18 / 8%);
+  color: #696a65;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.agent-composer {
+  position: relative;
+  margin: 0;
+  border: 1px solid #d8d8d4;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgb(20 20 18 / 8%);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.agent-composer:focus-within {
+  border-color: #b9c8be;
+  box-shadow: 0 4px 18px rgb(20 20 18 / 8%);
+}
+
+.agent-composer.is-drop-active {
+  border-color: #75a087;
+  box-shadow: 0 0 0 2px rgb(63 123 86 / 12%);
+}
+
+.composer-pending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-bottom: 1px solid #eeeeeb;
+  padding: 8px 10px;
+}
+
+.pending-directive {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #dce6df;
+  border-radius: 5px;
+  background: #f5f9f6;
+  padding: 4px 4px 4px 6px;
+  color: #41634d;
+  font-size: 10px;
+}
+
+.pending-follow_up {
+  border-color: #e2e2de;
+  background: #f8f8f6;
+  color: #656660;
+}
+
+.pending-directive > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-directive small {
+  margin-right: 4px;
+  color: #7d8e82;
+  font-size: 9px;
+}
+
+.pending-directive button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pending-directive button:hover:not(:disabled) {
+  background: rgb(45 83 58 / 8%);
+}
+
+.pending-directive button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.composer-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 10px 0;
+}
+
+.composer-context:empty {
+  display: none;
+}
+
+.composer-context-chip,
+.composer-upload-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 190px;
+  border: 1px solid #dededb;
+  border-radius: 5px;
+  background: #f8f8f6;
+  padding: 3px 4px 3px 6px;
+  overflow: hidden;
+  color: #676862;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.composer-context-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+}
+
+.composer-context-chip > button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: #8a8b85;
+  cursor: pointer;
+}
+
+.composer-context-chip > button:hover {
+  background: #e8e8e5;
+  color: #4d4e49;
+}
+
+.composer-upload-chip {
+  border-style: dashed;
+  color: #5a735f;
+}
+
+.agent-composer textarea {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  background: transparent;
+  outline: 0;
+  max-height: 150px;
+  padding: 12px 14px 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agent-composer textarea::placeholder {
+  color: #a5a6a1;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 7px;
+}
+
+.composer-actions > div {
+  display: flex;
+  align-items: center;
+}
+
+.composer-menu-wrap {
+  position: relative;
+  gap: 6px;
+}
+
+.composer-tool-button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  color: #696a65;
+  cursor: pointer;
+}
+
+.composer-slash-button {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.composer-tool-button:hover {
+  background: #eeeeec;
+}
+
+.composer-tool-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.composer-tool-button.is-listening {
+  background: #eef6f0;
+  color: #2f7650;
+}
+
+.composer-tool-button.is-listening svg {
+  animation: composer-pulse 1.2s ease-in-out infinite;
+}
+
+.composer-menu {
+  bottom: 34px;
+  left: 0;
+  width: 280px;
+  max-height: min(380px, calc(100dvh - 160px));
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.composer-menu-label {
+  padding: 5px 7px;
+  color: #93948f;
+  font-size: 10px;
+}
+
+.composer-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.composer-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.composer-menu button > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-menu button:hover:not(:disabled) {
+  background: #f1f1ef;
+}
+
+.composer-menu button small {
+  min-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  color: #93948f;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-menu .menu-check {
+  flex: 0 0 auto;
+  color: #397257;
+}
+
+.composer-menu-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 5px 4px;
+  border: 1px solid #dededb;
+  border-radius: 5px;
+  padding: 5px 7px;
+  color: #8c8d88;
+}
+
+.composer-menu-search:focus-within {
+  border-color: #aebfb3;
+  box-shadow: 0 0 0 2px rgb(63 123 86 / 10%);
+}
+
+.composer-menu-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  outline: 0;
+  color: #3f403c;
+  font-size: 11px;
+}
+
+.composer-menu-empty {
+  margin: 0;
+  padding: 12px 8px;
+  color: #92938d;
+  font-size: 10px;
+  text-align: center;
+}
+
+.composer-inline-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 10px 0;
+  border-top: 1px solid #f0d9d5;
+  padding: 6px 2px 0;
+  color: #9a453d;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.composer-inline-notice button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.composer-drop-overlay {
+  position: absolute;
+  z-index: 45;
+  inset: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed #75a087;
+  border-radius: 6px;
+  background: rgb(247 251 248 / 96%);
+  color: #35694b;
+  font-size: 12px;
+  font-weight: 560;
+  pointer-events: none;
+}
+
+.send-behavior {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 5px 6px;
+  color: #757670;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.send-mode-wrap {
+  position: relative;
+}
+
+.send-mode-menu {
+  position: absolute;
+  z-index: 35;
+  bottom: 34px;
+  left: 0;
+  display: grid;
+  width: 240px;
+  gap: 2px;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgb(20 20 18 / 12%);
+  padding: 5px;
+}
+
+.send-mode-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 5px;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.send-mode-menu button:hover,
+.send-mode-menu button.is-selected {
+  background: #f1f1ef;
+}
+
+.send-mode-menu span,
+.send-mode-menu strong,
+.send-mode-menu small {
+  display: block;
+}
+
+.send-mode-menu strong {
+  color: #3e3f3b;
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.send-mode-menu small {
+  margin-top: 2px;
+  color: #92938d;
+  font-size: 9px;
+}
+
+.send-mode {
+  display: inline-flex;
+  height: 26px;
+  margin-left: 4px;
+  border: 1px solid #e0e0dd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.send-mode button {
+  padding: 0 7px;
+  background: transparent;
+  color: #858680;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.send-mode button.is-active {
+  background: #eeeeec;
+  color: #343531;
+}
+
+.send-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  background: #202124;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.send-button:disabled {
+  background: #d8d8d4;
+  cursor: default;
+}
+
+.composer-tool-button:focus-visible,
+.composer-trigger-back:focus-visible,
+.composer-trigger-item:focus-visible,
+.pending-directive button:focus-visible,
+.composer-context-chip > button:focus-visible,
+.composer-inline-notice button:focus-visible,
+.send-behavior:focus-visible,
+.send-button:focus-visible,
+.composer-menu button:focus-visible,
+.send-mode-menu button:focus-visible {
+  outline: 2px solid #6f9b7f;
+  outline-offset: 2px;
+}
+
+.is-spinning {
+  animation: activity-spin 900ms linear infinite;
+}
+
+@keyframes composer-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}

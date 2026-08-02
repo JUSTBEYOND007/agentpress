@@ -1,0 +1,33 @@
+{
+  "name": "@agentpress/editor-application",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests --exclude '**/*.integration.test.*' --exclude 'dist/**'",
+    "test:integration": "vitest run test/*.integration.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentpress/database": "workspace:*",
+    "@agentpress/editor-patch": "workspace:*",
+    "@agentpress/knowledge-retrieval": "workspace:*",
+    "@agentpress/tool-runtime": "workspace:*",
+    "@sinclair/typebox": "catalog:",
+    "drizzle-orm": "catalog:",
+    "ioredis": "catalog:"
+  }
+}

@@ -1,0 +1,2 @@
+ALTER TABLE "run_directives" DROP CONSTRAINT "run_directives_status_check";--> statement-breakpoint
+ALTER TABLE "run_directives" ADD CONSTRAINT "run_directives_status_check" CHECK ("run_directives"."status" in ('pending', 'applied', 'consumed', 'cancelled'));

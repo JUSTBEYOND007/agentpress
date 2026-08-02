@@ -1,0 +1,37 @@
+{
+  "name": "@agentpress/runtime-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentpress/agent-application": "workspace:*",
+    "@agentpress/config": "workspace:*",
+    "@agentpress/database": "workspace:*",
+    "@agentpress/editor-application": "workspace:*",
+    "@agentpress/knowledge-retrieval": "workspace:*",
+    "@agentpress/mcp-runtime": "workspace:*",
+    "@agentpress/media-application": "workspace:*",
+    "@agentpress/tool-runtime": "workspace:*",
+    "@agentpress/web-research": "workspace:*",
+    "@sinclair/typebox": "catalog:",
+    "drizzle-orm": "catalog:",
+    "fast-xml-parser": "4.5.7"
+  }
+}

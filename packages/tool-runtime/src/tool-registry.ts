@@ -1,0 +1,164 @@
+import type { TSchema } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
+
+import type {
+  CapabilityPolicy,
+  RegisteredTool,
+  SelectedTool,
+  ToolDefinition,
+  ToolExecutionContext,
+} from './contracts.js';
+import { ToolRuntimeError } from './tool-errors.js';
+
+export class ToolRegistry {
+  private readonly definitions = new Map<string, RegisteredTool>();
+
+  public register<TInput extends TSchema, TOutput extends TSchema>(
+    definition: ToolDefinition<TInput, TOutput>,
+  ): void {
+    validateDefinition(definition);
+    const key = toolKey(definition.toolId, definition.version);
+    if (this.definitions.has(key)) {
+      throw new ToolRuntimeError('duplicate_tool', `Tool ${key} is already registered`);
+    }
+    this.definitions.set(key, {
+      ...definition,
+      estimateCost: (input) => definition.estimateCost(input),
+      execute: (input, context) => definition.execute(input, context),
+    });
+  }
+
+  public get(toolId: string, version: string): RegisteredTool {
+    const definition = this.definitions.get(toolKey(toolId, version));
+    if (!definition) {
+      throw new ToolRuntimeError('tool_not_found', `Tool ${toolId}@${version} is not registered`);
+    }
+    return definition;
+  }
+
+  public list(): readonly RegisteredTool[] {
+    return [...this.definitions.values()];
+  }
+
+  public validateInput(definition: RegisteredTool, input: unknown): asserts input is object {
+    validateSchema(definition.inputSchema, input, 'invalid_input', definition);
+  }
+
+  public validateOutput(definition: RegisteredTool, output: unknown): void {
+    validateSchema(definition.outputSchema, output, 'invalid_output', definition);
+  }
+
+  public async execute(
+    definition: RegisteredTool,
+    input: Readonly<Record<string, unknown>>,
+    context: Omit<ToolExecutionContext, 'signal'> & { readonly signal?: AbortSignal },
+  ): Promise<unknown> {
+    this.validateInput(definition, input);
+    const timeout = AbortSignal.timeout(definition.timeoutMs);
+    const signal = context.signal ? AbortSignal.any([context.signal, timeout]) : timeout;
+    try {
+      const output: unknown = await definition.execute(input, { ...context, signal });
+      this.validateOutput(definition, output);
+      return output;
+    } catch (error) {
+      if (timeout.aborted && !context.signal?.aborted) {
+        throw new ToolRuntimeError('tool_timeout', `Tool ${definition.toolId} timed out`, {
+          timeoutMs: definition.timeoutMs,
+        });
+      }
+      throw error;
+    }
+  }
+}
+
+export class CapabilityCatalog {
+  public constructor(private readonly registry: ToolRegistry) {}
+
+  public select(query: string, policy: CapabilityPolicy, limit = 8): readonly SelectedTool[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16) {
+      throw new RangeError('Capability Catalog limit must be between 1 and 16');
+    }
+    const allowed = intersectPolicy(policy);
+    const terms = tokenize(query);
+    return this.registry
+      .list()
+      .filter((tool) => tool.capabilities.every((capability) => allowed.has(capability)))
+      .map((tool) => ({ tool, score: scoreTool(tool, terms) }))
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          toolKey(left.tool.toolId, left.tool.version).localeCompare(
+            toolKey(right.tool.toolId, right.tool.version),
+          ),
+      )
+      .slice(0, limit)
+      .map(({ tool }) => ({
+        toolId: tool.toolId,
+        version: tool.version,
+        description: tool.description,
+        capabilities: tool.capabilities,
+        risk: tool.risk,
+      }));
+  }
+}
+
+function validateDefinition(
+  definition: Pick<ToolDefinition, 'toolId' | 'version' | 'capabilities' | 'timeoutMs'>,
+): void {
+  if (!definition.toolId || !definition.version || definition.capabilities.length === 0) {
+    throw new TypeError('Tool identity, version, and capabilities are required');
+  }
+  if (!Number.isSafeInteger(definition.timeoutMs) || definition.timeoutMs < 1) {
+    throw new TypeError('Tool timeout must be a positive integer');
+  }
+}
+
+function validateSchema(
+  schema: TSchema,
+  value: unknown,
+  code: 'invalid_input' | 'invalid_output',
+  definition: RegisteredTool,
+): void {
+  if (Value.Check(schema, value)) {
+    return;
+  }
+  const errors = [...Value.Errors(schema, value)].slice(0, 8).map(({ path, message }) => ({
+    path,
+    message,
+  }));
+  throw new ToolRuntimeError(code, `${definition.toolId} ${code.replace('_', ' ')}`, { errors });
+}
+
+function intersectPolicy(policy: CapabilityPolicy): ReadonlySet<string> {
+  const layers = [policy.workspace, policy.agent, policy.skill, policy.task];
+  return new Set(
+    [...policy.platform].filter((capability) => layers.every((set) => set.has(capability))),
+  );
+}
+
+function tokenize(value: string): ReadonlySet<string> {
+  return new Set(
+    value
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}_.-]+/u)
+      .filter(Boolean),
+  );
+}
+
+function scoreTool(tool: RegisteredTool, terms: ReadonlySet<string>): number {
+  const haystack = tokenize(`${tool.toolId} ${tool.description} ${tool.capabilities.join(' ')}`);
+  return [...terms].reduce(
+    (score, term) =>
+      score +
+      (haystack.has(term)
+        ? 2
+        : [...haystack].some((candidate) => candidate.includes(term))
+          ? 1
+          : 0),
+    0,
+  );
+}
+
+function toolKey(toolId: string, version: string): string {
+  return `${toolId}@${version}`;
+}

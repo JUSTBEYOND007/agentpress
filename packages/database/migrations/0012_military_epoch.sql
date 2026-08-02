@@ -1,0 +1,2 @@
+ALTER TABLE "tool_calls" ADD COLUMN "provider_tool_call_id" varchar(240);--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_calls_run_provider_call_unique" ON "tool_calls" USING btree ("run_id","provider_tool_call_id") WHERE "tool_calls"."provider_tool_call_id" is not null;

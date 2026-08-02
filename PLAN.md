@@ -15,7 +15,7 @@
 - NestJS 使用 Fastify Adapter、TypeBox/Ajv 和 OpenAPI 提供独立 REST/SSE API；Drizzle `0.45.2` 管理 PostgreSQL 16 与 pgvector。NestJS 仅负责依赖组合、入口和进程生命周期，Domain 保持纯 TypeScript。
 - Next.js 不使用 Server Actions 承载业务写入，不直接访问数据库；所有查询、命令、鉴权、文章、Agent、RAG、发布和热榜逻辑统一经过 NestJS API。
 - PostgreSQL 是唯一业务事实源；Redis 只负责限流、缓存、单写者/Worker 租约、取消标记和 SSE 广播；Kafka 只承载持久异步命令与领域事件。
-- Kafka 采用 transactional outbox、consumer inbox 和至少一次投递；使用当前维护的 Confluent JavaScript client，生产兼容火山 Kafka 2.8.2。
+- Kafka 采用 transactional outbox、consumer inbox 和至少一次投递；使用维护中的 KafkaJS 2.2.4，生产兼容火山 Kafka 2.8.2。
 - 本地 Docker Compose 启动 PostgreSQL/pgvector、Redis、Apache Kafka KRaft、MinIO、Logto、文档解析服务和可观测性组件。
 - 生产 IaC 使用 Helm + OpenTofu，目标为北京地域多 AZ 的 VKE 1.34、RDS PG16、Redis 7、Kafka 2.8.2、TOS/CDN；设计基线约 1 万 MAU、1000 并发客户端、100 个并发 Agent Run，RPO 5 分钟、RTO 30 分钟。
 - 建立 `CONTEXT-MAP.md`，划分 Authoring、Agent Runtime、Knowledge、Publishing 四个上下文；ADR 记录 Pi 适配边界、无 Yjs 的 revision 协议、Postgres/Kafka/Redis 职责和模块化核心 + 独立 Worker。

@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+.next
+.playwright-cli
+.turbo
+**/dist
+**/node_modules
+Agent.jsonl
+coverage
+node_modules
+output

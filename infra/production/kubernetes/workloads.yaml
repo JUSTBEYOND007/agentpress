@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentpress-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: agentpress-web }
+  template:
+    metadata:
+      labels: { app: agentpress-web }
+    spec:
+      containers:
+        - name: web
+          image: agentpress-web
+          ports: [{ name: http, containerPort: 3000 }]
+          envFrom:
+            - configMapRef: { name: agentpress-config }
+            - secretRef: { name: agentpress-secrets }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+          livenessProbe:
+            httpGet: { path: /, port: http }
+          resources:
+            requests: { cpu: 250m, memory: 384Mi }
+            limits: { cpu: '1', memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentpress-web
+spec:
+  selector: { app: agentpress-web }
+  ports: [{ name: http, port: 3000, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentpress-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: agentpress-api }
+  template:
+    metadata:
+      labels: { app: agentpress-api }
+    spec:
+      containers:
+        - name: api
+          image: agentpress-api
+          ports: [{ name: http, containerPort: 4000 }]
+          envFrom:
+            - configMapRef: { name: agentpress-config }
+            - secretRef: { name: agentpress-secrets }
+          readinessProbe:
+            httpGet: { path: /v1/health, port: http }
+          livenessProbe:
+            httpGet: { path: /v1/health, port: http }
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { cpu: '2', memory: 2Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentpress-api
+spec:
+  selector: { app: agentpress-api }
+  ports: [{ name: http, port: 4000, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentpress-agent-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: agentpress-agent-worker }
+  template:
+    metadata:
+      labels: { app: agentpress-agent-worker }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: agentpress-agent-worker
+          envFrom:
+            - configMapRef: { name: agentpress-config }
+            - secretRef: { name: agentpress-secrets }
+          resources:
+            requests: { cpu: 500m, memory: 768Mi }
+            limits: { cpu: '2', memory: 3Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentpress-async-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: agentpress-async-worker }
+  template:
+    metadata:
+      labels: { app: agentpress-async-worker }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: agentpress-async-worker
+          envFrom:
+            - configMapRef: { name: agentpress-config }
+            - secretRef: { name: agentpress-secrets }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: '2', memory: 2Gi }

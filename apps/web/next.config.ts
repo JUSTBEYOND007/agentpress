@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: workspaceRoot,
   reactStrictMode: true,
-  transpilePackages: ['@agentpress/domain'],
+  transpilePackages: ['@agentpress/domain', '@agentpress/editor-patch'],
   turbopack: {
     root: workspaceRoot,
   },

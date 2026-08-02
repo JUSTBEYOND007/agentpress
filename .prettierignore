@@ -1,6 +1,7 @@
 .next
 dist
 coverage
+output/evals
 node_modules
 pnpm-lock.yaml
 Agent.jsonl

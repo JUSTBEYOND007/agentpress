@@ -3,15 +3,31 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "benchmark:editor": "tsx scripts/editor-benchmark.ts",
     "build": "next build",
+    "check:file-lengths": "node scripts/check-file-lengths.mjs",
     "dev": "next dev --port 3000",
-    "lint": "eslint src",
+    "lint": "eslint src scripts",
     "start": "next start --port 3000",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@agentpress/domain": "workspace:*",
+    "@agentpress/editor-patch": "workspace:*",
+    "@assistant-ui/react": "catalog:",
+    "@logto/react": "catalog:",
+    "@microsoft/fetch-event-source": "catalog:",
+    "@tiptap/core": "catalog:",
+    "@tiptap/extension-image": "catalog:",
+    "@tiptap/extension-placeholder": "3.29.2",
+    "@tiptap/extension-table": "3.29.2",
+    "@tiptap/extension-task-item": "3.29.2",
+    "@tiptap/extension-task-list": "3.29.2",
+    "@tiptap/extension-unique-id": "catalog:",
+    "@tiptap/pm": "catalog:",
+    "@tiptap/react": "catalog:",
+    "@tiptap/starter-kit": "catalog:",
     "lucide-react": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
@@ -19,6 +35,7 @@
   },
   "devDependencies": {
     "@types/react": "catalog:types",
-    "@types/react-dom": "catalog:types"
+    "@types/react-dom": "catalog:types",
+    "tsx": "catalog:"
   }
 }

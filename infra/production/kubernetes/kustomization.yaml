@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentpress
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - workloads.yaml
+  - ingress.yaml
+  - migration-job.yaml
+  - policies.yaml
+images:
+  - name: agentpress-web
+    newName: ghcr.io/example/agentpress-web
+    newTag: 0.0.0
+  - name: agentpress-api
+    newName: ghcr.io/example/agentpress-api
+    newTag: 0.0.0
+  - name: agentpress-agent-worker
+    newName: ghcr.io/example/agentpress-agent-worker
+    newTag: 0.0.0
+  - name: agentpress-async-worker
+    newName: ghcr.io/example/agentpress-async-worker
+    newTag: 0.0.0

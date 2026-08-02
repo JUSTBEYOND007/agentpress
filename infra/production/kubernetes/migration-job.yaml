@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentpress-migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: { app: agentpress-migrate }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: agentpress-api
+          command: ['node', 'packages/database/dist/migrate.js']
+          envFrom:
+            - configMapRef: { name: agentpress-config }
+            - secretRef: { name: agentpress-secrets }

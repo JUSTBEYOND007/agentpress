@@ -4,15 +4,26 @@ packages:
 
 catalog:
   '@assistant-ui/react': 0.15.1
-  '@confluentinc/kafka-javascript': 1.10.0
   '@earendil-works/pi-agent-core': 0.82.1
   '@earendil-works/pi-ai': 0.82.1
   '@modelcontextprotocol/sdk': 1.30.0
+  '@microsoft/fetch-event-source': 2.0.1
+  '@logto/react': 4.0.14
+  '@opentelemetry/api': 1.9.1
+  '@opentelemetry/auto-instrumentations-node': 0.79.0
+  '@opentelemetry/exporter-metrics-otlp-http': 0.221.0
+  '@opentelemetry/exporter-trace-otlp-http': 0.221.0
+  '@opentelemetry/resources': 2.10.0
+  '@opentelemetry/sdk-metrics': 2.10.0
+  '@opentelemetry/sdk-node': 0.221.0
+  '@opentelemetry/semantic-conventions': 1.43.0
   '@nestjs/common': 11.1.28
   '@nestjs/core': 11.1.28
   '@nestjs/platform-fastify': 11.1.28
   '@sinclair/typebox': 0.34.41
   '@tiptap/core': 3.29.2
+  '@tiptap/extension-unique-id': 3.29.2
+  '@tiptap/extension-image': 3.29.2
   '@tiptap/pm': 3.29.2
   '@tiptap/react': 3.29.2
   '@tiptap/starter-kit': 3.29.2
@@ -20,6 +31,8 @@ catalog:
   drizzle-orm: 0.45.2
   fastify: 5.10.0
   ioredis: 5.8.2
+  kafkajs: 2.2.4
+  jose: 6.2.5
   minio: 8.0.6
   nestjs-pino: 4.5.0
   next: 16.2.12
@@ -30,9 +43,12 @@ catalog:
   react-dom: 19.2.8
   reflect-metadata: 0.2.2
   rxjs: 7.8.2
+  tsx: 4.21.0
+  yaml: 2.8.2
+  zod: 4.4.3
 
 catalogs:
   types:
-    '@types/pg': 8.15.5
+    '@types/pg': 8.15.6
     '@types/react': 19.2.14
     '@types/react-dom': 19.2.3

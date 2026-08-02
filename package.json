@@ -10,10 +10,28 @@
     "node": ">=22.19",
     "pnpm": ">=10.10.0"
   },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@emnapi/core": "1.11.1",
+        "@emnapi/runtime": "1.11.1"
+      }
+    },
+    "patchedDependencies": {
+      "kafkajs@2.2.4": "patches/kafkajs@2.2.4.patch"
+    }
+  },
   "scripts": {
     "build": "turbo run build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "benchmark:agent": "pnpm --filter @agentpress/demo-kit benchmark",
+    "benchmark:editor": "pnpm --filter @agentpress/web benchmark:editor",
+    "check": "pnpm check:file-lengths && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check:file-lengths": "pnpm --filter @agentpress/web check:file-lengths",
+    "demo": "node scripts/demo.mjs",
+    "demo:prepare": "node scripts/demo.mjs --prepare-only",
+    "local:prepare": "node scripts/demo.mjs --prepare-only",
     "dev": "turbo run dev --parallel",
+    "eval:online": "pnpm --filter @agentpress/agent-evals eval:online",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:config": "docker compose config --quiet",
@@ -28,8 +46,8 @@
     "@types/node": "24.10.1",
     "eslint": "10.8.0",
     "prettier": "3.8.2",
-    "turbo": "2.10.7",
     "tsx": "4.21.0",
+    "turbo": "2.10.7",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.10"

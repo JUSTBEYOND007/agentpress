@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentpress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '3600'
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [agentpress.example, api.agentpress.example]
+      secretName: agentpress-tls
+  rules:
+    - host: agentpress.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentpress-web
+                port: { name: http }
+    - host: api.agentpress.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentpress-api
+                port: { name: http }
