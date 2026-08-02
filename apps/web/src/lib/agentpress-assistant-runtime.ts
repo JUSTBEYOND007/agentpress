@@ -11,6 +11,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { clearLiveRunContent, updateLiveRunContent, type LiveRunContent } from './agent-streaming';
 import { authenticatedFetch } from './authenticated-fetch';
+import {
+  articleReviewChangeFromPart,
+  articleReviewChangeFromPayload,
+  isTerminalRunEvent,
+  takeUnseenArticleReviewChange,
+  terminalRunStatus,
+  type ArticleReviewChange,
+} from './run-event-effects';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 
@@ -23,6 +31,7 @@ export type RunPart = {
   readonly type:
     | 'text'
     | 'plan'
+    | 'action-proposal'
     | 'activity'
     | 'tool-approval'
     | 'ask-user'
@@ -40,6 +49,7 @@ export type RunProjection = {
   readonly runId: string;
   readonly rootMessageId: string;
   readonly status: string;
+  readonly terminal: boolean;
   readonly mode: 'direct' | 'planned';
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];
@@ -90,16 +100,6 @@ export type AgentRuntimeReadiness =
   | { readonly status: 'ready'; readonly missing: readonly string[] }
   | { readonly status: 'unavailable'; readonly missing: readonly string[] };
 
-const ACTIVE_RUN_STATES = new Set([
-  'queued',
-  'planning',
-  'running',
-  'waiting_for_approval',
-  'waiting_for_user',
-  'recovering',
-  'cancelling',
-]);
-
 export function useAgentPressAssistantRuntime(
   sendMode: AgentSendMode,
   context: {
@@ -110,6 +110,7 @@ export function useAgentPressAssistantRuntime(
     readonly skills?: readonly { readonly skillId: string; readonly version: string }[];
     readonly contextBindings?: readonly AgentContextBinding[];
     readonly sendingDisabled?: boolean;
+    readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
   } = {},
 ) {
   const conversationId = context.conversationId;
@@ -132,19 +133,37 @@ export function useAgentPressAssistantRuntime(
   const [submissionSequence, setSubmissionSequence] = useState(0);
   const lastEventIds = useRef(new Map<string, number>());
   const runModes = useRef(new Map<string, RunProjection['mode']>());
+  const notifiedArticleProposals = useRef(new Set<string>());
+  const onArticleReviewChangedRef = useRef(context.onArticleReviewChanged);
 
-  const refreshProjection = useCallback(async (runId: string): Promise<RunProjection> => {
-    const response = await authenticatedFetch(`${apiUrl}/runs/${runId}/projection`);
-    if (!response.ok) throw new Error(`运行状态加载失败 (${String(response.status)})`);
-    const projection = (await response.json()) as RunProjection;
-    lastEventIds.current.set(runId, projection.lastEventId);
-    runModes.current.set(runId, projection.mode);
-    setProjections((current) => upsertProjection(current, projection));
-    if (projection.mode === 'planned' || !ACTIVE_RUN_STATES.has(projection.status)) {
-      setLiveContent((current) => clearLiveRunContent(current, runId));
-    }
-    return projection;
+  useEffect(() => {
+    onArticleReviewChangedRef.current = context.onArticleReviewChanged;
+  }, [context.onArticleReviewChanged]);
+
+  const notifyArticleReviewChanged = useCallback((change: ArticleReviewChange): void => {
+    if (!takeUnseenArticleReviewChange(notifiedArticleProposals.current, change)) return;
+    void onArticleReviewChangedRef.current?.(change.articleId).catch(() => undefined);
   }, []);
+
+  const refreshProjection = useCallback(
+    async (runId: string): Promise<RunProjection> => {
+      const response = await authenticatedFetch(`${apiUrl}/runs/${runId}/projection`);
+      if (!response.ok) throw new Error(`运行状态加载失败 (${String(response.status)})`);
+      const projection = (await response.json()) as RunProjection;
+      lastEventIds.current.set(runId, projection.lastEventId);
+      runModes.current.set(runId, projection.mode);
+      setProjections((current) => upsertProjection(current, projection));
+      for (const part of projection.parts) {
+        const change = articleReviewChangeFromPart(part);
+        if (change) notifyArticleReviewChanged(change);
+      }
+      if (projection.mode === 'planned' || projection.terminal) {
+        setLiveContent((current) => clearLiveRunContent(current, runId));
+      }
+      return projection;
+    },
+    [notifyArticleReviewChanged],
+  );
 
   useEffect(() => {
     if (!conversationId || !branchId) {
@@ -178,7 +197,7 @@ export function useAgentPressAssistantRuntime(
           lastEventIds.current.set(run.runId, run.lastEventId);
           runModes.current.set(run.runId, run.mode);
         }
-        const activeRun = [...runs].reverse().find((run) => ACTIVE_RUN_STATES.has(run.status));
+        const activeRun = [...runs].reverse().find((run) => !run.terminal);
         setActiveRunId(activeRun?.runId);
       })
       .catch((error: unknown) => {
@@ -231,7 +250,7 @@ export function useAgentPressAssistantRuntime(
       try {
         const projection = await refreshProjection(activeRunId);
         setPanelError(undefined);
-        if (!ACTIVE_RUN_STATES.has(projection.status)) {
+        if (projection.terminal) {
           setActiveRunId(undefined);
           stream.abort();
         }
@@ -276,10 +295,33 @@ export function useAgentPressAssistantRuntime(
         if (event.event === 'content.delta') {
           return;
         }
+        if (isTerminalRunEvent(event.event)) {
+          setPanelError(undefined);
+          setProjections((current) =>
+            current.map((projection) =>
+              projection.runId === activeRunId
+                ? {
+                    ...projection,
+                    status: terminalRunStatus(event.event),
+                    terminal: true,
+                  }
+                : projection,
+            ),
+          );
+          setLiveContent((current) => clearLiveRunContent(current, activeRunId));
+          setActiveRunId(undefined);
+          stream.abort();
+          void refreshProjection(activeRunId);
+          return;
+        }
         const sequence = numberValue(data.sequence);
         const previous = lastEventIds.current.get(activeRunId) ?? 0;
         if (sequence > 0 && sequence <= previous) return;
         if (sequence > 0) lastEventIds.current.set(activeRunId, sequence);
+        if (event.event === 'article.proposal.created') {
+          const change = articleReviewChangeFromPayload(data);
+          if (change) notifyArticleReviewChanged(change);
+        }
         void sync();
       },
       onerror: (error) => {
@@ -298,7 +340,7 @@ export function useAgentPressAssistantRuntime(
     return () => {
       stream.abort();
     };
-  }, [activeRunId, refreshProjection]);
+  }, [activeRunId, notifyArticleReviewChanged, refreshProjection]);
 
   const messages = useMemo(
     () => [...buildRunTurns(stableMessages, projections, liveContent), ...optimisticMessages],
@@ -316,7 +358,7 @@ export function useAgentPressAssistantRuntime(
       ]);
       setPanelError(undefined);
       try {
-        if (activeProjection && ACTIVE_RUN_STATES.has(activeProjection.status)) {
+        if (activeProjection && !activeProjection.terminal) {
           const endpoint = sendMode === 'steering' ? 'steering' : 'follow-ups';
           await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, {
             content: prompt,
@@ -407,18 +449,24 @@ export function useAgentPressAssistantRuntime(
     [refreshProjection],
   );
 
-  const decideProposal = useCallback(
-    async (proposalId: string, decisions: Readonly<Record<string, 'accepted' | 'rejected'>>) => {
-      const result = await request(`${apiUrl}/edit-proposals/${proposalId}/decisions`, {
-        decisions,
-      });
+  const decideActionProposal = useCallback(
+    async (proposalId: string, decision: 'confirmed' | 'rejected') => {
+      const result = await request(
+        `${apiUrl}/action-proposals/${proposalId}/${decision === 'confirmed' ? 'confirm' : 'reject'}`,
+        {},
+      );
       if (activeRunId) await refreshProjection(activeRunId);
+      const confirmedRunId = stringValue(result.confirmedRunId);
+      if (confirmedRunId) {
+        setActiveRunId(confirmedRunId);
+        await refreshProjection(confirmedRunId);
+      }
       return result;
     },
     [activeRunId, refreshProjection],
   );
 
-  const isRunning = Boolean(activeProjection && ACTIVE_RUN_STATES.has(activeProjection.status));
+  const isRunning = Boolean(activeProjection && !activeProjection.terminal);
   const dictation = useMemo(
     () => new WebSpeechDictationAdapter({ language: 'zh-CN', continuous: true }),
     [],
@@ -439,7 +487,7 @@ export function useAgentPressAssistantRuntime(
     activeProjection,
     decideTool,
     answerQuestion,
-    decideProposal,
+    decideActionProposal,
     cancelDirective,
     readiness,
     panelError,
@@ -473,7 +521,7 @@ function buildRunTurns(
       role: 'assistant',
       projection,
       ...(liveText ? { text: liveText } : {}),
-      status: ACTIVE_RUN_STATES.has(projection.status) ? 'running' : 'complete',
+      status: projection.terminal ? 'complete' : 'running',
     });
     skipNextAssistant = projectedRunIds.has(projection.runId);
   }
@@ -539,7 +587,7 @@ function projectionContent(
       } satisfies RunPart,
     });
   }
-  if (parts.length === 0 || ACTIVE_RUN_STATES.has(projection.status)) {
+  if (parts.length === 0 || !projection.terminal) {
     parts.unshift({
       type: 'data',
       name: 'agentpress-run-part',

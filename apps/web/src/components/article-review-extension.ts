@@ -163,10 +163,13 @@ function buttonFor(
   button.textContent = decision === 'accepted' ? '✓' : '×';
   button.dataset.decision = decision;
   button.disabled = review.phase === 'submitting';
-  button.addEventListener('mousedown', (event) => {
+  button.addEventListener('pointerdown', (event) => {
     event.preventDefault();
+    event.stopPropagation();
   });
-  button.addEventListener('click', () => {
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     dispatchReviewDecision(view.state, operationId, decision);
   });
   return button;

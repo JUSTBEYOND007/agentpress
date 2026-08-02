@@ -12,7 +12,6 @@ import type {
   AttachmentView,
   ConversationView,
   MemoryView,
-  Proposal,
   SkillView,
 } from './agent-view-model';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
@@ -28,23 +27,27 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 export function AgentWorkbench({
   conversationId,
   branchId,
-  onArticleUpdated,
+  onArticleReviewChanged,
+  onClose,
   workspaceId,
   activeArticleId,
   activeArticleTitle,
   articleSelection,
   articles,
-  onProposalReady,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
-  readonly onArticleUpdated?: () => Promise<void>;
+  readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
+  readonly onClose?: () => void;
   readonly workspaceId?: string;
   readonly activeArticleId?: string;
   readonly activeArticleTitle?: string;
   readonly articleSelection?: ArticleSelectionView;
-  readonly articles: readonly { readonly id: string; readonly revisionId: string; readonly title: string }[];
-  readonly onProposalReady?: (proposal: Proposal) => void;
+  readonly articles: readonly {
+    readonly id: string;
+    readonly revisionId: string;
+    readonly title: string;
+  }[];
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const [skills, setSkills] = useState<readonly SkillView[]>([]);
@@ -114,7 +117,7 @@ export function AgentWorkbench({
     activeProjection,
     decideTool,
     answerQuestion,
-    decideProposal,
+    decideActionProposal,
     cancelDirective,
     readiness,
     panelError,
@@ -128,6 +131,7 @@ export function AgentWorkbench({
           branchId: selectedConversation.branchId,
           contextBindings,
           sendingDisabled: uploadingAttachments > 0,
+          ...(onArticleReviewChanged ? { onArticleReviewChanged } : {}),
         }
       : {},
   );
@@ -234,11 +238,9 @@ export function AgentWorkbench({
     () => ({
       decideTool,
       answerQuestion,
-      decideProposal,
-      ...(onArticleUpdated ? { onArticleUpdated } : {}),
-      ...(onProposalReady ? { onProposalReady } : {}),
+      decideActionProposal,
     }),
-    [answerQuestion, decideProposal, decideTool, onArticleUpdated, onProposalReady],
+    [answerQuestion, decideActionProposal, decideTool],
   );
   const status =
     activeProjection?.status ?? (readiness.status === 'ready' ? 'ready' : readiness.status);
@@ -250,6 +252,7 @@ export function AgentWorkbench({
           <AgentConversationHeader
             conversations={conversations}
             onCreate={createConversation}
+            {...(onClose ? { onClose } : {})}
             onSelect={setSelectedConversation}
             onUpdate={updateConversation}
             {...(selectedConversation ? { selected: selectedConversation } : {})}

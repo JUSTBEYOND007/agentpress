@@ -311,10 +311,15 @@
     height: 100dvh;
     box-shadow: -16px 0 40px rgb(20 20 18 / 12%);
   }
+
+  .agent-mobile-close {
+    display: grid;
+  }
 }
 
 @media (max-width: 720px) {
-  .workspace {
+  .workspace,
+  .workspace.agent-closed {
     grid-template-columns: minmax(0, 1fr);
   }
 

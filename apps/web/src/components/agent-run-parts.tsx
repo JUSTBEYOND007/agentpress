@@ -15,7 +15,7 @@ import {
   LoaderCircle,
   X,
 } from 'lucide-react';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 
 import {
   activityLabel,
@@ -36,12 +36,10 @@ import {
 export type RunActions = {
   readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
   readonly answerQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
-  readonly decideProposal: (
+  readonly decideActionProposal: (
     proposalId: string,
-    decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
+    decision: 'confirmed' | 'rejected',
   ) => Promise<Readonly<Record<string, unknown>>>;
-  readonly onArticleUpdated?: () => Promise<void>;
-  readonly onProposalReady?: (proposal: Proposal) => void;
 };
 
 export const RunActionsContext = createContext<RunActions | undefined>(undefined);
@@ -82,6 +80,7 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
   const part = parseRunPart(data);
   if (!part) return null;
   if (part.type === 'plan') return <PlanPart part={part} />;
+  if (part.type === 'action-proposal') return <ActionProposalPart part={part} />;
   if (part.type === 'tool-approval') return <ApprovalPart part={part} />;
   if (part.type === 'ask-user') return <AskUserPart part={part} />;
   if (part.type === 'artifact') return <ArtifactPart part={part} />;
@@ -98,6 +97,72 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
     );
   }
   return null;
+}
+
+function ActionProposalPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const actions = useRunActions();
+  const proposalId = stringValue(part.payload.id);
+  const [decision, setDecision] = useState<'confirmed' | 'rejected' | undefined>(() =>
+    part.status === 'action.confirmed'
+      ? 'confirmed'
+      : part.status === 'action.rejected'
+        ? 'rejected'
+        : undefined,
+  );
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+  const decide = (next: 'confirmed' | 'rejected'): void => {
+    if (!proposalId || pending || decision) return;
+    setPending(true);
+    setError(undefined);
+    void actions
+      .decideActionProposal(proposalId, next)
+      .then(() => {
+        setDecision(next);
+      })
+      .catch((reason: unknown) => {
+        setError(friendlyFailure(reason, '动作没有确认成功，请重试。'));
+      })
+      .finally(() => {
+        setPending(false);
+      });
+  };
+  return (
+    <section className="run-part action-proposal-part" aria-label="文章动作确认">
+      <div>
+        <strong>{stringValue(part.payload.summary) || '修改当前文章'}</strong>
+        <span>{stringValue(part.payload.instruction)}</span>
+      </div>
+      <div>
+        <button
+          aria-label="确认文章修改"
+          disabled={pending || Boolean(decision)}
+          onClick={() => {
+            decide('confirmed');
+          }}
+          title="确认"
+          type="button"
+        >
+          <Check size={14} />
+        </button>
+        <button
+          aria-label="拒绝文章修改"
+          disabled={pending || Boolean(decision)}
+          onClick={() => {
+            decide('rejected');
+          }}
+          title="拒绝"
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      {decision ? (
+        <p className="interaction-result">{decision === 'confirmed' ? '已确认' : '已拒绝'}</p>
+      ) : null}
+      {error ? <p className="interaction-error">{error}</p> : null}
+    </section>
+  );
 }
 
 function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
@@ -318,10 +383,6 @@ function ArticleChangePart({
   readonly part: RunPart;
   readonly proposal?: Proposal;
 }): React.JSX.Element | null {
-  const actions = useRunActions();
-  useEffect(() => {
-    if (proposal) actions.onProposalReady?.(proposal);
-  }, [actions, proposal]);
   if (!proposal) return null;
   return (
     <section className="run-part proposal-preview">
@@ -330,15 +391,7 @@ function ArticleChangePart({
           <strong>文章修改</strong>
           <span>{proposal.operations.length} 处修改</span>
         </div>
-        <button
-          className="proposal-view-button"
-          onClick={() => {
-            actions.onProposalReady?.(proposal);
-          }}
-          type="button"
-        >
-          显示修改
-        </button>
+        <span className="proposal-view-status">已在正文中显示</span>
       </div>
     </section>
   );

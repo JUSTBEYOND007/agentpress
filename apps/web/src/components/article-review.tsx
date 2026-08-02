@@ -26,16 +26,55 @@ export function useArticleReview(
   const [review, setReview] = useState<ArticleReviewState>();
   const [resolved, setResolved] = useState<ReadonlySet<string>>(new Set());
   const reviewRef = useRef<ArticleReviewState | undefined>(undefined);
+  const decisionHandlerRef = useRef<ArticleReviewState['onDecision']>(() => undefined);
+  const loadSequenceRef = useRef(0);
 
   useEffect(() => {
     reviewRef.current = review;
   }, [review]);
 
+  const reload = useCallback(async (): Promise<void> => {
+    const requestedArticleId = articleId;
+    const loadSequence = ++loadSequenceRef.current;
+    if (!requestedArticleId) {
+      reviewRef.current = undefined;
+      setReview(undefined);
+      return;
+    }
+    const response = await authenticatedFetch(
+      `${apiUrl}/articles/${requestedArticleId}/edit-proposals/pending`,
+    );
+    if (!response.ok) throw new Error(await response.text());
+    const { proposal: value } = (await response.json()) as { readonly proposal?: unknown };
+    if (loadSequence !== loadSequenceRef.current) return;
+    if (typeof value !== 'object' || value === null) {
+      reviewRef.current = undefined;
+      setReview(undefined);
+      return;
+    }
+    const proposal = value as Proposal & {
+      readonly decisions?: Readonly<Record<string, 'accepted' | 'rejected'>>;
+    };
+    if (!Array.isArray(proposal.operations) || !Array.isArray(proposal.diffs)) return;
+    const restored: ArticleReviewState = {
+      ...createArticleReviewState(proposal, (operationId, decision) => {
+        decisionHandlerRef.current(operationId, decision);
+      }),
+      decisions: proposal.decisions ?? {},
+    };
+    reviewRef.current = restored;
+    setReview(restored);
+  }, [articleId]);
+
   useEffect(() => {
     reviewRef.current = undefined;
     setReview(undefined);
     setResolved(new Set());
-  }, [articleId]);
+    void reload().catch(() => undefined);
+    return () => {
+      loadSequenceRef.current += 1;
+    };
+  }, [reload]);
 
   const submitDecisions = useCallback(
     async (
@@ -90,15 +129,56 @@ export function useArticleReview(
       const current = reviewRef.current;
       if (!current || current.phase === 'submitting') return;
       const decisions = { ...current.decisions, [operationId]: decision };
-      const next = { ...current, decisions, error: undefined };
+      const next = { ...current, decisions, phase: 'submitting' as const, error: undefined };
       reviewRef.current = next;
       setReview(next);
-      if (current.proposal.operations.every(({ operationId: id }) => decisions[id])) {
-        void submitDecisions(current.proposal, decisions);
-      }
+      void authenticatedFetch(
+        `${apiUrl}/edit-proposals/${current.proposal.proposalId}/operations/${operationId}/decision`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ decision }),
+        },
+      )
+        .then(async (response) => {
+          if (!response.ok) throw new Error(await response.text());
+          return (await response.json()) as {
+            readonly status: string;
+            readonly decisions: Readonly<Record<string, 'accepted' | 'rejected'>>;
+          };
+        })
+        .then(async (result) => {
+          if (result.status !== 'pending') {
+            setResolved((items) => new Set([...items, current.proposal.proposalId]));
+            reviewRef.current = undefined;
+            setReview(undefined);
+            await onArticleUpdated().catch(() => undefined);
+            return;
+          }
+          const persisted = {
+            ...next,
+            decisions: result.decisions,
+            phase: 'pending' as const,
+          };
+          reviewRef.current = persisted;
+          setReview(persisted);
+        })
+        .catch((reason: unknown) => {
+          const failed = {
+            ...current,
+            phase: 'conflict' as const,
+            error: friendlyFailure(reason, '这个决定没有保存，请刷新后重试。'),
+          };
+          reviewRef.current = failed;
+          setReview(failed);
+        });
     },
-    [submitDecisions],
+    [onArticleUpdated],
   );
+
+  useEffect(() => {
+    decisionHandlerRef.current = onDecision;
+  }, [onDecision]);
 
   const showProposal = useCallback(
     (proposal: Proposal): void => {
@@ -167,6 +247,7 @@ export function useArticleReview(
 
   return {
     review,
+    reload,
     showProposal,
     onDecision,
     setAll,

@@ -13,6 +13,7 @@ import {
 export function AgentConversationHeader({
   conversations,
   onCreate,
+  onClose,
   onSelect,
   onUpdate,
   selected,
@@ -20,6 +21,7 @@ export function AgentConversationHeader({
 }: {
   readonly conversations: readonly ConversationView[];
   readonly onCreate: () => Promise<void>;
+  readonly onClose?: () => void;
   readonly onSelect: (conversation: ConversationView) => void;
   readonly onUpdate: (
     conversation: ConversationView,
@@ -207,6 +209,17 @@ export function AgentConversationHeader({
         ) : null}
       </div>
       <span className={`status-dot status-${statusTone(status)}`}>{statusLabel(status)}</span>
+      {onClose ? (
+        <button
+          aria-label="关闭 Agent 面板"
+          className="header-icon-button agent-mobile-close"
+          onClick={onClose}
+          title="关闭"
+          type="button"
+        >
+          <X aria-hidden="true" size={15} />
+        </button>
+      ) : null}
     </header>
   );
 }

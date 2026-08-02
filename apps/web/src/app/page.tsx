@@ -606,10 +606,12 @@ function WorkspacePage(): React.JSX.Element {
             ? { conversationId: activeArticle.conversationId }
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
-          onArticleUpdated={reloadArticles}
+          onArticleReviewChanged={articleReview.reload}
+          onClose={() => {
+            setAgentOpen(false);
+          }}
           articles={articles.map(({ id, revisionId, title }) => ({ id, revisionId, title }))}
           {...(agentSelection ? { articleSelection: agentSelection } : {})}
-          onProposalReady={articleReview.showProposal}
           {...(workspaceId ? { workspaceId } : {})}
           {...(activeArticle
             ? { activeArticleId: activeArticle.id, activeArticleTitle: activeArticle.title }

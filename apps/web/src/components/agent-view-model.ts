@@ -68,6 +68,7 @@ export function parseRunPart(value: unknown): RunPart | undefined {
   const allowed: readonly RunPart['type'][] = [
     'text',
     'plan',
+    'action-proposal',
     'activity',
     'tool-approval',
     'ask-user',
