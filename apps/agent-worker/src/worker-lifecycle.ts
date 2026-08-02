@@ -152,12 +152,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       eachMessage: async ({ topic, partition, message, heartbeat }) => {
         await runWithKafkaHeartbeat(
           () =>
-            this.handleCommand(
-              topic,
-              partition,
-              Number(message.offset),
-              message.value?.toString(),
-            ),
+            this.handleCommand(topic, partition, Number(message.offset), message.value?.toString()),
           heartbeat,
           {
             onHeartbeatError: (error) => {

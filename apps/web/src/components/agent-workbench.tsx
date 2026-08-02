@@ -8,12 +8,7 @@ import type { ArticleSelectionView } from './article-selection';
 import { AgentConversationHeader } from './agent-conversation-header';
 import { RunActionsContext, type RunActions } from './agent-run-parts';
 import { AgentThread } from './agent-thread';
-import type {
-  AttachmentView,
-  ConversationView,
-  MemoryView,
-  SkillView,
-} from './agent-view-model';
+import type { AttachmentView, ConversationView, MemoryView, SkillView } from './agent-view-model';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
