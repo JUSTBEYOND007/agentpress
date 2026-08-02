@@ -37,30 +37,6 @@ export function useArticleReview(
     setResolved(new Set());
   }, [articleId]);
 
-  const showProposal = useCallback(
-    (proposal: Proposal): void => {
-      if (
-        !articleId ||
-        (proposal.articleId && proposal.articleId !== articleId) ||
-        resolved.has(proposal.proposalId)
-      )
-        return;
-      setReview((current) =>
-        current?.proposal.proposalId === proposal.proposalId
-          ? { ...current, visible: true }
-          : {
-              proposal,
-              decisions: {},
-              visible: true,
-              activeOperationId: proposal.operations[0]?.operationId,
-              phase: 'pending',
-              onDecision: () => undefined,
-            },
-      );
-    },
-    [articleId, resolved],
-  );
-
   const submitDecisions = useCallback(
     async (
       proposal: Proposal,
@@ -124,9 +100,22 @@ export function useArticleReview(
     [submitDecisions],
   );
 
-  useEffect(() => {
-    setReview((current) => (current ? { ...current, onDecision } : current));
-  }, [onDecision]);
+  const showProposal = useCallback(
+    (proposal: Proposal): void => {
+      if (
+        !articleId ||
+        (proposal.articleId && proposal.articleId !== articleId) ||
+        resolved.has(proposal.proposalId)
+      )
+        return;
+      setReview((current) =>
+        current?.proposal.proposalId === proposal.proposalId
+          ? { ...current, visible: true, onDecision }
+          : createArticleReviewState(proposal, onDecision),
+      );
+    },
+    [articleId, onDecision, resolved],
+  );
 
   const setAll = useCallback(
     (decision: 'accepted' | 'rejected'): void => {
@@ -226,7 +215,6 @@ export function ArticleReviewToolbar({
           {activeIndex + 1}/{count}
         </span>
         <button
-          className="article-review-accept"
           aria-label="下一处修改"
           disabled={count < 2 || review.phase === 'submitting'}
           onClick={() => {
@@ -240,7 +228,7 @@ export function ArticleReviewToolbar({
       </div>
       <div className="article-review-actions">
         <button
-          className="article-review-reject"
+          className="article-review-accept"
           disabled={review.phase === 'submitting'}
           onClick={() => {
             onDecisionAll('accepted');
@@ -251,6 +239,7 @@ export function ArticleReviewToolbar({
           全部接受
         </button>
         <button
+          className="article-review-reject"
           disabled={review.phase === 'submitting'}
           onClick={() => {
             onDecisionAll('rejected');
@@ -282,4 +271,18 @@ export function ArticleReviewToolbar({
       ) : null}
     </section>
   );
+}
+
+export function createArticleReviewState(
+  proposal: Proposal,
+  onDecision: ArticleReviewState['onDecision'],
+): ArticleReviewState {
+  return {
+    proposal,
+    decisions: {},
+    visible: true,
+    activeOperationId: proposal.operations[0]?.operationId,
+    phase: 'pending',
+    onDecision,
+  };
 }
