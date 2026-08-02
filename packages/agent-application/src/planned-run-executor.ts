@@ -45,7 +45,10 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
-import { AgentTranscriptProjector } from './agent-transcript-projector.js';
+import {
+  AgentTranscriptProjector,
+  withHistoricalIntentBoundary,
+} from './agent-transcript-projector.js';
 import { ActionProposalService } from './action-proposal-service.js';
 import {
   createAgentTurnProfile,
@@ -1082,7 +1085,8 @@ export class PlannedRunExecutor {
           .where(eq(agentSessions.id, sessionId));
       });
     };
-    await record('system', 'system_prompt', { content: systemPrompt });
+    const governedSystemPrompt = withHistoricalIntentBoundary(systemPrompt, history.length > 0);
+    await record('system', 'system_prompt', { content: governedSystemPrompt });
     for (const message of history) {
       await record(
         message.role,
@@ -1099,7 +1103,7 @@ export class PlannedRunExecutor {
       result = await runtime.execute(
         {
           runId: sessionId,
-          systemPrompt,
+          systemPrompt: governedSystemPrompt,
           history,
           currentTurn,
           tools,

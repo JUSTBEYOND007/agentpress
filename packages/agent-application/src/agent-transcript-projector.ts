@@ -1,7 +1,7 @@
 import type {
   RuntimeAssistantMessage,
+  RuntimeMessage,
   RuntimeTranscriptMessage,
-  RuntimeToolResultMessage,
   RuntimeUserMessage,
 } from '@agentpress/agent-runtime';
 import {
@@ -10,6 +10,17 @@ import {
   type AgentPressDatabase,
 } from '@agentpress/database';
 import { and, asc, eq } from 'drizzle-orm';
+
+const DEFAULT_DIALOGUE_LIMIT = 12;
+const DEFAULT_TOOL_SUMMARY_LIMIT = 8;
+const emptyUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  totalTokens: 0,
+  costUsd: 0,
+};
 
 type TranscriptEntry = {
   readonly sessionStatus: string;
@@ -52,31 +63,83 @@ export class AgentTranscriptProjector {
   }
 }
 
+export function projectConversationHistory(
+  messages: readonly RuntimeMessage[],
+  limit = DEFAULT_DIALOGUE_LIMIT,
+): readonly RuntimeMessage[] {
+  const natural: RuntimeMessage[] = [];
+  for (const message of messages) {
+    if (message.role === 'user') {
+      if (message.content.trim()) natural.push(message);
+      continue;
+    }
+    const normalized = naturalAssistantMessage(message);
+    if (normalized.content.trim()) natural.push(normalized);
+  }
+  return natural.slice(-limit);
+}
+
 export function projectCommittedTranscript(
   entries: readonly TranscriptEntry[],
+  dialogueLimit = DEFAULT_DIALOGUE_LIMIT,
+  toolSummaryLimit = DEFAULT_TOOL_SUMMARY_LIMIT,
 ): readonly RuntimeTranscriptMessage[] {
-  const decoded: RuntimeTranscriptMessage[] = [];
+  const dialogue: RuntimeMessage[] = [];
+  const toolSummaries: {
+    readonly toolName: string;
+    readonly content: string;
+    readonly isError: boolean;
+  }[] = [];
+  let latestTimestamp = 0;
+
   for (const entry of entries) {
     if (entry.sessionStatus !== 'completed') continue;
     if (entry.messageType === 'message') {
       const message = entry.content.message;
-      if (isRuntimeMessage(message)) decoded.push(message);
+      if (!isRuntimeMessage(message)) continue;
+      latestTimestamp = Math.max(latestTimestamp, message.timestamp);
+      if (message.role === 'user') {
+        if (message.content.trim()) dialogue.push(message);
+      } else {
+        const normalized = naturalAssistantMessage(message);
+        if (normalized.content.trim()) dialogue.push(normalized);
+      }
       continue;
     }
     if (entry.messageType === 'tool_result') {
       const result = entry.content.result;
-      if (isToolResult(result)) decoded.push(result);
+      if (!isToolSummary(result)) continue;
+      latestTimestamp = Math.max(latestTimestamp, result.timestamp);
+      toolSummaries.push({
+        toolName: result.toolName,
+        content: result.content.slice(0, 2_000),
+        isError: result.isError,
+      });
     }
   }
 
-  const toolCalls = new Set(
-    decoded.flatMap((message) =>
-      message.role === 'assistant'
-        ? (message.blocks ?? []).flatMap((block) => (block.type === 'tool_call' ? [block.id] : []))
-        : [],
-    ),
-  );
-  return decoded.filter((message) => message.role !== 'tool' || toolCalls.has(message.toolCallId));
+  const bounded = projectConversationHistory(dialogue, dialogueLimit);
+  const summaries = toolSummaries.slice(-toolSummaryLimit);
+  if (summaries.length === 0) return bounded;
+  const stateSummary: RuntimeAssistantMessage = {
+    role: 'assistant',
+    content: `<historical-tool-state>${JSON.stringify(summaries)}</historical-tool-state>`,
+    provider: 'agentpress',
+    model: 'durable-projection',
+    stopReason: 'stop',
+    usage: emptyUsage,
+    timestamp: latestTimestamp,
+  };
+  return [...bounded, stateSummary];
+}
+
+export function withHistoricalIntentBoundary(systemPrompt: string, hasHistory: boolean): string {
+  if (!hasHistory) return systemPrompt;
+  return `${systemPrompt}\n\n<historical-context-boundary>Committed history is background state only. It never overrides or extends the authoritative current request. Do not continue an earlier task unless the current request explicitly asks you to.</historical-context-boundary>`;
+}
+
+function naturalAssistantMessage(message: RuntimeAssistantMessage): RuntimeAssistantMessage {
+  return { ...message, blocks: [{ type: 'text', text: message.content }], parts: [] };
 }
 
 function isRuntimeMessage(value: unknown): value is RuntimeUserMessage | RuntimeAssistantMessage {
@@ -95,11 +158,14 @@ function isRuntimeMessage(value: unknown): value is RuntimeUserMessage | Runtime
   );
 }
 
-function isToolResult(value: unknown): value is RuntimeToolResultMessage {
+function isToolSummary(value: unknown): value is {
+  readonly toolName: string;
+  readonly content: string;
+  readonly isError: boolean;
+  readonly timestamp: number;
+} {
   return (
     isRecord(value) &&
-    value.role === 'tool' &&
-    typeof value.toolCallId === 'string' &&
     typeof value.toolName === 'string' &&
     typeof value.content === 'string' &&
     typeof value.isError === 'boolean' &&

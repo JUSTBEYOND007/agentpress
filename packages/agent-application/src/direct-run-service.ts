@@ -32,7 +32,7 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -49,6 +49,7 @@ import {
   type RuntimeToolFactory,
 } from './contracts.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
+import { projectConversationHistory } from './agent-transcript-projector.js';
 import { RunContextService } from './run-context-service.js';
 import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
 
@@ -987,11 +988,14 @@ export class DirectRunService {
           lt(conversationMessages.sequence, run.messageSequence),
         ),
       )
-      .orderBy(asc(conversationMessages.sequence));
-    const history = historyRows.flatMap(({ content }) => {
-      const message = decodeRuntimeMessage(content);
-      return message ? [message] : [];
-    });
+      .orderBy(desc(conversationMessages.sequence))
+      .limit(12);
+    const history = projectConversationHistory(
+      historyRows.reverse().flatMap(({ content }) => {
+        const message = decodeRuntimeMessage(content);
+        return message ? [message] : [];
+      }),
+    );
     const contextPack = await this.contexts.load(runId);
     if (!contextPack) throw new Error(`Agent Run ${runId} has no persisted Context Pack`);
     const answeredQuestions = await this.options.database
