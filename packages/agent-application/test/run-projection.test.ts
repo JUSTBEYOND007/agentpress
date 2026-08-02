@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import type { DurableRunEvent } from '../src/contracts.js';
 import { projectRunParts } from '../src/run-projection.js';
+import { isTerminalRunStatus } from '../src/direct-run-service.js';
 
 describe('run projection', () => {
+  it('uses one server-side terminal classification', () => {
+    expect(isTerminalRunStatus('completed')).toBe(true);
+    expect(isTerminalRunStatus('completed_with_degradation')).toBe(true);
+    expect(isTerminalRunStatus('failed')).toBe(true);
+    expect(isTerminalRunStatus('cancelled')).toBe(true);
+    expect(isTerminalRunStatus('running')).toBe(false);
+  });
   it('folds tool and task lifecycle events into their latest durable state', () => {
     const parts = projectRunParts([
       event(1, 'task.started', { taskId: 'task-1' }),
@@ -29,6 +37,33 @@ describe('run projection', () => {
     );
 
     expect(parts[0]?.payload).toMatchObject({ proposalStatus: 'accepted' });
+  });
+
+  it('projects action confirmation and article proposals as explicit parts', () => {
+    const parts = projectRunParts([
+      event(1, 'action.proposed', { id: 'action-1', instruction: '继续写' }),
+      event(2, 'article.proposal.created', {
+        proposalId: 'proposal-1',
+        operations: [],
+        diffs: [],
+      }),
+    ]);
+
+    expect(parts.map(({ type }) => type)).toEqual(['action-proposal', 'article-change']);
+  });
+
+  it('folds an action decision into the original proposal card', () => {
+    const parts = projectRunParts([
+      event(1, 'action.proposed', { id: 'action-1', instruction: '继续写' }),
+      event(2, 'action.confirmed', { proposalId: 'action-1', confirmedRunId: 'run-2' }),
+    ]);
+
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      type: 'action-proposal',
+      status: 'action.confirmed',
+      payload: { id: 'action-1', confirmedRunId: 'run-2' },
+    });
   });
 });
 

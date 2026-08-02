@@ -1,4 +1,5 @@
 import {
+  ActionProposalService,
   AgentApplicationError,
   DirectRunService,
   ToolCallApplicationError,
@@ -75,7 +76,39 @@ export class AgentController {
     @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
     @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
     @Inject(DATABASE_CONNECTION) private readonly connection?: DatabaseConnection,
+    @Inject(ActionProposalService)
+    @Optional()
+    private readonly actionProposals?: ActionProposalService,
   ) {}
+
+  @Post('action-proposals/:proposalId/confirm')
+  @HttpCode(202)
+  public async confirmActionProposal(
+    @Param('proposalId') proposalId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!this.actionProposals)
+      throw new BadRequestException('Action proposal service is unavailable');
+    try {
+      return await this.actionProposals.confirm(proposalId, user.id, this.runs);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
+
+  @Post('action-proposals/:proposalId/reject')
+  public async rejectActionProposal(
+    @Param('proposalId') proposalId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!this.actionProposals)
+      throw new BadRequestException('Action proposal service is unavailable');
+    try {
+      return await this.actionProposals.reject(proposalId, user.id);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
 
   @Get('conversations/:conversationId/branches/:branchId/messages')
   public async listMessages(
@@ -206,6 +239,7 @@ export class AgentController {
       runId: projection.runId,
       rootMessageId: projection.rootMessageId,
       status: projection.status,
+      terminal: projection.terminal,
       mode: projection.mode,
       ...(projection.activePlanRevision
         ? { activePlanRevision: projection.activePlanRevision }

@@ -124,6 +124,70 @@ export class DirectRunService {
   }
 
   public async create(input: CreateDirectRunInput): Promise<CreateDirectRunResult> {
+    return this.createWithEnvelope(input, {
+      version: 1,
+      source: 'free_text',
+      grantedCapabilities: [],
+    });
+  }
+
+  public async createConfirmedAction(input: {
+    readonly conversationId: string;
+    readonly branchId: string;
+    readonly userId: string;
+    readonly proposalId: string;
+    readonly instruction: string;
+    readonly articleId: string;
+    readonly baseRevisionId: string;
+    readonly selectedBlocks: readonly { readonly blockId: string; readonly contentHash: string }[];
+    readonly grantedCapabilities: readonly string[];
+  }): Promise<CreateDirectRunResult> {
+    const envelope: ActionEnvelopeV1 = {
+      version: 1,
+      source: 'button',
+      requestedIntent: 'article_edit',
+      actionProposalId: input.proposalId,
+      payload: {
+        instruction: input.instruction,
+        articleId: input.articleId,
+        baseRevisionId: input.baseRevisionId,
+        selectedBlocks: [...input.selectedBlocks],
+      },
+      grantedCapabilities: [...input.grantedCapabilities],
+    };
+    return this.createWithEnvelope(
+      {
+        conversationId: input.conversationId,
+        branchId: input.branchId,
+        userId: input.userId,
+        prompt: input.instruction,
+        idempotencyKey: `action:${input.proposalId}`,
+        contextBindings:
+          input.selectedBlocks.length > 0
+            ? [
+                {
+                  type: 'article_selection',
+                  articleId: input.articleId,
+                  revisionId: input.baseRevisionId,
+                  blocks: input.selectedBlocks,
+                },
+              ]
+            : [
+                {
+                  type: 'article_revision',
+                  articleId: input.articleId,
+                  revisionId: input.baseRevisionId,
+                },
+              ],
+      },
+      envelope,
+    );
+  }
+
+  private async createWithEnvelope(
+    input: CreateDirectRunInput,
+    actionEnvelope: ActionEnvelopeV1,
+  ): Promise<CreateDirectRunResult> {
     const prompt = input.prompt.trim();
     if (prompt.length === 0 || prompt.length > 100_000) {
       throw new AgentApplicationError(
@@ -239,6 +303,7 @@ export class DirectRunService {
         messageId,
         requestedByUserId: input.userId,
         idempotencyKey: input.idempotencyKey,
+        actionEnvelope,
         createdAt: now,
       });
       await transaction.insert(agentRuns).values({
@@ -301,6 +366,17 @@ export class DirectRunService {
   }
 
   public async execute(runId: string, signal?: AbortSignal): Promise<ExecuteDirectRunResult> {
+    try {
+      return await this.executeClaimed(runId, signal);
+    } catch (error) {
+      return this.settleUnexpectedFailure(runId, error, signal);
+    }
+  }
+
+  private async executeClaimed(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<ExecuteDirectRunResult> {
     const context = await this.loadExecutionContext(runId);
     if (!context) {
       throw new AgentApplicationError('run_not_found', `Agent Run ${runId} does not exist`);
@@ -328,7 +404,41 @@ export class DirectRunService {
         ? await this.plannedRuns.recover(runId, currentTurn, context.history, signal)
         : await this.plannedRuns.execute(runId, currentTurn, context.history, signal);
     if (!outcome) return { runId, status: 'ignored' };
+    if (signal?.aborted && outcome.result.status === 'failed') {
+      throw new Error(outcome.result.error.message);
+    }
     return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
+  }
+
+  private async settleUnexpectedFailure(
+    runId: string,
+    error: unknown,
+    signal?: AbortSignal,
+  ): Promise<ExecuteDirectRunResult> {
+    const rows = await this.options.database
+      .select({ branchId: agentRuns.branchId, status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+    const run = rows[0];
+    if (!run) {
+      throw error;
+    }
+    if (isTerminalRunStatus(run.status)) {
+      return { runId, status: 'ignored' };
+    }
+    if (signal?.aborted && run.status !== 'cancelling') {
+      throw error;
+    }
+    return this.settleRun(run.branchId, runId, {
+      status: 'failed',
+      messages: [],
+      error: {
+        code: 'runtime_error',
+        message: error instanceof Error ? error.message : 'Agent Run execution failed',
+        retryable: false,
+      },
+    });
   }
 
   public async requestCancellation(runId: string): Promise<RequestRunCancellationResult> {
@@ -692,6 +802,7 @@ export class DirectRunService {
       runId,
       rootMessageId: run.rootMessageId,
       status: run.status,
+      terminal: isTerminalRunStatus(run.status),
       mode: run.mode,
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
       parts: [
@@ -1149,7 +1260,20 @@ export class DirectRunService {
           updatedAt: now,
           version: sql`${agentRuns.version} + 1`,
         })
-        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            inArray(agentRuns.status, [
+              'queued',
+              'planning',
+              'running',
+              'waiting_for_approval',
+              'waiting_for_user',
+              'interrupted',
+              'recovering',
+            ]),
+          ),
+        );
       await appendCheckpoint(transaction, {
         id: this.createId(),
         runId,
@@ -1215,6 +1339,10 @@ export class DirectRunService {
       .set({ status: 'consumed', consumedAt: this.now(), createdRunId: created.runId })
       .where(and(eq(queuedFollowups.id, claimed.id), eq(queuedFollowups.status, 'pending')));
   }
+}
+
+export function isTerminalRunStatus(status: string): boolean {
+  return (TERMINAL_RUN_STATES as readonly string[]).includes(status);
 }
 
 function encodeRuntimeMessage(message: RuntimeMessage): readonly unknown[] {

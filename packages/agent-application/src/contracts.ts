@@ -144,6 +144,7 @@ export type RunPart = {
   readonly type:
     | 'text'
     | 'plan'
+    | 'action-proposal'
     | 'activity'
     | 'tool-approval'
     | 'ask-user'
@@ -161,6 +162,7 @@ export type RunProjection = {
   readonly runId: string;
   readonly rootMessageId: string;
   readonly status: string;
+  readonly terminal: boolean;
   readonly mode: 'direct' | 'planned';
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];

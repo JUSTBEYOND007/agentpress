@@ -26,7 +26,10 @@ export function projectRunParts(
         lifecycleIndexes.set(key, projected.length);
         projected.push(part);
       } else {
-        projected[previousIndex] = part;
+        const previous = projected[previousIndex];
+        projected[previousIndex] = previous
+          ? { ...part, payload: { ...previous.payload, ...part.payload } }
+          : part;
       }
     }
   }
@@ -43,6 +46,11 @@ function lifecycleKey(event: DurableRunEvent): string | undefined {
     const taskId = stringProperty(event.payload, 'taskId');
     return taskId ? `task:${taskId}` : undefined;
   }
+  if (event.eventType.startsWith('action.')) {
+    const proposalId =
+      stringProperty(event.payload, 'id') ?? stringProperty(event.payload, 'proposalId');
+    return proposalId ? `action:${proposalId}` : undefined;
+  }
   return undefined;
 }
 
@@ -56,21 +64,25 @@ function toRunParts(
       ? 'text'
       : type.startsWith('plan.')
         ? 'plan'
-        : type === 'tool.approval_requested'
-          ? 'tool-approval'
-          : type === 'user.input_requested'
-            ? 'ask-user'
-            : type.includes('artifact')
-              ? 'artifact'
-              : type.startsWith('run.recover')
-                ? 'recovery'
-                : type === 'run.completed_with_degradation' || type === 'run.failed'
-                  ? 'warning'
-                  : type.startsWith('tool.') || type.startsWith('task.')
-                    ? 'activity'
-                    : type.startsWith('run.completed')
-                      ? 'usage'
-                      : undefined;
+        : type.startsWith('action.')
+          ? 'action-proposal'
+          : type === 'article.proposal.created'
+            ? 'article-change'
+            : type === 'tool.approval_requested'
+              ? 'tool-approval'
+              : type === 'user.input_requested'
+                ? 'ask-user'
+                : type.includes('artifact')
+                  ? 'artifact'
+                  : type.startsWith('run.recover')
+                    ? 'recovery'
+                    : type === 'run.completed_with_degradation' || type === 'run.failed'
+                      ? 'warning'
+                      : type.startsWith('tool.') || type.startsWith('task.')
+                        ? 'activity'
+                        : type.startsWith('run.completed')
+                          ? 'usage'
+                          : undefined;
   if (!partType) return [];
 
   const proposalId = proposalIdFromPayload(event.payload);

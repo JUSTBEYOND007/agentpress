@@ -46,6 +46,7 @@ import type {
   RuntimeToolFactory,
 } from './contracts.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
+import { ActionProposalService } from './action-proposal-service.js';
 
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type TaskCriticality = 'required' | 'optional';
@@ -199,6 +200,7 @@ export class PlannedRunExecutor {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly transcripts: AgentTranscriptProjector;
+  private readonly actionProposals: ActionProposalService;
   private readonly activeMainRuntimes = new Map<
     string,
     ReturnType<AgentRuntimeFactory['create']>
@@ -208,6 +210,12 @@ export class PlannedRunExecutor {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.transcripts = new AgentTranscriptProjector(options.database, this.now);
+    this.actionProposals = new ActionProposalService(
+      options.database,
+      options.publisher,
+      this.now,
+      this.createId,
+    );
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
@@ -296,6 +304,7 @@ export class PlannedRunExecutor {
           return { accepted };
         },
       },
+      this.actionProposals.createRuntimeTool(runId),
       {
         name: 'plan_submit',
         label: 'Submit execution plan',
@@ -342,19 +351,24 @@ export class PlannedRunExecutor {
         },
       },
     ];
+    const currentTurnTools =
+      turn.actionEnvelope.source === 'free_text'
+        ? tools
+        : tools.filter(({ name }) => name !== 'action_propose');
     const result = await this.executeWithTranscript(
       runId,
       undefined,
       'main',
       1,
       'main',
-      mainPlanningPrompt(availableCapabilities),
+      mainPlanningPrompt(availableCapabilities, turn.actionEnvelope.source),
       history,
       turn,
-      tools,
+      currentTurnTools,
       signal,
     );
     await this.setConversationTitle(runId, turn.request.slice(0, 24), true);
+    if (await this.actionProposals.getBySourceRun(runId)) return { kind: 'direct', result };
     if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
     if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
     if (result.status === 'completed' && findAssistant(result)) return { kind: 'direct', result };
@@ -1657,7 +1671,10 @@ function assertAcyclic(tasks: readonly PlannedTaskSpec[]): void {
   for (const task of tasks) visit(task.id);
 }
 
-export function mainPlanningPrompt(capabilities: readonly string[]): string {
+export function mainPlanningPrompt(
+  capabilities: readonly string[],
+  actionSource: 'free_text' | 'button' = 'free_text',
+): string {
   const specialists = specialistRoles.map((role) => ({
     role,
     responsibility: specialistResponsibilities[role],
@@ -1667,10 +1684,11 @@ export function mainPlanningPrompt(capabilities: readonly string[]): string {
 Current date: ${new Date().toISOString().slice(0, 10)}.
 Conversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The actionEnvelope describes host-granted capabilities; never claim or infer additional grants.
 Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.
+${actionSource === 'free_text' ? 'If currentRequest asks to create, continue, rewrite, delete, or otherwise change the current article, call action_propose and stop. A free-text turn may propose that action but must never plan or execute the article change.' : 'This host-confirmed button turn may plan the approved article edit using only capabilities listed in actionEnvelope.grantedCapabilities.'}
 Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.
 Keep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.
 Choose Specialists from this policy catalog: ${JSON.stringify(specialists)}.
-For any edit to existing article content, delegate to editor and request both article.read and article.propose so it can obtain stable block hashes before proposing changes. Use writer for new drafts, not revisions to existing content.
+For a host-confirmed article edit, delegate to editor and request both article.read and article.propose so it can obtain stable block hashes before proposing changes. Use writer for new drafts, not revisions to existing content.
 Request article.read or article.propose only when the frozen root context contains an article revision. A new standalone draft is an Artifact and does not need article tools.
 If required business information is missing, call user_request_input.
 Available capabilities: ${JSON.stringify(capabilities)}.

@@ -39,6 +39,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  ActionProposalService,
   ContextGovernanceService,
   DirectRunService,
   PersistentToolBridge,
@@ -200,6 +201,216 @@ describeWithDatabase('Direct Run application flow', () => {
       await connection.db.select().from(runEvents).where(eq(runEvents.runId, second.runId)),
     ).toHaveLength(5);
     expect(published.some((event) => !event.durable)).toBe(true);
+  });
+
+  it('settles an unexpected runtime initialization error instead of leaving the Run active', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Runtime failure',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const failedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => {
+          throw new Error('Runtime model is not configured');
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await failedService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '你好',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(failedService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'failed',
+    });
+    const rows = await connection.db
+      .select({ status: agentRuns.status, finalOutcome: agentRuns.finalOutcome })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(rows[0]).toMatchObject({
+      status: 'failed',
+      finalOutcome: {
+        error: {
+          code: 'runtime_error',
+          message: 'Runtime model is not configured',
+          retryable: false,
+        },
+      },
+    });
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.at(-1)?.eventType).toBe('run.failed');
+  });
+
+  it('settles an invalid persisted root message instead of blocking later commands', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Invalid persisted request',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const run = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '你好',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db
+      .update(conversationMessages)
+      .set({ content: [{ type: 'legacy-message' }] })
+      .where(eq(conversationMessages.id, run.messageId));
+
+    await expect(service.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'failed',
+    });
+    const rows = await connection.db
+      .select({ status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(rows[0]?.status).toBe('failed');
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.at(-1)?.eventType).toBe('run.failed');
+  });
+
+  it('leaves an aborted worker attempt recoverable instead of committing a business failure', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Interrupted worker',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const interruptedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => ({
+          execute: () => Promise.reject(new Error('Worker is shutting down')),
+        }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await interruptedService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '继续执行',
+      idempotencyKey: randomUUID(),
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(interruptedService.execute(run.runId, controller.signal)).rejects.toThrow();
+    const rows = await connection.db
+      .select({ status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(rows[0]?.status).toBe('running');
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.some(({ eventType }) => eventType === 'run.failed')).toBe(false);
+  });
+
+  it('creates button runs only from a server-built confirmed action envelope', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const proposalId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Confirmed edit',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const run = await service.createConfirmedAction({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      proposalId,
+      instruction: '继续上一段',
+      articleId: ids.article,
+      baseRevisionId: ids.articleRevision,
+      selectedBlocks: [],
+      grantedCapabilities: ['article.read', 'article.propose'],
+    });
+    const rows = await connection.db
+      .select({ actionEnvelope: rootRequests.actionEnvelope })
+      .from(rootRequests)
+      .where(eq(rootRequests.id, run.rootRequestId));
+    expect(rows[0]?.actionEnvelope).toMatchObject({
+      source: 'button',
+      actionProposalId: proposalId,
+      payload: { instruction: '继续上一段', articleId: ids.article },
+      grantedCapabilities: ['article.read', 'article.propose'],
+    });
+    const bindings = await connection.db
+      .select({ targetId: mentionBindings.targetId, revision: mentionBindings.revision })
+      .from(mentionBindings)
+      .where(eq(mentionBindings.runId, run.runId));
+    expect(bindings).toEqual([{ targetId: ids.article, revision: ids.articleRevision }]);
+  });
+
+  it('confirms a persisted action proposal idempotently into one authorized run', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Action proposal',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const source = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '继续上一段',
+      idempotencyKey: randomUUID(),
+      mentionTargetIds: [ids.article],
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'completed', completedAt: new Date() })
+      .where(eq(agentRuns.id, source.runId));
+    const actions = new ActionProposalService(connection.db, publisher);
+    const proposal = await actions.create({
+      runId: source.runId,
+      instruction: '继续上一段',
+      summary: '继续写作',
+      selectedBlocks: [],
+    });
+    const confirmed = await actions.confirm(proposal.id, ids.user, service);
+    const replay = await actions.confirm(proposal.id, ids.user, service);
+    expect(confirmed).toMatchObject({ status: 'confirmed' });
+    expect(replay.confirmedRunId).toBe(confirmed.confirmedRunId);
+    const confirmedRuns = await connection.db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.branchId, branchId));
+    expect(confirmedRuns).toHaveLength(2);
   });
 
   it('pins Mention, Skill, prompt and accepted memory into an immutable Context Manifest', async () => {
@@ -460,7 +671,9 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(true);
     await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(false);
-    await expect(service.getProjection(run.runId)).resolves.toMatchObject({ pendingDirectives: [] });
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({
+      pendingDirectives: [],
+    });
   });
 
   it('fails the Run when a Required Specialist fails', async () => {
@@ -658,13 +871,13 @@ describeWithDatabase('Direct Run application flow', () => {
       .select({ id: agentSessions.id, nextSequence: agentSessions.nextSequence })
       .from(agentSessions)
       .where(eq(agentSessions.logicalKey, `${run.runId}:main:1`));
-    expect(sessions).toEqual([{ id: sessionId, nextSequence: 6 }]);
+    expect(sessions).toEqual([{ id: sessionId, nextSequence: 5 }]);
     const entries = await connection.db
       .select({ sequence: agentTranscriptEntries.sequence })
       .from(agentTranscriptEntries)
       .where(eq(agentTranscriptEntries.sessionId, sessionId));
     expect(entries.map(({ sequence }) => sequence).sort((left, right) => left - right)).toEqual([
-      1, 2, 3, 4, 5,
+      1, 2, 3, 4,
     ]);
   });
 

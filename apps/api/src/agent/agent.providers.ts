@@ -1,4 +1,5 @@
 import {
+  ActionProposalService,
   ContextGovernanceService,
   DirectRunService,
   ToolCallService,
@@ -125,6 +126,12 @@ export const agentProviders: Provider[] = [
         },
         systemPrompt: 'You are AgentPress.',
       }),
+    inject: [DATABASE_CONNECTION, RedisRunEventBus],
+  },
+  {
+    provide: ActionProposalService,
+    useFactory: (connection: DatabaseConnection, publisher: RedisRunEventBus) =>
+      new ActionProposalService(connection.db, publisher),
     inject: [DATABASE_CONNECTION, RedisRunEventBus],
   },
   {

@@ -441,9 +441,22 @@ export class ToolCallService {
         eventType: `tool.${status}`,
         payload: { toolCallId, ...(status === 'succeeded' ? { output } : { failure }) },
       });
-      return toDurableEvent(event);
+      const events = [toDurableEvent(event)];
+      const articleProposal = articleEditProposalOutput(output);
+      if (status === 'succeeded' && articleProposal) {
+        const created = await appendRunEvent(transaction, {
+          id: this.createId(),
+          runId: claimed.call.runId,
+          eventType: 'article.proposal.created',
+          payload: articleProposal,
+        });
+        events.push(toDurableEvent(created));
+      }
+      return events;
     });
-    await this.options.publisher.publish({ durable: true, event: settled });
+    for (const event of settled) {
+      await this.options.publisher.publish({ durable: true, event });
+    }
     return { toolCallId, status, ...(status === 'succeeded' ? { output } : {}) };
   }
 
@@ -525,6 +538,14 @@ export class ToolCallService {
     });
     if (persisted) await this.options.publisher.publish({ durable: true, event: persisted });
   }
+}
+
+function articleEditProposalOutput(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const output = value as Readonly<Record<string, unknown>>;
+  return output.kind === 'article_edit_proposal' && typeof output.proposalId === 'string'
+    ? output
+    : undefined;
 }
 
 function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
