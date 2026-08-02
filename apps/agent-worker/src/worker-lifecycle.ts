@@ -30,6 +30,12 @@ import { Injectable, type OnApplicationShutdown, type OnModuleInit } from '@nest
 import { Redis } from 'ioredis';
 import { Kafka, Partitioners } from 'kafkajs';
 
+import { runWithKafkaHeartbeat } from './kafka-heartbeat.js';
+import {
+  AGENT_RUN_PARTITIONS,
+  ARTICLE_INDEX_PARTITIONS,
+  ensureKafkaTopics,
+} from './kafka-topics.js';
 import { RedisRunLeaseManager } from './redis-run-lease.js';
 
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
@@ -113,7 +119,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
   private stopping = false;
 
   public async onModuleInit(): Promise<void> {
-    await this.ensureTopic();
+    await this.ensureTopics();
     await Promise.all([
       this.redisPublisher.connect(),
       this.redisSubscriber.connect(),
@@ -142,25 +148,43 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       });
     }
     await this.consumer.run({
-      partitionsConsumedConcurrently: 8,
-      eachMessage: async ({ topic, partition, message }) => {
-        await this.handleCommand(
-          topic,
-          partition,
-          Number(message.offset),
-          message.value?.toString(),
+      partitionsConsumedConcurrently: AGENT_RUN_PARTITIONS,
+      eachMessage: async ({ topic, partition, message, heartbeat }) => {
+        await runWithKafkaHeartbeat(
+          () =>
+            this.handleCommand(
+              topic,
+              partition,
+              Number(message.offset),
+              message.value?.toString(),
+            ),
+          heartbeat,
+          {
+            onHeartbeatError: (error) => {
+              this.logger.warn({ err: error, topic, partition }, 'Kafka heartbeat failed');
+            },
+          },
         );
       },
     });
     if (this.articleIndexer) {
       await this.indexConsumer.run({
-        partitionsConsumedConcurrently: 4,
-        eachMessage: async ({ topic, partition, message }) => {
-          await this.handleIndexCommand(
-            topic,
-            partition,
-            Number(message.offset),
-            message.value?.toString(),
+        partitionsConsumedConcurrently: ARTICLE_INDEX_PARTITIONS,
+        eachMessage: async ({ topic, partition, message, heartbeat }) => {
+          await runWithKafkaHeartbeat(
+            () =>
+              this.handleIndexCommand(
+                topic,
+                partition,
+                Number(message.offset),
+                message.value?.toString(),
+              ),
+            heartbeat,
+            {
+              onHeartbeatError: (error) => {
+                this.logger.warn({ err: error, topic, partition }, 'Kafka heartbeat failed');
+              },
+            },
           );
         },
       });
@@ -180,19 +204,14 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     );
   }
 
-  private async ensureTopic(): Promise<void> {
+  private async ensureTopics(): Promise<void> {
     const admin = this.kafka.admin();
     await admin.connect();
     try {
-      const existing = new Set(await admin.listTopics());
-      const topics = [AGENT_RUN_COMMAND_TOPIC, ARTICLE_INDEX_COMMAND_TOPIC]
-        .filter((topic) => !existing.has(topic))
-        .map((topic) => ({ topic }));
-      if (topics.length === 0) return;
-      await admin.createTopics({
-        topics,
-        waitForLeaders: true,
-      });
+      await ensureKafkaTopics(admin, [
+        { topic: AGENT_RUN_COMMAND_TOPIC, partitions: AGENT_RUN_PARTITIONS },
+        { topic: ARTICLE_INDEX_COMMAND_TOPIC, partitions: ARTICLE_INDEX_PARTITIONS },
+      ]);
     } finally {
       await admin.disconnect();
     }
