@@ -3,6 +3,8 @@
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   max-height: 100dvh;
   border-left: 1px solid #e8e8e6;
   background: linear-gradient(180deg, #ffffff 0%, #fafafa 42%, #f7f7f5 100%);

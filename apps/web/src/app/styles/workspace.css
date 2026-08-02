@@ -5,6 +5,8 @@
 }
 
 .sidebar {
+  min-height: 0;
+  overflow-y: auto;
   border-right: 1px solid #e8e8e6;
   padding: 12px 10px;
 }
@@ -113,6 +115,10 @@
 }
 
 .document-pane {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: auto;
   min-width: 0;
   background: #ffffff;
 }

@@ -99,13 +99,18 @@ button {
   --workspace-agent-width: clamp(420px, 27vw, 520px);
   --workspace-editor-gutter: clamp(24px, 4vw, 72px);
 
+  position: fixed;
+  z-index: 0;
+  inset: 0;
   display: grid;
-  width: 100vw;
   grid-template-columns:
     var(--workspace-sidebar-width)
     minmax(0, 1fr)
     var(--workspace-agent-width);
-  min-height: 100dvh;
+  width: auto;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: #ffffff;
 }
 
