@@ -23,8 +23,6 @@ import {
   artifactVersions,
   type AgentPressDatabase,
   contextPacks,
-  conversationBranches,
-  conversations,
   type DatabaseTransaction,
   executionPlans,
   evidenceRecords,
@@ -477,6 +475,9 @@ export class PlannedRunExecutor {
           `Required ${requiredFailure.owner} task failed: ${requiredFailure.failure ?? 'unknown failure'}`,
         ),
       };
+    }
+    if (tasks.length === 1 && tasks[0]?.clientKey === 'confirmed-article-edit') {
+      return { result: terminalProductionResult(settled[0], this.now()), degraded: false };
     }
     const completion = await this.runCompletionMain(runId, prompt, settled, signal);
     return {
@@ -1582,30 +1583,6 @@ export class PlannedRunExecutor {
     }
   }
 
-  private async setConversationTitle(
-    runId: string,
-    rawTitle: string,
-    onlyWhenTemporary: boolean,
-  ): Promise<boolean> {
-    const title = rawTitle.trim().slice(0, 80);
-    if (!title) return false;
-    const runRows = await this.options.database
-      .select({ conversationId: conversations.id, title: conversations.title })
-      .from(agentRuns)
-      .innerJoin(conversationBranches, eq(conversationBranches.id, agentRuns.branchId))
-      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
-      .where(eq(agentRuns.id, runId))
-      .limit(1);
-    const conversation = runRows[0];
-    if (!conversation || (onlyWhenTemporary && conversation.title !== '新对话')) return false;
-    const updated = await this.options.database
-      .update(conversations)
-      .set({ title, updatedAt: this.now() })
-      .where(eq(conversations.id, conversation.conversationId))
-      .returning({ id: conversations.id });
-    return updated.length === 1;
-  }
-
   private async publishRuntimeEvent(runId: string, event: RuntimeEvent): Promise<void> {
     if (
       event.type === 'content.delta' ||
@@ -1734,6 +1711,27 @@ function confirmedArticleEditPlan(
         ],
         dependencyIds: [],
         capabilities: profile.allowedCapabilities,
+      },
+    ],
+  };
+}
+
+function terminalProductionResult(task: SettledTask | undefined, now: Date): RuntimeResult {
+  if (!task || task.status !== 'succeeded') {
+    return protocolFailure([], 'Confirmed article edit did not produce a successful task result');
+  }
+  const proposal = task.artifacts.find(({ type }) => type === 'EditProposal');
+  return {
+    status: 'completed',
+    messages: [
+      {
+        role: 'assistant',
+        content: proposal?.summary ?? task.summary ?? '文章修改提案已生成，请在正文中审阅。',
+        provider: 'agentpress',
+        model: 'durable-production-result',
+        stopReason: 'stop',
+        usage: emptyUsage,
+        timestamp: now.getTime(),
       },
     ],
   };
