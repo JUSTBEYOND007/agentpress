@@ -30,7 +30,7 @@
     "demo": "node scripts/demo.mjs",
     "demo:prepare": "node scripts/demo.mjs --prepare-only",
     "local:prepare": "node scripts/demo.mjs --prepare-only",
-    "dev": "turbo run dev --parallel",
+    "dev": "node --env-file-if-exists=.env ./node_modules/turbo/bin/turbo run dev --parallel --concurrency=100",
     "eval:online": "pnpm --filter @agentpress/agent-evals eval:online",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
