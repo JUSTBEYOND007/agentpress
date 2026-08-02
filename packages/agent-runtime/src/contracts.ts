@@ -170,6 +170,7 @@ export type RuntimeResult =
 export type RuntimeEventSink = (event: RuntimeEvent) => Promise<void> | void;
 
 export type AgentRuntime = {
+  readonly identity?: { readonly provider: string; readonly model: string };
   execute(
     request: RuntimeRequest,
     sink: RuntimeEventSink,

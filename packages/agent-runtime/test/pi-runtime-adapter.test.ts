@@ -23,6 +23,12 @@ function currentTurn(request: string): RuntimeCurrentTurn {
 }
 
 describe('PiRuntimeAdapter', () => {
+  it('exposes the actual provider and model identity', () => {
+    expect(PiRuntimeAdapter.forTests({ responses: [] }).identity).toMatchObject({
+      provider: expect.any(String),
+      model: expect.any(String),
+    });
+  });
   it('registers explicit Ark credentials with the Pi model registry', async () => {
     const backend = createArkBackend({ modelId: 'ark-endpoint', apiKey: 'test-key' });
 

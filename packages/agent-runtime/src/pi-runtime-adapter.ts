@@ -73,7 +73,11 @@ export type FauxRuntimeConfig = {
 export class PiRuntimeAdapter implements AgentRuntime {
   private activeAgent: Agent | undefined;
 
-  private constructor(private readonly backend: PiBackend) {}
+  public readonly identity: { readonly provider: string; readonly model: string };
+
+  private constructor(private readonly backend: PiBackend) {
+    this.identity = { provider: backend.model.provider, model: backend.model.id };
+  }
 
   public static forArk(config: ArkRuntimeConfig): PiRuntimeAdapter {
     return new PiRuntimeAdapter(createArkBackend(config));

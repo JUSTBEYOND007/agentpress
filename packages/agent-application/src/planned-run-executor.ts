@@ -26,6 +26,7 @@ import {
   type DatabaseTransaction,
   executionPlans,
   evidenceRecords,
+  modelSelections,
   planRevisionTasks,
   planRevisions,
   runDirectives,
@@ -1027,6 +1028,8 @@ export class PlannedRunExecutor {
     signal?: AbortSignal,
     continuation = false,
   ): Promise<RuntimeResult> {
+    const runtime = this.options.runtimeFactory.create(modelPurpose);
+    const selectedModel = runtime.identity?.model ?? modelPurpose;
     const logicalKey = taskId
       ? `${runId}:task:${taskId}:${String(attempt)}`
       : `${runId}:main:${String(attempt)}`;
@@ -1039,15 +1042,27 @@ export class PlannedRunExecutor {
         kind,
         attempt,
         logicalKey,
-        model: modelPurpose,
+        model: selectedModel,
       })
       .onConflictDoUpdate({
         target: agentSessions.logicalKey,
-        set: { status: 'active', model: modelPurpose, updatedAt: this.now() },
+        set: { status: 'active', model: selectedModel, updatedAt: this.now() },
       })
       .returning({ id: agentSessions.id });
     const sessionId = sessionRows[0]?.id;
     if (!sessionId) throw new Error(`Unable to initialize Agent Session ${logicalKey}`);
+    await this.options.database.insert(modelSelections).values({
+      id: this.createId(),
+      runId,
+      ...(taskId ? { taskId } : {}),
+      purpose: modelPurpose,
+      policySnapshot: {
+        purpose: modelPurpose,
+        provider: runtime.identity?.provider ?? 'unknown',
+      },
+      selectedModel,
+      fallbackUsed: false,
+    });
     const record = async (
       role: string,
       messageType: string,
@@ -1097,7 +1112,6 @@ export class PlannedRunExecutor {
       );
     }
     await record('application', 'current_turn', { currentTurn });
-    const runtime = this.options.runtimeFactory.create(modelPurpose);
     if (kind === 'main') this.activeMainRuntimes.set(runId, runtime);
     let result: RuntimeResult;
     try {

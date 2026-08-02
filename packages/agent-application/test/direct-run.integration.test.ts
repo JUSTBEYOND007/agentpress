@@ -26,6 +26,7 @@ import {
   runSkillBindings,
   skillRevisions,
   memoryCandidates,
+  modelSelections,
   mentionBindings,
   taskResults,
   toolCalls,
@@ -200,6 +201,14 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(
       await connection.db.select().from(runEvents).where(eq(runEvents.runId, second.runId)),
     ).toHaveLength(5);
+    const selections = await connection.db
+      .select({ purpose: modelSelections.purpose, selectedModel: modelSelections.selectedModel })
+      .from(modelSelections)
+      .where(eq(modelSelections.runId, second.runId));
+    expect(selections).toEqual([
+      expect.objectContaining({ purpose: 'main', selectedModel: expect.any(String) }),
+    ]);
+    expect(selections[0]?.selectedModel).not.toBe('main');
     expect(published.some((event) => !event.durable)).toBe(true);
   });
 
