@@ -1,5 +1,6 @@
 export * from './contracts.js';
 export * from './context-governance-service.js';
+export * from './current-turn-contract.js';
 export * from './direct-run-service.js';
 export * from './planned-run-executor.js';
 export * from './persistent-tool-bridge.js';

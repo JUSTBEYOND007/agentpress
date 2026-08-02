@@ -312,11 +312,14 @@ export class DirectRunService {
     if (context.status !== 'queued' && context.status !== 'recovering') {
       return { runId, status: 'ignored' };
     }
-    const effectivePrompt = withContext(context.prompt, context.contextContent);
+    const currentTurn = {
+      request: context.prompt,
+      frozenContext: context.contextContent,
+    };
     const outcome =
       context.status === 'recovering'
-        ? await this.plannedRuns.recover(runId, effectivePrompt, context.history, signal)
-        : await this.plannedRuns.execute(runId, effectivePrompt, context.history, signal);
+        ? await this.plannedRuns.recover(runId, currentTurn, context.history, signal)
+        : await this.plannedRuns.execute(runId, currentTurn, context.history, signal);
     if (!outcome) return { runId, status: 'ignored' };
     return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
   }
@@ -1235,12 +1238,6 @@ function findLastAssistantMessage(
   return messages.findLast(
     (message): message is RuntimeAssistantMessage => message.role === 'assistant',
   );
-}
-
-function withContext(prompt: string, context: string): string {
-  return context.length > 0
-    ? `${context}\n<root-request-json>${JSON.stringify(prompt)}</root-request-json>`
-    : prompt;
 }
 
 function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {

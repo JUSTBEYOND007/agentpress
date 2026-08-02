@@ -44,6 +44,11 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
+import {
+  CURRENT_TURN_AUTHORITY_POLICY,
+  type CurrentTurnInput,
+  serializeCurrentTurn,
+} from './current-turn-contract.js';
 
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type TaskCriticality = 'required' | 'optional';
@@ -213,12 +218,12 @@ export class PlannedRunExecutor {
 
   public async execute(
     runId: string,
-    prompt: string,
+    turn: CurrentTurnInput,
     history: readonly RuntimeMessage[] = [],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
     if (!(await this.claimPlanning(runId, 'queued'))) return undefined;
-    const control = await this.runMainControl(runId, prompt, history, signal);
+    const control = await this.runMainControl(runId, turn, history, signal);
     if (control.kind === 'direct') {
       await this.enterRunning(runId, 'direct');
       return { result: control.result, degraded: false };
@@ -227,12 +232,12 @@ export class PlannedRunExecutor {
       await this.persistQuestion(runId, control.question, control.options);
       return undefined;
     }
-    return this.persistAndExecutePlan(runId, prompt, control.plan, signal);
+    return this.persistAndExecutePlan(runId, serializeCurrentTurn(turn), control.plan, signal);
   }
 
   public async recover(
     runId: string,
-    prompt: string,
+    turn: CurrentTurnInput,
     history: readonly RuntimeMessage[] = [],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
@@ -245,7 +250,7 @@ export class PlannedRunExecutor {
     if (!run) return undefined;
     if (!run.revisionId || run.mode === 'direct') {
       if (!(await this.claimPlanning(runId, 'recovering'))) return undefined;
-      const control = await this.runMainControl(runId, prompt, history, signal);
+      const control = await this.runMainControl(runId, turn, history, signal);
       if (control.kind === 'direct') {
         await this.enterRunning(runId, 'direct');
         return { result: control.result, degraded: false };
@@ -254,17 +259,17 @@ export class PlannedRunExecutor {
         await this.persistQuestion(runId, control.question, control.options);
         return undefined;
       }
-      return this.persistAndExecutePlan(runId, prompt, control.plan, signal);
+      return this.persistAndExecutePlan(runId, serializeCurrentTurn(turn), control.plan, signal);
     }
     const tasks = await this.loadPlanTasks(runId, run.revisionId);
     const settled = await this.loadPersistedTaskResults(tasks);
     await this.enterRunning(runId, 'planned');
-    return this.executePlannedWork(runId, prompt, tasks, signal, settled);
+    return this.executePlannedWork(runId, serializeCurrentTurn(turn), tasks, signal, settled);
   }
 
   private async runMainControl(
     runId: string,
-    prompt: string,
+    turn: CurrentTurnInput,
     history: readonly RuntimeMessage[],
     signal?: AbortSignal,
   ): Promise<ControlDecision> {
@@ -295,7 +300,7 @@ export class PlannedRunExecutor {
         name: 'plan_submit',
         label: 'Submit execution plan',
         description:
-          'Submit a concrete task DAG only when the request needs specialist work or tools.',
+          'Submit a concrete task DAG only when the authoritative current request needs specialist work or tools.',
         parameters: Type.Object(
           {
             goal: Type.String({ minLength: 1, maxLength: 4_000 }),
@@ -345,11 +350,11 @@ export class PlannedRunExecutor {
       'main',
       mainPlanningPrompt(availableCapabilities),
       history,
-      prompt,
+      serializeCurrentTurn(turn),
       tools,
       signal,
     );
-    await this.setConversationTitle(runId, prompt.slice(0, 24), true);
+    await this.setConversationTitle(runId, turn.request.slice(0, 24), true);
     if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
     if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
     if (result.status === 'completed' && findAssistant(result)) return { kind: 'direct', result };
@@ -1640,14 +1645,15 @@ function assertAcyclic(tasks: readonly PlannedTaskSpec[]): void {
   for (const task of tasks) visit(task.id);
 }
 
-function mainPlanningPrompt(capabilities: readonly string[]): string {
+export function mainPlanningPrompt(capabilities: readonly string[]): string {
   const specialists = specialistRoles.map((role) => ({
     role,
     responsibility: specialistResponsibilities[role],
     allowedCapabilities: [...specialistCapabilityPolicy[role]],
   }));
-  return `You are the persistent AgentPress Main Agent. Decide how to handle the user's request.
+  return `You are the AgentPress Main Agent handling exactly one current turn. Decide how to handle its authoritative current request.
 Current date: ${new Date().toISOString().slice(0, 10)}.
+${CURRENT_TURN_AUTHORITY_POLICY}
 Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.
 Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.
 Keep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.

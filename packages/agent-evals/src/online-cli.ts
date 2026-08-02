@@ -15,6 +15,7 @@ import {
   artifacts,
   connectDatabase,
   conversationBranches,
+  conversationMessages,
   conversations,
   evidenceRecords,
   runEvents,
@@ -122,6 +123,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
       const conversationId = randomUUID();
       const branchId = randomUUID();
       const requiresArticle =
+        scenario.setup?.bindArticle === true ||
         scenario.expected.requiredCapabilities.includes('article.read') ||
         scenario.expected.requiredCapabilities.includes('article.propose');
       const articleId = requiresArticle ? randomUUID() : undefined;
@@ -178,6 +180,38 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           ...(articleId ? { articleId, isDefault: true } : {}),
         });
         await transaction.insert(conversationBranches).values({ id: branchId, conversationId });
+        const priorMessages = (scenario.setup?.priorTurns ?? []).flatMap((turn, index) => {
+          const timestamp = Date.now() - (scenario.setup?.priorTurns?.length ?? 0) + index;
+          return [
+            {
+              id: randomUUID(),
+              branchId,
+              role: 'user',
+              sequence: index * 2 + 1,
+              content: encodeEvalMessage({ role: 'user', content: turn.user, timestamp }),
+              stable: true,
+            },
+            {
+              id: randomUUID(),
+              branchId,
+              role: 'assistant',
+              sequence: index * 2 + 2,
+              content: encodeEvalMessage({
+                role: 'assistant',
+                content: turn.assistant,
+                provider: 'eval-fixture',
+                model: 'eval-fixture',
+                stopReason: 'stop',
+                usage: emptyUsage,
+                timestamp,
+              }),
+              stable: true,
+            },
+          ];
+        });
+        if (priorMessages.length > 0) {
+          await transaction.insert(conversationMessages).values(priorMessages);
+        }
       });
       const service = new DirectRunService({
         database: connection.db,
@@ -301,6 +335,10 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
       };
     },
   };
+}
+
+function encodeEvalMessage(message: Readonly<Record<string, unknown>>): readonly unknown[] {
+  return [{ type: 'agentpress.runtime-message', version: 1, message }];
 }
 
 async function approvePendingToolCall(

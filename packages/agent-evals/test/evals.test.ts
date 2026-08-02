@@ -18,6 +18,22 @@ describe('Agent eval suite', () => {
     expect(evalScenarios.every(({ expected }) => expected.allowedModes.length > 0)).toBe(true);
   });
 
+  it('covers both sides of the cross-turn intent boundary', () => {
+    const greeting = evalScenarios.find(({ id }) => id === 'agentpress-routing-06');
+    const continuation = evalScenarios.find(({ id }) => id === 'agentpress-routing-07');
+
+    expect(greeting).toMatchObject({
+      prompt: '你好',
+      expected: { allowedModes: ['direct'] },
+      setup: { bindArticle: true },
+    });
+    expect(greeting?.setup?.priorTurns).toHaveLength(1);
+    expect(continuation).toMatchObject({
+      prompt: '继续上一段',
+      expected: { allowedModes: ['planned'], requiredRoles: ['editor'] },
+    });
+  });
+
   it('scores only supplied persisted facts and fails missing observations', () => {
     const scenario = evalScenarios[0];
     if (!scenario) throw new Error('Eval fixture is empty');
