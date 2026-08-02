@@ -49,7 +49,7 @@ export function convertAgentPressMessages(messages: AgentMessage[]): Message[] {
   });
 }
 
-export function isRuntimeCurrentTurn(message: AgentMessage): message is RuntimeCurrentTurn {
+export function isRuntimeCurrentTurn(message: unknown): message is RuntimeCurrentTurn {
   if (!isRecord(message)) return false;
   return (
     message.type === 'agentpress_current_turn' &&

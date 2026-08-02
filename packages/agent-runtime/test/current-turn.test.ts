@@ -43,6 +43,6 @@ describe('convertAgentPressMessages', () => {
 
 describe('isRuntimeCurrentTurn', () => {
   it('does not treat arbitrary custom messages as AgentPress current turns', () => {
-    expect(isRuntimeCurrentTurn({ type: 'unrelated' } as never)).toBe(false);
+    expect(isRuntimeCurrentTurn({ type: 'unrelated' })).toBe(false);
   });
 });
