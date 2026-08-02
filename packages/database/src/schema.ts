@@ -1,3 +1,4 @@
+import type { ActionEnvelopeV1, ActionSelectedBlock } from '@agentpress/contracts';
 import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
@@ -303,6 +304,10 @@ export const rootRequests = pgTable(
       onDelete: 'restrict',
     }),
     idempotencyKey: varchar('idempotency_key', { length: 160 }).notNull(),
+    actionEnvelope: jsonb('action_envelope')
+      .$type<ActionEnvelopeV1>()
+      .notNull()
+      .default(sql`'{"version":1,"source":"free_text","grantedCapabilities":[]}'::jsonb`),
     createdAt,
   },
   (table) => [
@@ -1102,6 +1107,53 @@ export const autosaveBatches = pgTable(
     createdAt,
   },
   (table) => [index('autosave_batches_article_created_idx').on(table.articleId, table.createdAt)],
+);
+
+export const actionProposals = pgTable(
+  'action_proposals',
+  {
+    id: uuid('id').primaryKey(),
+    sourceRunId: uuid('source_run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => articles.id, { onDelete: 'cascade' }),
+    baseRevisionId: uuid('base_revision_id')
+      .notNull()
+      .references(() => articleRevisions.id, { onDelete: 'restrict' }),
+    requestedByUserId: uuid('requested_by_user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'restrict' }),
+    instruction: text('instruction').notNull(),
+    summary: text('summary').notNull(),
+    selectedBlocks: jsonb('selected_blocks').$type<readonly ActionSelectedBlock[]>().notNull(),
+    grantedCapabilities: jsonb('granted_capabilities').$type<readonly string[]>().notNull(),
+    status: varchar('status', { length: 24 }).notNull().default('pending'),
+    confirmedRunId: uuid('confirmed_run_id').references(() => agentRuns.id, {
+      onDelete: 'restrict',
+    }),
+    expiresAt: timestamp('expires_at', { withTimezone: true, precision: 3 }).notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true, precision: 3 }),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    unique('action_proposals_source_run_unique').on(table.sourceRunId),
+    uniqueIndex('action_proposals_confirmed_run_unique')
+      .on(table.confirmedRunId)
+      .where(sql`${table.confirmedRunId} is not null`),
+    index('action_proposals_article_status_idx').on(table.articleId, table.status),
+    check(
+      'action_proposals_status_check',
+      sql`${table.status} in ('pending', 'confirmed', 'rejected', 'expired')`,
+    ),
+    check(
+      'action_proposals_confirmed_state_check',
+      sql`(${table.status} = 'confirmed' and ${table.confirmedRunId} is not null and ${table.confirmedAt} is not null)
+          or (${table.status} <> 'confirmed' and ${table.confirmedRunId} is null and ${table.confirmedAt} is null)`,
+    ),
+  ],
 );
 
 export const editProposals = pgTable(

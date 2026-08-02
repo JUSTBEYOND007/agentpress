@@ -492,6 +492,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@agentpress/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@agentpress/domain':
         specifier: workspace:*
         version: link:../domain

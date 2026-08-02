@@ -55,6 +55,16 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
 - Changes: replaced code-file line anchors and short xxHash tags with canonical Tiptap block JSON, stable block IDs, and SHA-256; retained snapshot preflight, stale-input rejection, atomic apply, and preview-first behavior.
 - Verification: revision drift, block drift, atomic preflight, partial acceptance, structural inserts, ProseMirror step replay, and red-delete/green-insert diff output.
 
+### InkOS Structured Action Envelope
+
+- Upstream: `https://github.com/Narcooo/inkos`
+- Commit: `c7851b94ada27f2810b903e96d8fec6f33e5d9bc` (`v1.7.2`)
+- Source: `packages/core/src/interaction/action-envelope.ts`, `packages/core/src/agent/agent-session.ts`, `packages/core/src/__tests__/interaction-models.test.ts`, `packages/core/src/__tests__/agent-session.test.ts`
+- Local: `packages/contracts/src/action-envelope.ts`, `packages/contracts/test/action-envelope.test.ts`, with host authorization adapters under `packages/agent-application/src/`
+- License: AGPL-3.0-only, Copyright (c) 2026 InkOS contributors
+- Changes: reduced the fiction workflow intent union to AgentPress article editing; adapted Zod validation to the repository's TypeBox contracts; replaced file/session ownership with PostgreSQL Root Request and Action Proposal facts; tightened free-text turns so they cannot carry confirmed capabilities.
+- Verification: free-text isolation, complete confirmed payloads, host-issued action sources, exact capability grants, invalid/unknown intent rejection, and confirmed-action idempotency.
+
 ## Visual Reference
 
 `docs/references/ui/notion-agent-editor-reference.png` is a user-supplied visual reference. It is

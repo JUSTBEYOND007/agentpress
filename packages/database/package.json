@@ -26,6 +26,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/contracts": "workspace:*",
     "@agentpress/domain": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "catalog:"
