@@ -49,7 +49,10 @@ export function evaluatePersistedRun(
   return {
     scenarioId: scenario.id,
     routingCorrect: Boolean(
-      observed && expected.allowedModes.includes(observed.mode) && rejectionCorrect,
+      observed &&
+      ['completed', 'completed_with_degradation'].includes(observed.status) &&
+      expected.allowedModes.includes(observed.mode) &&
+      rejectionCorrect,
     ),
     delegationCorrect: Boolean(
       observed &&

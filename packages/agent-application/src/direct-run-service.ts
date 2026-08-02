@@ -68,6 +68,8 @@ type DirectRunServiceOptions = {
   readonly runtimeToolFactory?: RuntimeToolFactory;
   readonly now?: () => Date;
   readonly createId?: () => string;
+  /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
+  readonly dispatchCommands?: boolean;
 };
 
 export class DirectRunService {
@@ -345,15 +347,17 @@ export class DirectRunService {
           contextHash: contextPack.contentHash,
         },
       });
-      await enqueueOutboxMessage(transaction, {
-        id: outboxId,
-        aggregateType: 'AgentRun',
-        aggregateId: runId,
-        topic: AGENT_RUN_COMMAND_TOPIC,
-        messageKey: runId,
-        payload: { command: 'run.execute', messageId: outboxId, runId },
-        occurredAt: now,
-      });
+      if (this.options.dispatchCommands !== false) {
+        await enqueueOutboxMessage(transaction, {
+          id: outboxId,
+          aggregateType: 'AgentRun',
+          aggregateId: runId,
+          topic: AGENT_RUN_COMMAND_TOPIC,
+          messageKey: runId,
+          payload: { command: 'run.execute', messageId: outboxId, runId },
+          occurredAt: now,
+        });
+      }
 
       return {
         result: {

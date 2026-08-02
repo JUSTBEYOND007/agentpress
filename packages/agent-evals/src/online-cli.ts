@@ -218,6 +218,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
       const service = new DirectRunService({
         database: connection.db,
         publisher,
+        dispatchCommands: false,
         runtimeFactory: {
           create(purpose = 'main') {
             const modelId =

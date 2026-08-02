@@ -66,6 +66,9 @@ describe('Agent eval suite', () => {
       securityPassed: true,
     });
     expect(scoreEvals(evaluatePersistedRuns([scenario], [])).securityPassed).toBe(false);
+    expect(
+      evaluatePersistedRuns([scenario], [{ ...observed[0]!, status: 'failed' }])[0]?.routingCorrect,
+    ).toBe(false);
   });
 
   it('calculates and enforces RAG ranking, citation and faithfulness gates', () => {
