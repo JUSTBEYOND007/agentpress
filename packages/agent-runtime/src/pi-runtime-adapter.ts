@@ -21,6 +21,10 @@ import {
 } from '@earendil-works/pi-ai';
 
 import { createArkBackend, type ArkRuntimeConfig } from './ark-provider.js';
+import {
+  createOpenAICompatibleBackend,
+  type OpenAICompatibleRuntimeConfig,
+} from './openai-compatible-provider.js';
 import type {
   AgentRuntime,
   RuntimeAssistantContentBlock,
@@ -73,6 +77,10 @@ export class PiRuntimeAdapter implements AgentRuntime {
 
   public static forArk(config: ArkRuntimeConfig): PiRuntimeAdapter {
     return new PiRuntimeAdapter(createArkBackend(config));
+  }
+
+  public static forOpenAICompatible(config: OpenAICompatibleRuntimeConfig): PiRuntimeAdapter {
+    return new PiRuntimeAdapter(createOpenAICompatibleBackend(config));
   }
 
   public static forTests(config: FauxRuntimeConfig): PiRuntimeAdapter {

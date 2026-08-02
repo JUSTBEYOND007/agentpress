@@ -86,13 +86,29 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     runtimeToolFactory: this.builtInTools.bridge,
     runtimeFactory: {
       create: (task = 'direct') => {
-        if (!this.environment.arkModelPro) {
-          throw new Error('ARK_MODEL_PRO is required to execute a real Agent Run');
+        const proModel = this.environment.agentModelPro ?? this.environment.arkModelPro;
+        if (!proModel) {
+          throw new Error(
+            'AGENT_MODEL_PRO or ARK_MODEL_PRO is required to execute a real Agent Run',
+          );
         }
-        const proModel = this.environment.arkModelPro;
-        const selection = createModelPolicies(proModel, this.environment.arkModelTurbo).select(
-          task,
-        );
+        const turboModel = this.environment.agentModelPro
+          ? this.environment.agentModelTurbo
+          : this.environment.arkModelTurbo;
+        const selection = createModelPolicies(proModel, turboModel).select(task);
+        if (
+          this.environment.agentModelApiKey &&
+          this.environment.agentModelBaseUrl &&
+          this.environment.agentModelPro
+        ) {
+          return PiRuntimeAdapter.forOpenAICompatible({
+            providerId: 'agent-model',
+            providerName: 'Agent model',
+            modelId: selection.model,
+            baseUrl: this.environment.agentModelBaseUrl,
+            apiKey: this.environment.agentModelApiKey,
+          });
+        }
         return PiRuntimeAdapter.forArk({
           modelId: selection.model,
           baseUrl: this.environment.arkBaseUrl,

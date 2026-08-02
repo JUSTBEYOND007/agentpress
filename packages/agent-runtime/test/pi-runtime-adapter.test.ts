@@ -4,6 +4,7 @@ import { Type } from 'typebox';
 
 import {
   createArkBackend,
+  createOpenAICompatibleBackend,
   PiRuntimeAdapter,
   RUNTIME_CURRENT_TURN_VERSION,
   type RuntimeCurrentTurn,
@@ -25,6 +26,25 @@ describe('PiRuntimeAdapter', () => {
   it('registers explicit Ark credentials with the Pi model registry', async () => {
     const backend = createArkBackend({ modelId: 'ark-endpoint', apiKey: 'test-key' });
 
+    await expect(backend.models.getAuth(backend.model)).resolves.toMatchObject({
+      auth: { apiKey: 'test-key' },
+    });
+  });
+
+  it('registers an independently named OpenAI-compatible provider', async () => {
+    const backend = createOpenAICompatibleBackend({
+      providerId: 'agent-model',
+      providerName: 'Agent model',
+      modelId: 'gpt-compatible',
+      baseUrl: 'https://models.example/v1',
+      apiKey: 'test-key',
+    });
+
+    expect(backend.model).toMatchObject({
+      provider: 'agent-model',
+      id: 'gpt-compatible',
+      baseUrl: 'https://models.example/v1',
+    });
     await expect(backend.models.getAuth(backend.model)).resolves.toMatchObject({
       auth: { apiKey: 'test-key' },
     });
