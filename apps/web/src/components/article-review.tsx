@@ -207,10 +207,8 @@ export function ArticleReviewToolbar({
     <section className="article-review-toolbar" aria-label="AI 修改审阅" aria-live="polite">
       <div className="article-review-title">
         <Sparkles aria-hidden="true" size={14} />
-        <strong>AI 修改</strong>
-        <span>
-          {selected}/{count} 处已处理
-        </span>
+        <strong>建议修改</strong>
+        <span>{count} 处</span>
       </div>
       <div className="article-review-navigation">
         <button
@@ -225,9 +223,10 @@ export function ArticleReviewToolbar({
           <ChevronLeft size={14} />
         </button>
         <span>
-          {activeIndex + 1} / {count}
+          {activeIndex + 1}/{count}
         </span>
         <button
+          className="article-review-accept"
           aria-label="下一处修改"
           disabled={count < 2 || review.phase === 'submitting'}
           onClick={() => {
@@ -241,6 +240,7 @@ export function ArticleReviewToolbar({
       </div>
       <div className="article-review-actions">
         <button
+          className="article-review-reject"
           disabled={review.phase === 'submitting'}
           onClick={() => {
             onDecisionAll('accepted');
@@ -271,6 +271,9 @@ export function ArticleReviewToolbar({
           <EyeOff size={14} />
         </button>
       </div>
+      <span className="article-review-progress" aria-hidden="true">
+        {selected > 0 ? `${String(selected)} 处已处理` : null}
+      </span>
       {review.error ? (
         <p className="article-review-error">
           <RotateCcw size={12} />

@@ -70,7 +70,7 @@ export function buildReviewDecorations(
       decorations.push(
         Decoration.widget(
           anchor,
-          () => createAfterWidget(state, review, diff.operationId, diff.after, focus),
+          () => createAfterWidget(state, review, diff.operationId, diff.kind, diff.after, focus),
           {
             key: `${review.proposal.proposalId}:${diff.operationId}`,
             side: 1,
@@ -79,10 +79,14 @@ export function buildReviewDecorations(
       );
     } else if (current) {
       decorations.push(
-        Decoration.widget(current.to, () => createActionWidget(review, diff.operationId, focus), {
-          key: `${review.proposal.proposalId}:${diff.operationId}:actions`,
-          side: 1,
-        }),
+        Decoration.widget(
+          current.to,
+          () => createActionWidget(review, diff.operationId, focus, 'inline'),
+          {
+            key: `${review.proposal.proposalId}:${diff.operationId}:actions`,
+            side: 1,
+          },
+        ),
       );
     }
   }
@@ -104,11 +108,12 @@ function createAfterWidget(
   state: EditorState,
   review: ArticleReviewState,
   operationId: string,
+  kind: string,
   block: unknown,
   focus: boolean,
 ): HTMLElement {
   const wrapper = document.createElement('div');
-  wrapper.className = `ai-diff-after ${focus ? 'is-focused' : ''}`;
+  wrapper.className = `ai-diff-after ai-diff-${kind} ${focus ? 'is-focused' : ''}`;
   wrapper.dataset.aiDiffId = operationId;
   wrapper.contentEditable = 'false';
   try {
@@ -127,9 +132,10 @@ function createActionWidget(
   review: ArticleReviewState,
   operationId: string,
   focus: boolean,
+  placement: 'overlay' | 'inline' = 'overlay',
 ): HTMLElement {
   const actions = document.createElement('span');
-  actions.className = `ai-diff-actions ${focus ? 'is-focused' : ''}`;
+  actions.className = `ai-diff-actions is-${placement} ${focus ? 'is-focused' : ''}`;
   actions.contentEditable = 'false';
   actions.append(
     buttonFor('接受修改', 'accepted', review, operationId),
@@ -150,6 +156,7 @@ function buttonFor(
   button.ariaLabel = label;
   button.textContent = decision === 'accepted' ? '✓' : '×';
   button.dataset.decision = decision;
+  button.disabled = review.phase === 'submitting';
   button.addEventListener('mousedown', (event) => {
     event.preventDefault();
   });
