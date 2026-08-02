@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { convertAgentPressMessages, type RuntimeCurrentTurn } from '../src/index.js';
+import {
+  convertAgentPressMessages,
+  isRuntimeCurrentTurn,
+  type RuntimeCurrentTurn,
+} from '../src/index.js';
 
 describe('convertAgentPressMessages', () => {
   it('converts the typed current turn to one deterministic JSON user message', () => {
@@ -34,5 +38,11 @@ describe('convertAgentPressMessages', () => {
       actionEnvelope: { source: 'free_text' },
       contextPack: { content: '旧轮要求：续写文章' },
     });
+  });
+});
+
+describe('isRuntimeCurrentTurn', () => {
+  it('does not treat arbitrary custom messages as AgentPress current turns', () => {
+    expect(isRuntimeCurrentTurn({ type: 'unrelated' } as never)).toBe(false);
   });
 });

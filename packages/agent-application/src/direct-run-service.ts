@@ -297,6 +297,14 @@ export class DirectRunService {
         stable: true,
         createdAt: now,
       });
+      if (actionEnvelope.source === 'free_text') {
+        await transaction
+          .update(conversations)
+          .set({ title: prompt.slice(0, 24), updatedAt: now })
+          .where(
+            and(eq(conversations.id, branch.conversationId), eq(conversations.title, '新对话')),
+          );
+      }
       await transaction.insert(rootRequests).values({
         id: rootRequestId,
         branchId: input.branchId,

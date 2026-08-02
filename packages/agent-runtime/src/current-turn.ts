@@ -50,5 +50,17 @@ export function convertAgentPressMessages(messages: AgentMessage[]): Message[] {
 }
 
 export function isRuntimeCurrentTurn(message: AgentMessage): message is RuntimeCurrentTurn {
-  return 'type' in message;
+  if (!isRecord(message)) return false;
+  return (
+    message.type === 'agentpress_current_turn' &&
+    message.version === RUNTIME_CURRENT_TURN_VERSION &&
+    (message.source === 'user' || message.source === 'application') &&
+    typeof message.request === 'string' &&
+    typeof message.timestamp === 'number' &&
+    isRecord(message.actionEnvelope)
+  );
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

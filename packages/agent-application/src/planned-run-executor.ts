@@ -47,6 +47,11 @@ import type {
 } from './contracts.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { ActionProposalService } from './action-proposal-service.js';
+import {
+  createAgentTurnProfile,
+  selectMainControlTools,
+  type AgentTurnProfile,
+} from './agent-turn-profile.js';
 
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type TaskCriticality = 'required' | 'optional';
@@ -230,7 +235,16 @@ export class PlannedRunExecutor {
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
     if (!(await this.claimPlanning(runId, 'queued'))) return undefined;
-    const control = await this.runMainControl(runId, turn, history, signal);
+    const profile = await this.createTurnProfile(runId, turn);
+    if (profile.kind === 'confirmed_article_edit') {
+      return this.persistAndExecutePlan(
+        runId,
+        turn,
+        confirmedArticleEditPlan(turn, profile, this.createId),
+        signal,
+      );
+    }
+    const control = await this.runMainControl(runId, turn, profile, history, signal);
     if (control.kind === 'direct') {
       await this.enterRunning(runId, 'direct');
       return { result: control.result, degraded: false };
@@ -258,7 +272,16 @@ export class PlannedRunExecutor {
     if (!run) return undefined;
     if (!run.revisionId || run.mode === 'direct') {
       if (!(await this.claimPlanning(runId, 'recovering'))) return undefined;
-      const control = await this.runMainControl(runId, turn, history, signal);
+      const profile = await this.createTurnProfile(runId, turn);
+      if (profile.kind === 'confirmed_article_edit') {
+        return this.persistAndExecutePlan(
+          runId,
+          turn,
+          confirmedArticleEditPlan(turn, profile, this.createId),
+          signal,
+        );
+      }
+      const control = await this.runMainControl(runId, turn, profile, history, signal);
       if (control.kind === 'direct') {
         await this.enterRunning(runId, 'direct');
         return { result: control.result, degraded: false };
@@ -278,32 +301,16 @@ export class PlannedRunExecutor {
   private async runMainControl(
     runId: string,
     turn: RuntimeCurrentTurn,
+    profile: AgentTurnProfile,
     history: readonly RuntimeMessage[],
     signal?: AbortSignal,
   ): Promise<ControlDecision> {
-    const availableCapabilities = this.options.runtimeToolFactory
-      ? await this.options.runtimeToolFactory.listCapabilities(runId)
-      : [];
+    const availableCapabilities = profile.allowedCapabilities;
     let submittedPlan: SubmittedPlan | undefined;
     let requestedQuestion:
       | { readonly question: string; readonly options: readonly string[] }
       | undefined;
     const tools: RuntimeTool[] = [
-      {
-        name: 'conversation_title_set',
-        label: 'Set conversation title',
-        description: 'Set a concise title for this conversation on the first user turn.',
-        parameters: Type.Object(
-          { title: Type.String({ minLength: 1, maxLength: 80 }) },
-          { additionalProperties: false },
-        ),
-        constrainedSampling: { type: 'json_schema', strict: 'require' },
-        executionMode: 'sequential',
-        execute: async (arguments_) => {
-          const accepted = await this.setConversationTitle(runId, String(arguments_.title), false);
-          return { accepted };
-        },
-      },
       this.actionProposals.createRuntimeTool(runId),
       {
         name: 'plan_submit',
@@ -351,10 +358,7 @@ export class PlannedRunExecutor {
         },
       },
     ];
-    const currentTurnTools =
-      turn.actionEnvelope.source === 'free_text'
-        ? tools
-        : tools.filter(({ name }) => name !== 'action_propose');
+    const currentTurnTools = selectMainControlTools(profile, tools);
     const result = await this.executeWithTranscript(
       runId,
       undefined,
@@ -367,7 +371,6 @@ export class PlannedRunExecutor {
       currentTurnTools,
       signal,
     );
-    await this.setConversationTitle(runId, turn.request.slice(0, 24), true);
     if (await this.actionProposals.getBySourceRun(runId)) return { kind: 'direct', result };
     if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
     if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
@@ -376,6 +379,16 @@ export class PlannedRunExecutor {
       kind: 'direct',
       result: protocolFailure(result.messages, 'Main Agent returned no valid control decision'),
     };
+  }
+
+  private async createTurnProfile(
+    runId: string,
+    turn: RuntimeCurrentTurn,
+  ): Promise<AgentTurnProfile> {
+    const capabilities = this.options.runtimeToolFactory
+      ? await this.options.runtimeToolFactory.listCapabilities(runId)
+      : [];
+    return createAgentTurnProfile(turn, capabilities);
   }
 
   private async persistAndExecutePlan(
@@ -1693,6 +1706,33 @@ Request article.read or article.propose only when the frozen root context contai
 If required business information is missing, call user_request_input.
 Available capabilities: ${JSON.stringify(capabilities)}.
 Never emit a generic template plan. Never reveal hidden chain of thought.`;
+}
+
+function confirmedArticleEditPlan(
+  turn: RuntimeCurrentTurn,
+  profile: AgentTurnProfile,
+  createId: () => string,
+): SubmittedPlan {
+  const payload = turn.actionEnvelope.payload;
+  if (!payload) throw new Error('Confirmed article edit is missing its action payload');
+  return {
+    goal: payload.instruction,
+    tasks: [
+      {
+        id: createId(),
+        clientKey: 'confirmed-article-edit',
+        owner: 'editor',
+        objective: payload.instruction,
+        criticality: 'required',
+        acceptanceCriteria: [
+          'Read the pinned article revision before proposing changes.',
+          'Produce a reviewable EditProposal without directly mutating the article.',
+        ],
+        dependencyIds: [],
+        capabilities: profile.allowedCapabilities,
+      },
+    ],
+  };
 }
 
 function applicationTurn(parent: RuntimeCurrentTurn, request: string): RuntimeCurrentTurn {

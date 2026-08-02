@@ -47,7 +47,7 @@ export function AgentWorkbench({
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const [skills, setSkills] = useState<readonly SkillView[]>([]);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<readonly string[]>([]);
-  const [mentionActiveArticle, setMentionActiveArticle] = useState(true);
+  const [mentionActiveArticle, setMentionActiveArticle] = useState(false);
   const [selectedArticleIds, setSelectedArticleIds] = useState<readonly string[]>([]);
   const [selectionIncluded, setSelectionIncluded] = useState(Boolean(articleSelection));
   const [attachments, setAttachments] = useState<readonly AttachmentView[]>([]);
