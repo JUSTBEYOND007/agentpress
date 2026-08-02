@@ -2,6 +2,7 @@ export * from './contracts.js';
 export * from './context-governance-service.js';
 export * from './action-capability-policy.js';
 export * from './agent-turn-profile.js';
+export * from './agent-session-runner.js';
 export * from './agent-transcript-projector.js';
 export * from './action-proposal-service.js';
 export * from './direct-run-service.js';

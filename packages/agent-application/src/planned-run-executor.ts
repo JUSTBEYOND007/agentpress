@@ -26,7 +26,6 @@ import {
   type DatabaseTransaction,
   executionPlans,
   evidenceRecords,
-  modelSelections,
   planRevisionTasks,
   planRevisions,
   runDirectives,
@@ -36,7 +35,7 @@ import {
   toolCalls,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, asc, desc, eq, inArray, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -44,10 +43,8 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
-import {
-  AgentTranscriptProjector,
-  withHistoricalIntentBoundary,
-} from './agent-transcript-projector.js';
+import { AgentTranscriptProjector } from './agent-transcript-projector.js';
+import { AgentSessionRunner } from './agent-session-runner.js';
 import { ActionProposalService } from './action-proposal-service.js';
 import {
   createAgentTurnProfile,
@@ -207,16 +204,20 @@ export class PlannedRunExecutor {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly transcripts: AgentTranscriptProjector;
+  private readonly sessions: AgentSessionRunner;
   private readonly actionProposals: ActionProposalService;
-  private readonly activeMainRuntimes = new Map<
-    string,
-    ReturnType<AgentRuntimeFactory['create']>
-  >();
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.transcripts = new AgentTranscriptProjector(options.database, this.now);
+    this.sessions = new AgentSessionRunner({
+      database: options.database,
+      runtimeFactory: options.runtimeFactory,
+      createId: this.createId,
+      now: this.now,
+      onRuntimeEvent: (runId, event) => this.publishRuntimeEvent(runId, event),
+    });
     this.actionProposals = new ActionProposalService(
       options.database,
       options.publisher,
@@ -226,8 +227,7 @@ export class PlannedRunExecutor {
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
-    const runtime = this.activeMainRuntimes.get(runId);
-    return runtime?.steer?.({ role: 'user', content, timestamp: this.now().getTime() }) ?? false;
+    return this.sessions.steerActiveMain(runId, content);
   }
 
   public async execute(
@@ -361,7 +361,7 @@ export class PlannedRunExecutor {
       },
     ];
     const currentTurnTools = selectMainControlTools(profile, tools);
-    const result = await this.executeWithTranscript(
+    const result = await this.sessions.execute(
       runId,
       undefined,
       'main',
@@ -534,7 +534,7 @@ export class PlannedRunExecutor {
         })),
       })),
     );
-    let result = await this.executeWithTranscript(
+    let result = await this.sessions.execute(
       runId,
       undefined,
       'main',
@@ -550,7 +550,7 @@ export class PlannedRunExecutor {
       signal,
     );
     for (let repair = 1; !finalText && result.status === 'completed' && repair <= 2; repair += 1) {
-      result = await this.executeWithTranscript(
+      result = await this.sessions.execute(
         runId,
         undefined,
         'main',
@@ -786,7 +786,7 @@ export class PlannedRunExecutor {
           })),
         })),
     };
-    let result = await this.executeWithTranscript(
+    let result = await this.sessions.execute(
       runId,
       undefined,
       'main',
@@ -799,7 +799,7 @@ export class PlannedRunExecutor {
       signal,
     );
     for (let repair = 1; !submitted && result.status === 'completed' && repair <= 2; repair += 1) {
-      result = await this.executeWithTranscript(
+      result = await this.sessions.execute(
         runId,
         undefined,
         'main',
@@ -947,7 +947,7 @@ export class PlannedRunExecutor {
     });
     const recoveredHistory = await this.loadApprovedToolContinuation(runId, task.id);
     let result = recoveredHistory
-      ? await this.executeWithTranscript(
+      ? await this.sessions.execute(
           runId,
           task.id,
           'specialist',
@@ -960,7 +960,7 @@ export class PlannedRunExecutor {
           signal,
           true,
         )
-      : await this.executeWithTranscript(
+      : await this.sessions.execute(
           runId,
           task.id,
           'specialist',
@@ -973,7 +973,7 @@ export class PlannedRunExecutor {
           signal,
         );
     for (let repair = 1; !completion && result.status !== 'cancelled' && repair <= 2; repair += 1) {
-      result = await this.executeWithTranscript(
+      result = await this.sessions.execute(
         runId,
         task.id,
         'specialist',
@@ -1013,152 +1013,6 @@ export class PlannedRunExecutor {
     };
     await this.persistTaskResult(runId, taskResult);
     return taskResult;
-  }
-
-  private async executeWithTranscript(
-    runId: string,
-    taskId: string | undefined,
-    kind: 'main' | 'specialist',
-    attempt: number,
-    modelPurpose: string,
-    systemPrompt: string,
-    history: readonly RuntimeTranscriptMessage[],
-    currentTurn: RuntimeCurrentTurn,
-    tools: readonly RuntimeTool[],
-    signal?: AbortSignal,
-    continuation = false,
-  ): Promise<RuntimeResult> {
-    const runtime = this.options.runtimeFactory.create(modelPurpose);
-    const selectedModel = runtime.identity?.model ?? modelPurpose;
-    const logicalKey = taskId
-      ? `${runId}:task:${taskId}:${String(attempt)}`
-      : `${runId}:main:${String(attempt)}`;
-    const sessionRows = await this.options.database
-      .insert(agentSessions)
-      .values({
-        id: this.createId(),
-        runId,
-        ...(taskId ? { taskId } : {}),
-        kind,
-        attempt,
-        logicalKey,
-        model: selectedModel,
-      })
-      .onConflictDoUpdate({
-        target: agentSessions.logicalKey,
-        set: { status: 'active', model: selectedModel, updatedAt: this.now() },
-      })
-      .returning({ id: agentSessions.id });
-    const sessionId = sessionRows[0]?.id;
-    if (!sessionId) throw new Error(`Unable to initialize Agent Session ${logicalKey}`);
-    await this.options.database.insert(modelSelections).values({
-      id: this.createId(),
-      runId,
-      ...(taskId ? { taskId } : {}),
-      purpose: modelPurpose,
-      policySnapshot: {
-        purpose: modelPurpose,
-        provider: runtime.identity?.provider ?? 'unknown',
-      },
-      selectedModel,
-      fallbackUsed: false,
-    });
-    const record = async (
-      role: string,
-      messageType: string,
-      content: Readonly<Record<string, unknown>>,
-      providerToolCallId?: string,
-    ) => {
-      await this.options.database.transaction(async (transaction) => {
-        await transaction.execute(
-          sql`select id from ${agentSessions} where id = ${sessionId} for update`,
-        );
-        const sequenceRows = await transaction
-          .select({ nextSequence: agentSessions.nextSequence })
-          .from(agentSessions)
-          .where(eq(agentSessions.id, sessionId))
-          .limit(1);
-        const existingRows = await transaction
-          .select({ maxSequence: max(agentTranscriptEntries.sequence) })
-          .from(agentTranscriptEntries)
-          .where(eq(agentTranscriptEntries.sessionId, sessionId));
-        const persistedNext = sequenceRows[0]?.nextSequence;
-        if (!persistedNext)
-          throw new Error(`Agent Session ${sessionId} has no transcript sequence`);
-        const sequence = Math.max(persistedNext, (existingRows[0]?.maxSequence ?? 0) + 1);
-        await transaction.insert(agentTranscriptEntries).values({
-          id: this.createId(),
-          sessionId,
-          sequence,
-          role,
-          messageType,
-          content,
-          ...(providerToolCallId ? { providerToolCallId } : {}),
-        });
-        await transaction
-          .update(agentSessions)
-          .set({ nextSequence: sequence + 1, updatedAt: this.now() })
-          .where(eq(agentSessions.id, sessionId));
-      });
-    };
-    const governedSystemPrompt = withHistoricalIntentBoundary(systemPrompt, history.length > 0);
-    await record('system', 'system_prompt', { content: governedSystemPrompt });
-    for (const message of history) {
-      await record(
-        message.role,
-        'history',
-        { message },
-        message.role === 'tool' ? message.toolCallId : undefined,
-      );
-    }
-    await record('application', 'current_turn', { currentTurn });
-    if (kind === 'main') this.activeMainRuntimes.set(runId, runtime);
-    let result: RuntimeResult;
-    try {
-      result = await runtime.execute(
-        {
-          runId: sessionId,
-          systemPrompt: governedSystemPrompt,
-          history,
-          currentTurn,
-          tools,
-          continuation,
-          ...(kind === 'specialist' ? { maxToolCalls: 12, maxFailedCompletionCalls: 2 } : {}),
-        },
-        async (event) => {
-          if (event.type === 'message.completed') {
-            await record(event.message.role, 'message', { message: event.message });
-          } else if (event.type === 'tool.started') {
-            await record(
-              'assistant',
-              'tool_call',
-              { name: event.toolName, arguments: event.arguments },
-              event.toolCallId,
-            );
-          } else if (event.type === 'tool.completed') {
-            await record('tool', 'tool_result', { result: event.result }, event.result.toolCallId);
-          }
-          await this.publishRuntimeEvent(runId, event);
-        },
-        signal,
-      );
-    } catch (error) {
-      result = protocolFailure(
-        [],
-        error instanceof Error ? error.message : 'Unknown Pi runtime error',
-      );
-    }
-    if (kind === 'main' && this.activeMainRuntimes.get(runId) === runtime) {
-      this.activeMainRuntimes.delete(runId);
-    }
-    await this.options.database
-      .update(agentSessions)
-      .set({
-        status: result.status === 'completed' ? 'completed' : 'failed',
-        updatedAt: this.now(),
-      })
-      .where(eq(agentSessions.id, sessionId));
-    return result;
   }
 
   private async claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
