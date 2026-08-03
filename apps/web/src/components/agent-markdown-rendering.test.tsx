@@ -29,6 +29,10 @@ describe('Agent Markdown rendering contract', () => {
 | --- | --- |
 | 公式 | $E=mc^2$ |
 
+$$
+E=mc^2
+$$
+
 \`\`\`typescript
 const value = 1
 \`\`\`
@@ -43,6 +47,7 @@ A --> B
     expect(html).toContain('<ul');
     expect(html).toContain('<table');
     expect(html).toContain('typescript');
+    expect(html).toContain('katex');
     expect(html).toContain('animate-spin');
     expect(html).toContain('中文标题');
   });
