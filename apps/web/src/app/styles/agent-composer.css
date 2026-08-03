@@ -230,6 +230,11 @@
   pointer-events: auto;
 }
 
+.scroll-button:disabled {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .agent-composer {
   position: relative;
   margin: 0;

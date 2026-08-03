@@ -35,9 +35,9 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 ## P1 Scrolling
 
 - [x] Reuse `ThreadPrimitive.Viewport` and `ScrollToBottom` with explicit bottom-pinned behavior.
-- [ ] Do not force-scroll while the user reads history.
-- [ ] Keep the bottom anchor stable when Markdown, code highlighting, Mermaid, or tool details change height.
-- [ ] Show the return-to-bottom control only when the viewport is not pinned.
+- [x] Do not force-scroll while the user reads history.
+- [x] Keep the bottom anchor stable when Markdown, code highlighting, Mermaid, or tool details change height.
+- [x] Show the return-to-bottom control only when the viewport is not pinned.
 - [ ] Add browser tests for streaming, expanding steps, and switching conversations.
 
 ## P1 Artifacts And Context
