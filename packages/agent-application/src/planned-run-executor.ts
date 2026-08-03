@@ -25,6 +25,7 @@ import {
   executionPlans,
   evidenceRecords,
   editProposals,
+  editProposalBatches,
   planRevisionTasks,
   planRevisions,
   runDirectives,
@@ -34,7 +35,7 @@ import {
   toolCalls,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -389,7 +390,13 @@ export class PlannedRunExecutor {
     const editRows = await this.options.database
       .select({ id: editProposals.id, operations: editProposals.operations })
       .from(editProposals)
-      .where(eq(editProposals.runId, runId))
+      .leftJoin(editProposalBatches, eq(editProposalBatches.proposalId, editProposals.id))
+      .where(
+        and(
+          eq(editProposals.status, 'pending'),
+          or(eq(editProposals.runId, runId), eq(editProposalBatches.runId, runId)),
+        ),
+      )
       .limit(1);
     if (editRows[0]) return { kind: 'direct', result: articleEditResult(result, editRows[0]) };
     if (await this.actionProposals.getBySourceRun(runId)) return { kind: 'direct', result };
