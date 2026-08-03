@@ -2,21 +2,15 @@
 
 import { Download, ExternalLink, FileText, X } from 'lucide-react';
 import { useState } from 'react';
-import { Streamdown } from 'streamdown';
-import { cjk } from '@streamdown/cjk';
-import { code } from '@streamdown/code';
-import { math } from '@streamdown/math';
-import { mermaid } from '@streamdown/mermaid';
 
 import { safeExternalUrl } from './agent-view-model';
+import { ArtifactContentView } from './agent-artifact-content';
 import {
   numberValue,
   recordValue,
   stringValue,
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
-
-const plugins = { cjk, code, math, mermaid };
 
 export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const values = Array.isArray(part.payload.artifacts)
@@ -66,7 +60,7 @@ function ArtifactDrawer({
   readonly onClose: () => void;
 }): React.JSX.Element {
   const href = safeExternalUrl(artifact.url) ?? safeExternalUrl(artifact.downloadUrl);
-  const content = artifactPreview(artifact.content);
+  const evidence = Array.isArray(artifact.evidence) ? artifact.evidence.map(recordValue) : [];
   return (
     <div className="artifact-drawer-backdrop" role="presentation" onMouseDown={onClose}>
       <aside
@@ -91,13 +85,29 @@ function ArtifactDrawer({
         {stringValue(artifact.summary) ? (
           <p className="artifact-summary">{stringValue(artifact.summary)}</p>
         ) : null}
-        {content ? (
-          <Streamdown mode="static" plugins={plugins} linkSafety={{ enabled: true }}>
-            {content}
-          </Streamdown>
-        ) : (
-          <p className="artifact-empty">该产物没有可预览内容。</p>
-        )}
+        <ArtifactContentView artifact={artifact} />
+        {evidence.length > 0 ? (
+          <section className="artifact-provenance">
+            <h3>来源</h3>
+            <ul>
+              {evidence.map((item, index) => {
+                const source = safeExternalUrl(item.source);
+                const title = stringValue(item.title) || stringValue(item.claim) || '引用来源';
+                return (
+                  <li key={stringValue(item.evidenceId) || String(index)}>
+                    {source ? (
+                      <a href={source} rel="noopener noreferrer" target="_blank">
+                        {title} <ExternalLink size={11} />
+                      </a>
+                    ) : (
+                      title
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
         {href ? (
           <footer>
             <a href={href} rel="noopener noreferrer" target="_blank">
@@ -107,7 +117,13 @@ function ArtifactDrawer({
               下载 <Download size={12} />
             </a>
           </footer>
-        ) : null}
+        ) : (
+          <footer>
+            <button onClick={() => downloadArtifact(artifact)} type="button">
+              下载 <Download size={12} />
+            </button>
+          </footer>
+        )}
       </aside>
     </div>
   );
@@ -122,13 +138,14 @@ function artifactLabel(type: string): string {
   return labels[type] ?? 'Agent 产物';
 }
 
-export function artifactPreview(value: unknown): string {
-  if (typeof value === 'string') return value;
-  const content = recordValue(value);
-  return (
-    stringValue(content.markdown) ||
-    stringValue(content.content) ||
-    stringValue(content.text) ||
-    stringValue(content.body)
-  );
+export function downloadArtifact(artifact: Readonly<Record<string, unknown>>): void {
+  const blob = new Blob([JSON.stringify(artifact.content ?? {}, null, 2) ?? '{}'], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${(stringValue(artifact.title) || 'agent-artifact').replaceAll(/[\\/:*?"<>|]/gu, '-')}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }

@@ -797,6 +797,53 @@
   gap: 12px;
 }
 
+.artifact-drawer footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: #5b5d58;
+  cursor: pointer;
+}
+
+.artifact-structured-content,
+.artifact-provenance {
+  margin-top: 16px;
+}
+
+.artifact-structured-content > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  border-top: 1px solid #ecece8;
+  padding: 9px 0;
+}
+
+.artifact-structured-content dt,
+.artifact-provenance h3 {
+  color: #777872;
+  font-size: 11px;
+}
+
+.artifact-structured-content dd {
+  margin: 0;
+  color: #41423e;
+  font-size: 13px;
+}
+.artifact-structured-content ol,
+.artifact-provenance ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.artifact-provenance h3 {
+  margin: 0 0 6px;
+}
+.artifact-provenance li {
+  margin: 4px 0;
+  font-size: 11px;
+}
+
 .artifact-drawer header > div {
   display: grid;
   gap: 3px;

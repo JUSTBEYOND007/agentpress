@@ -13,6 +13,7 @@ import {
   agentTasks,
   approvals,
   artifacts,
+  artifactEvidence,
   artifactVersions,
   appendCheckpoint,
   appendRunEvent,
@@ -754,6 +755,7 @@ export class DirectRunService {
       steeringRows,
       followUpRows,
       modelRows,
+      artifactEvidenceRows,
     ] = await Promise.all([
       this.listEvents(runId),
       this.options.database
@@ -840,6 +842,21 @@ export class DirectRunService {
         .where(eq(modelSelections.runId, runId))
         .orderBy(asc(modelSelections.createdAt))
         .limit(1),
+      this.options.database
+        .select({
+          artifactId: artifactVersions.artifactId,
+          evidenceId: artifactEvidence.evidenceId,
+          claim: artifactEvidence.claim,
+          ordinal: artifactEvidence.ordinal,
+          title: evidenceRecords.title,
+          source: evidenceRecords.sourceUri,
+        })
+        .from(artifactEvidence)
+        .innerJoin(artifactVersions, eq(artifactVersions.id, artifactEvidence.artifactVersionId))
+        .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))
+        .innerJoin(evidenceRecords, eq(evidenceRecords.id, artifactEvidence.evidenceId))
+        .where(eq(artifacts.runId, runId))
+        .orderBy(asc(artifactEvidence.ordinal)),
     ]);
     const question = questionRows[0];
     const proposalStatuses = new Map<string, ProposalProjectionStatus>(
@@ -858,6 +875,10 @@ export class DirectRunService {
     const queuedEvent = events.find(({ eventType }) => eventType === 'run.queued');
     const contextManifest = queuedEvent?.payload.contextManifest;
     const model = modelRows[0];
+    const enrichedArtifactRows = artifactRows.map((artifact) => ({
+      ...artifact,
+      evidence: artifactEvidenceRows.filter(({ artifactId }) => artifactId === artifact.id),
+    }));
     return {
       runId,
       rootMessageId: run.rootMessageId,
@@ -887,7 +908,7 @@ export class DirectRunService {
             payload: evidence,
           };
         }),
-        ...artifactRows.map((artifact) => {
+        ...enrichedArtifactRows.map((artifact) => {
           const sourceEvent = events.find(
             (event) =>
               event.eventType === 'task.succeeded' &&
@@ -921,7 +942,7 @@ export class DirectRunService {
             ]
           : []),
       ],
-      artifacts: artifactRows,
+      artifacts: enrichedArtifactRows,
       ...(contextManifest && typeof contextManifest === 'object'
         ? {
             context: {
