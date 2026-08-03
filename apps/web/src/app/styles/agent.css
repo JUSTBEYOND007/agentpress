@@ -978,16 +978,3 @@
 .notice-warning {
   color: #9a463e;
 }
-
-.usage-part {
-  color: #858680;
-}
-
-.usage-part > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 2px 0 7px 19px;
-  color: #92938d;
-  font-size: 10px;
-}

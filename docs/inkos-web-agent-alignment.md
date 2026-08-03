@@ -91,7 +91,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 - [ ] Give tool results, evidence, artifacts, and article changes typed open, locate, download, retry, and provenance actions where applicable.
 - [x] Locate the editor at the first affected block when an article-change part or review batch is opened, without moving the viewport during unrelated streaming.
-- [ ] Display the actual provider, model, context window, output limit, duration, tokens, and cost facts captured by the Run; never substitute current settings for historical facts.
+- [x] Display the actual provider, model, context window, output limit, duration, tokens, and cost facts captured by the Run; never substitute current settings for historical facts.
 - [ ] Test artifact and context authorization, missing resources, stale versions, restored Runs, and hostile external URLs.
 
 ## P2 Accessibility And Responsive Behavior

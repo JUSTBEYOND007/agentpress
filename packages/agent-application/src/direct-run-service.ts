@@ -55,6 +55,7 @@ import { PlannedRunExecutor } from './planned-run-executor.js';
 import { projectConversationHistory } from './agent-transcript-projector.js';
 import { RunContextService } from './run-context-service.js';
 import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
+import { projectRunExecutionFacts } from './run-execution-facts.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -915,14 +916,14 @@ export class DirectRunService {
         .orderBy(asc(queuedFollowups.sequence)),
       this.options.database
         .select({
+          purpose: modelSelections.purpose,
           selectedModel: modelSelections.selectedModel,
           policySnapshot: modelSelections.policySnapshot,
           fallbackUsed: modelSelections.fallbackUsed,
         })
         .from(modelSelections)
         .where(eq(modelSelections.runId, runId))
-        .orderBy(asc(modelSelections.createdAt))
-        .limit(1),
+        .orderBy(asc(modelSelections.createdAt)),
       this.options.database
         .select({
           artifactId: artifactVersions.artifactId,
@@ -956,6 +957,13 @@ export class DirectRunService {
     const queuedEvent = events.find(({ eventType }) => eventType === 'run.queued');
     const contextManifest = queuedEvent?.payload.contextManifest;
     const model = modelRows[0];
+    const executionFacts = projectRunExecutionFacts({
+      runId,
+      events,
+      modelSelections: modelRows,
+      createdAt: run.createdAt,
+      ...(run.completedAt ? { completedAt: run.completedAt } : {}),
+    });
     const enrichedArtifactRows = artifactRows.map((artifact) => ({
       ...artifact,
       evidence: artifactEvidenceRows.filter(({ artifactId }) => artifactId === artifact.id),
@@ -968,7 +976,8 @@ export class DirectRunService {
       mode: run.mode,
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
       parts: [
-        ...projectRunParts(events, proposalStatuses),
+        ...projectRunParts(events, proposalStatuses).filter(({ type }) => type !== 'usage'),
+        ...(executionFacts ? [executionFacts] : []),
         ...evidenceRows.map((evidence) => {
           const toolCallId =
             typeof evidence.metadata.toolCallId === 'string'

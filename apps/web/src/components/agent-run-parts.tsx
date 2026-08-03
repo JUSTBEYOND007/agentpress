@@ -5,7 +5,6 @@ import {
   Check,
   CircleAlert,
   Clock3,
-  Coins,
   Copy,
   ExternalLink,
   FileCheck2,
@@ -24,12 +23,7 @@ import {
   safeExternalUrl,
   statusLabel,
 } from './agent-view-model';
-import {
-  numberValue,
-  recordValue,
-  stringValue,
-  type RunPart,
-} from '../lib/agentpress-assistant-runtime';
+import { recordValue, stringValue, type RunPart } from '../lib/agentpress-assistant-runtime';
 import { AssistantMarkdownPart, UserTextPart } from './agent-message-content';
 import { ExecutionTimelineRenderer } from './agent-execution-timeline';
 import { NoticePart } from './agent-notice-part';
@@ -38,6 +32,7 @@ import { ArtifactPart } from './agent-artifact-drawer';
 import { ContextSourcesPart } from './agent-context-sources';
 import { AgentArticleChangePart } from './agent-article-change-part';
 import { useRunActions } from './agent-run-actions';
+import { AgentUsagePart } from './agent-usage-part';
 
 export function UserMessage(): React.JSX.Element {
   return (
@@ -87,7 +82,7 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
   if (part.type === 'context') return <ContextSourcesPart part={part} />;
   if (part.type === 'evidence') return <EvidencePart part={part} />;
   if (part.type === 'article-change') return <AgentArticleChangePart part={part} />;
-  if (part.type === 'usage') return <UsagePart part={part} />;
+  if (part.type === 'usage') return <AgentUsagePart part={part} />;
   if (part.type === 'warning' || part.type === 'recovery') return <NoticePart part={part} />;
   if (part.type === 'activity') {
     const proposal = proposalFromPart(part);
@@ -344,29 +339,4 @@ function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
       <span>{stringValue(part.payload.source)}</span>
     </section>
   );
-}
-
-function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const usage = recordValue(part.payload.usage);
-  const tokens = numberValue(usage.inputTokens) + numberValue(usage.outputTokens);
-  const cost = numberValue(part.payload.credits) || numberValue(part.payload.cost);
-  const duration = numberValue(part.payload.durationMs);
-  return (
-    <details className="run-part usage-part">
-      <summary>
-        <Coins size={13} />
-        运行详情
-      </summary>
-      <div>
-        {cost > 0 ? <span>{cost.toLocaleString()} 积分</span> : null}
-        {duration > 0 ? <span>{formatDuration(duration)}</span> : null}
-        {tokens > 0 ? <span>{tokens.toLocaleString()} tokens</span> : null}
-      </div>
-    </details>
-  );
-}
-
-function formatDuration(durationMs: number): string {
-  if (durationMs < 60_000) return `${String(Math.max(1, Math.round(durationMs / 1000)))} 秒`;
-  return `${String(Math.round(durationMs / 60_000))} 分钟`;
 }

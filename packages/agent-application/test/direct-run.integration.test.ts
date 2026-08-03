@@ -459,6 +459,22 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(proposals[0]?.status).toBe('pending');
     expect(plans).toHaveLength(0);
     expect(bindings).toMatchObject([{ targetId: ids.article }]);
+    const projection = await directEditService.getProjection(run.runId);
+    const executionPart = projection?.parts.find(({ type }) => type === 'usage');
+    const executions = Array.isArray(executionPart?.payload.executions)
+      ? executionPart.payload.executions
+      : [];
+    expect(projection?.status).toBe('completed');
+    expect(executionPart?.status).toBe('execution.facts');
+    expect(executions).toMatchObject([
+      {
+        purpose: 'main',
+        provider: 'faux',
+        model: 'faux-1',
+        contextWindow: 128_000,
+        maxOutputTokens: 16_384,
+      },
+    ]);
   });
 
   it('confirms a persisted action proposal idempotently into one authorized run', async () => {
