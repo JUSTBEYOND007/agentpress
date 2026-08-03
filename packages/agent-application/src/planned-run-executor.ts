@@ -1551,11 +1551,17 @@ export function mainPlanningPrompt(
     responsibility: specialistResponsibilities[role],
     allowedCapabilities: [...specialistCapabilityPolicy[role]],
   }));
+  const canProposeArticleEdits = capabilities.includes('article.propose');
+  const articleInstruction = canProposeArticleEdits
+    ? 'If currentRequest asks to create, continue, rewrite, delete, or otherwise change the current article, call article.propose_edits directly and stop. This creates a visible reviewable draft; do not call action_propose, plan_submit, or a Specialist for this simple article edit.'
+    : actionSource === 'free_text'
+      ? 'If currentRequest asks to change an article but no article.propose capability is available, explain that the current turn has no article editing capability and do not claim the article was changed.'
+      : 'This host-confirmed article edit may use only capabilities listed in actionEnvelope.grantedCapabilities.';
   return `You are the AgentPress Main Agent handling exactly one typed current-turn message. Decide how to handle its currentRequest.
 Current date: ${new Date().toISOString().slice(0, 10)}.
 Conversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The actionEnvelope describes host-granted capabilities; never claim or infer additional grants.
 Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.
-${actionSource === 'free_text' ? 'If currentRequest asks to create, continue, rewrite, delete, or otherwise change the current article, call action_propose and stop. A free-text turn may propose that action but must never plan or execute the article change.' : 'This host-confirmed button turn may plan the approved article edit using only capabilities listed in actionEnvelope.grantedCapabilities.'}
+${articleInstruction}
 Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.
 Keep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.
 Choose Specialists from this policy catalog: ${JSON.stringify(specialists)}.
