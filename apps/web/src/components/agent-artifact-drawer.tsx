@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { safeExternalUrl } from './agent-view-model';
 import { ArtifactContentView } from './agent-artifact-content';
+import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   numberValue,
   recordValue,
@@ -12,11 +13,15 @@ import {
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
 
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
+
 export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const values = Array.isArray(part.payload.artifacts)
     ? part.payload.artifacts.map(recordValue)
     : [part.payload];
   const [selected, setSelected] = useState<Readonly<Record<string, unknown>>>();
+  const [openingId, setOpeningId] = useState<string>();
+  const [error, setError] = useState<string>();
   return (
     <section className="run-part artifact-part" aria-label="Agent 产物">
       <h3>
@@ -27,19 +32,37 @@ export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.El
         return (
           <button
             className="artifact-card"
+            disabled={Boolean(openingId)}
             key={id}
             onClick={() => {
-              setSelected(artifact);
+              const version = numberValue(artifact.version);
+              setOpeningId(id);
+              setError(undefined);
+              void loadArtifact(part.runId, id, version)
+                .then(setSelected)
+                .catch((reason: unknown) => {
+                  setError(reason instanceof Error ? reason.message : '产物加载失败，请重试。');
+                })
+                .finally(() => {
+                  setOpeningId(undefined);
+                });
             }}
             type="button"
           >
             <strong>
               {stringValue(artifact.title) || artifactLabel(stringValue(artifact.type))}
             </strong>
-            <span>{stringValue(artifact.summary) || '查看产物详情'}</span>
+            <span>
+              {openingId === id ? '正在加载' : stringValue(artifact.summary) || '查看产物详情'}
+            </span>
           </button>
         );
       })}
+      {error ? (
+        <p className="interaction-error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {selected ? (
         <ArtifactDrawer
           artifact={selected}
@@ -50,6 +73,25 @@ export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.El
       ) : null}
     </section>
   );
+}
+
+export async function loadArtifact(
+  runId: string,
+  artifactId: string,
+  version: number,
+): Promise<Readonly<Record<string, unknown>>> {
+  const query = version > 0 ? `?version=${encodeURIComponent(String(version))}` : '';
+  const response = await authenticatedFetch(
+    `${apiUrl}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}${query}`,
+  );
+  if (response.status === 404) throw new Error('这个产物已经不存在。');
+  if (response.status === 409) throw new Error('这个产物已有新版本，请刷新对话后查看。');
+  if (!response.ok) throw new Error('产物加载失败，请重试。');
+  const artifact = (await response.json()) as unknown;
+  if (typeof artifact !== 'object' || artifact === null || Array.isArray(artifact)) {
+    throw new Error('产物响应格式无效。');
+  }
+  return artifact as Readonly<Record<string, unknown>>;
 }
 
 function ArtifactDrawer({

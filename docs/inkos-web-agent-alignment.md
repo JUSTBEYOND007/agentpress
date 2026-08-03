@@ -47,7 +47,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Show title, type, version, summary, evidence, download/open actions, and provenance.
 - [x] Add a compact context-source view backed by Context Pack/Turn Profile facts: article revision, selection, attachments, evidence, skills, provider/model, and budget.
 - [x] Never reconstruct context provenance from composer state after a Run starts.
-- [ ] Test authorization, missing artifacts, stale versions, and restored Runs.
+- [x] Test authorization, missing artifacts, stale versions, and restored Runs.
 
 ## P1 Conversation Branches
 

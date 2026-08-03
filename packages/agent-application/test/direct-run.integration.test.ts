@@ -12,6 +12,8 @@ import {
   agentRuns,
   approvals,
   appUsers,
+  artifacts,
+  artifactVersions,
   articleRevisions,
   articles,
   connectDatabase,
@@ -475,6 +477,64 @@ describeWithDatabase('Direct Run application flow', () => {
         maxOutputTokens: 16_384,
       },
     ]);
+  });
+
+  it('loads only the requested persisted artifact version for its owning Run', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: '生成报告',
+      idempotencyKey: randomUUID(),
+    });
+    const artifactId = randomUUID();
+    await connection.db.insert(artifacts).values({
+      id: artifactId,
+      runId: run.runId,
+      type: 'ResearchBrief',
+      title: '持久化报告',
+      currentVersion: 1,
+    });
+    await connection.db.insert(artifactVersions).values({
+      id: randomUUID(),
+      artifactId,
+      version: 1,
+      summary: '版本一',
+      content: { markdown: '# 报告' },
+      contentHash: createHash('sha256')
+        .update(JSON.stringify({ markdown: '# 报告' }))
+        .digest('hex'),
+    });
+
+    await expect(service.getArtifact(run.runId, artifactId, 1)).resolves.toMatchObject({
+      status: 'found',
+      artifact: { id: artifactId, version: 1, summary: '版本一' },
+    });
+    const projection = await service.getProjection(run.runId);
+    expect(projection?.artifacts).toEqual([
+      {
+        id: artifactId,
+        type: 'ResearchBrief',
+        title: '持久化报告',
+        version: 1,
+        summary: '版本一',
+      },
+    ]);
+    expect(projection?.parts.find(({ type }) => type === 'artifact')?.payload).not.toHaveProperty(
+      'content',
+    );
+    await expect(service.getArtifact(run.runId, artifactId, 2)).resolves.toEqual({
+      status: 'stale',
+      currentVersion: 1,
+    });
+    await expect(service.getArtifact(run.runId, randomUUID(), 1)).resolves.toEqual({
+      status: 'not_found',
+    });
   });
 
   it('confirms a persisted action proposal idempotently into one authorized run', async () => {

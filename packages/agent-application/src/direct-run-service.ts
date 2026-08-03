@@ -13,7 +13,6 @@ import {
   agentTasks,
   approvals,
   artifacts,
-  artifactEvidence,
   artifactVersions,
   appendCheckpoint,
   appendRunEvent,
@@ -58,6 +57,7 @@ import { RunContextService } from './run-context-service.js';
 import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
 import { projectRunExecutionFacts } from './run-execution-facts.js';
 import { projectRunProgress } from './run-progress.js';
+import { ArtifactQueryService, type ArtifactLookupResult } from './artifact-query-service.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -83,11 +83,13 @@ export class DirectRunService {
   private readonly createId: () => string;
   private readonly plannedRuns: PlannedRunExecutor;
   private readonly contexts: RunContextService;
+  private readonly artifactQueries: ArtifactQueryService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.plannedRuns = new PlannedRunExecutor(options);
+    this.artifactQueries = new ArtifactQueryService(options.database);
     this.contexts = new RunContextService(
       options.database,
       options.systemPrompt,
@@ -839,7 +841,6 @@ export class DirectRunService {
       steeringRows,
       followUpRows,
       modelRows,
-      artifactEvidenceRows,
       checkpointRows,
     ] = await Promise.all([
       this.listEvents(runId),
@@ -850,7 +851,6 @@ export class DirectRunService {
           title: artifacts.title,
           version: artifactVersions.version,
           summary: artifactVersions.summary,
-          content: artifactVersions.content,
         })
         .from(artifacts)
         .innerJoin(
@@ -929,21 +929,6 @@ export class DirectRunService {
         .orderBy(asc(modelSelections.createdAt)),
       this.options.database
         .select({
-          artifactId: artifactVersions.artifactId,
-          evidenceId: artifactEvidence.evidenceId,
-          claim: artifactEvidence.claim,
-          ordinal: artifactEvidence.ordinal,
-          title: evidenceRecords.title,
-          source: evidenceRecords.sourceUri,
-        })
-        .from(artifactEvidence)
-        .innerJoin(artifactVersions, eq(artifactVersions.id, artifactEvidence.artifactVersionId))
-        .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))
-        .innerJoin(evidenceRecords, eq(evidenceRecords.id, artifactEvidence.evidenceId))
-        .where(eq(artifacts.runId, runId))
-        .orderBy(asc(artifactEvidence.ordinal)),
-      this.options.database
-        .select({
           sequence: checkpoints.sequence,
           reason: checkpoints.reason,
           createdAt: checkpoints.createdAt,
@@ -986,10 +971,6 @@ export class DirectRunService {
       ...(pendingInteraction ? { pendingInteraction } : {}),
       ...(latestCheckpoint ? { recoveryPoint: latestCheckpoint } : {}),
     });
-    const enrichedArtifactRows = artifactRows.map((artifact) => ({
-      ...artifact,
-      evidence: artifactEvidenceRows.filter(({ artifactId }) => artifactId === artifact.id),
-    }));
     return {
       runId,
       rootMessageId: run.rootMessageId,
@@ -1021,7 +1002,7 @@ export class DirectRunService {
             payload: evidence,
           };
         }),
-        ...enrichedArtifactRows.map((artifact) => {
+        ...artifactRows.map((artifact) => {
           const sourceEvent = events.find(
             (event) =>
               event.eventType === 'task.succeeded' &&
@@ -1055,7 +1036,7 @@ export class DirectRunService {
             ]
           : []),
       ],
-      artifacts: enrichedArtifactRows,
+      artifacts: artifactRows,
       ...(contextManifest && typeof contextManifest === 'object'
         ? {
             context: {
@@ -1090,6 +1071,14 @@ export class DirectRunService {
       createdAt: run.createdAt.toISOString(),
       ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),
     };
+  }
+
+  public async getArtifact(
+    runId: string,
+    artifactId: string,
+    expectedVersion?: number,
+  ): Promise<ArtifactLookupResult> {
+    return this.artifactQueries.get(runId, artifactId, expectedVersion);
   }
 
   public async listRuns(conversationId: string, branchId: string, userId: string) {

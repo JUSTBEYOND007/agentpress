@@ -11,6 +11,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ConflictException,
   Get,
   Headers,
   HttpCode,
@@ -19,6 +20,7 @@ import {
   Optional,
   Param,
   Post,
+  Query,
   Sse,
   type MessageEvent,
 } from '@nestjs/common';
@@ -214,6 +216,26 @@ export class AgentController {
   public async getArtifacts(@Param('runId') runId: string, @CurrentUser() user: AuthenticatedUser) {
     const projection = await this.getProjection(runId, user);
     return projection.artifacts;
+  }
+
+  @Get('runs/:runId/artifacts/:artifactId')
+  public async getArtifact(
+    @Param('runId') runId: string,
+    @Param('artifactId') artifactId: string,
+    @Query('version') versionValue: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization?.assertRunAccess(runId, user.id);
+    const version = parseOptionalPositiveInteger(versionValue, 'version');
+    const result = await this.runs.getArtifact(runId, artifactId, version);
+    if (result.status === 'not_found') throw new NotFoundException('Artifact does not exist');
+    if (result.status === 'stale') {
+      throw new ConflictException({
+        code: 'artifact_version_stale',
+        currentVersion: result.currentVersion,
+      });
+    }
+    return result.artifact;
   }
 
   @Sse('runs/:runId/events')
@@ -424,6 +446,15 @@ function parseStringArray(value: unknown, field: string, maxItems: number): read
   )
     throw new BadRequestException(`${field} must be an array of at most ${String(maxItems)} IDs`);
   return value as string[];
+}
+
+function parseOptionalPositiveInteger(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new BadRequestException(`${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function parseSkills(value: unknown): readonly { skillId: string; version: string }[] {

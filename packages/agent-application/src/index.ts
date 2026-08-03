@@ -6,6 +6,7 @@ export * from './agent-turn-profile.js';
 export * from './agent-session-runner.js';
 export * from './agent-transcript-projector.js';
 export * from './action-proposal-service.js';
+export * from './artifact-query-service.js';
 export * from './direct-run-service.js';
 export * from './planned-run-executor.js';
 export * from './persistent-tool-bridge.js';

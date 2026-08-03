@@ -4,12 +4,13 @@ import type {
   LiveRunEvent,
   ToolCallService,
 } from '@agentpress/agent-application';
-import { BadRequestException } from '@nestjs/common';
-import { describe, expect, it } from 'vitest';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AgentController } from '../src/agent/agent.controller.js';
 import type { RedisRunEventBus } from '../src/agent/redis-run-event-bus.js';
 import type { AuthenticatedUser } from '../src/auth/auth.service.js';
+import type { AuthorizationService } from '../src/auth/authorization.service.js';
 
 const user: AuthenticatedUser = { id: 'user-1', subject: 'logto-user', displayName: 'User' };
 
@@ -133,6 +134,34 @@ describe('AgentController SSE replay', () => {
       controller.decideToolCall('call-1', { decision: 'approved' }, user),
     ).resolves.toMatchObject({ status: 'approved' });
     expect(decisions).toEqual([{ toolCallId: 'call-1', decision: 'approved', userId: 'user-1' }]);
+  });
+
+  it('re-authorizes exact artifact versions and keeps missing and stale resources distinct', async () => {
+    const assertRunAccess = vi.fn(() => Promise.resolve());
+    const getArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'found', artifact: { id: 'artifact-1', version: 2 } })
+      .mockResolvedValueOnce({ status: 'not_found' })
+      .mockResolvedValueOnce({ status: 'stale', currentVersion: 3 });
+    const controller = new AgentController(
+      { getArtifact } as unknown as DirectRunService,
+      {} as RedisRunEventBus,
+      undefined,
+      { assertRunAccess } as unknown as AuthorizationService,
+    );
+
+    await expect(controller.getArtifact('run-1', 'artifact-1', '2', user)).resolves.toEqual({
+      id: 'artifact-1',
+      version: 2,
+    });
+    await expect(controller.getArtifact('run-1', 'missing', '2', user)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(controller.getArtifact('run-1', 'artifact-1', '2', user)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(assertRunAccess).toHaveBeenCalledTimes(3);
+    expect(getArtifact).toHaveBeenNthCalledWith(1, 'run-1', 'artifact-1', 2);
   });
 });
 
