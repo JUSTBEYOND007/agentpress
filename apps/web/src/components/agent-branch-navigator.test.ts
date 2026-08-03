@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { branchNavigationView } from './agent-branch-navigator';
+import { branchForArrowKey, branchNavigationView } from './agent-branch-navigator';
 
 describe('branchNavigationView', () => {
   it('orders sibling branches by their immutable creation facts', () => {
@@ -23,5 +23,8 @@ describe('branchNavigationView', () => {
       previous: original,
       next: undefined,
     });
+    const view = branchNavigationView([fork, original], original);
+    expect(branchForArrowKey(view, 'ArrowRight')).toEqual(fork);
+    expect(branchForArrowKey(view, 'Enter')).toBeUndefined();
   });
 });

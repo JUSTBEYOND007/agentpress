@@ -1,7 +1,7 @@
 'use client';
 
 import { Archive, Check, ChevronDown, Pencil, Plus, Search, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   friendlyFailure,
@@ -38,6 +38,7 @@ export function AgentConversationHeader({
   const [archiveConfirm, setArchiveConfirm] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const pickerButtonRef = useRef<HTMLButtonElement>(null);
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     const matching = conversations.filter(
@@ -46,6 +47,20 @@ export function AgentConversationHeader({
     );
     return [...new Map(matching.map((conversation) => [conversation.id, conversation])).values()];
   }, [conversations, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.requestAnimationFrame(() => pickerButtonRef.current?.focus());
+    };
+  }, [open]);
 
   const run = async (action: () => Promise<void>, closeAfter = false): Promise<boolean> => {
     setPending(true);
@@ -67,19 +82,21 @@ export function AgentConversationHeader({
       <div className="conversation-picker">
         <button
           aria-expanded={open}
+          aria-haspopup="menu"
           onClick={() => {
             setOpen((value) => !value);
             setEditing(false);
             setArchiveConfirm(false);
             setError(undefined);
           }}
+          ref={pickerButtonRef}
           type="button"
         >
           <strong>{selected?.title ?? '写作助手'}</strong>
           <ChevronDown aria-hidden="true" size={14} />
         </button>
         {open ? (
-          <div className="conversation-menu">
+          <div aria-label="选择对话" className="conversation-menu" role="menu">
             <div className="conversation-search">
               <Search aria-hidden="true" size={13} />
               <input

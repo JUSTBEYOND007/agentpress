@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { safeExternalUrl } from './agent-view-model';
 import { ArtifactContentView } from './agent-artifact-content';
+import { useDialogFocus } from './use-dialog-focus';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   numberValue,
@@ -31,10 +32,12 @@ export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.El
         const id = stringValue(artifact.id) || stringValue(artifact.artifactId) || String(index);
         return (
           <button
+            aria-busy={openingId === id}
             className="artifact-card"
-            disabled={Boolean(openingId)}
+            disabled={Boolean(openingId && openingId !== id)}
             key={id}
             onClick={() => {
+              if (openingId) return;
               const version = numberValue(artifact.version);
               setOpeningId(id);
               setError(undefined);
@@ -101,6 +104,7 @@ function ArtifactDrawer({
   readonly artifact: Readonly<Record<string, unknown>>;
   readonly onClose: () => void;
 }): React.JSX.Element {
+  const drawerRef = useDialogFocus<HTMLElement>(onClose);
   const href = safeExternalUrl(artifact.url) ?? safeExternalUrl(artifact.downloadUrl);
   const evidence = Array.isArray(artifact.evidence) ? artifact.evidence.map(recordValue) : [];
   return (
@@ -108,9 +112,13 @@ function ArtifactDrawer({
       <aside
         className="artifact-drawer"
         aria-label="产物详情"
+        aria-modal="true"
         onMouseDown={(event) => {
           event.stopPropagation();
         }}
+        ref={drawerRef}
+        role="dialog"
+        tabIndex={-1}
       >
         <header>
           <div>

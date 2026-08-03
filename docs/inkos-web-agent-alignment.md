@@ -60,8 +60,8 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 - [x] Make current article, selection, attachments, skills, steering/follow-up mode, and pending-review lock visible in one composer context row.
 - [x] Ensure cancel, stop, steering, follow-up, and send-disabled states have distinct semantics.
-- [ ] Align typography, spacing, table overflow, code blocks, long links, focus states, and reduced motion with the Notion reference and InkOS density.
-- [ ] Verify desktop and mobile layouts with browser screenshots and overlap checks.
+- [x] Align typography, spacing, table overflow, code blocks, long links, focus states, and reduced motion with the Notion reference and InkOS density.
+- [x] Verify desktop and mobile layouts with browser screenshots and overlap checks.
 
 ## P0 Composer And Run Lifecycle
 
@@ -96,10 +96,10 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P2 Accessibility And Responsive Behavior
 
-- [ ] Support keyboard send, stop/close, branch navigation, and focus return with accessible names and visible focus states.
-- [ ] Respect reduced-motion preferences for streamed Markdown, spinners, drawers, menus, and scrolling.
-- [ ] Keep tables, code, Mermaid, CJK, and long links inside the Agent viewport at desktop and mobile widths.
-- [ ] Prevent the workspace header, global account actions, Agent header, composer, and mobile safe areas from overlapping by assigning layout ownership explicitly.
+- [x] Support keyboard send, stop/close, branch navigation, and focus return with accessible names and visible focus states.
+- [x] Respect reduced-motion preferences for streamed Markdown, spinners, drawers, menus, and scrolling.
+- [x] Keep tables, code, Mermaid, CJK, and long links inside the Agent viewport at desktop and mobile widths.
+- [x] Prevent the workspace header, global account actions, Agent header, composer, and mobile safe areas from overlapping by assigning layout ownership explicitly.
 - [ ] Verify these contracts with automated browser assertions and desktop/mobile screenshots, not screenshots alone.
 
 ## Deliberate Non-Adoption

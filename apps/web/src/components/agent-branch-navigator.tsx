@@ -16,7 +16,16 @@ export function AgentBranchNavigator({
   const view = branchNavigationView(conversations, selected);
   if (!selected || view.branches.length <= 1) return null;
   return (
-    <nav className="branch-navigator" aria-label="对话分支">
+    <nav
+      className="branch-navigator"
+      aria-label="对话分支"
+      onKeyDown={(event) => {
+        const next = branchForArrowKey(view, event.key);
+        if (!next) return;
+        event.preventDefault();
+        onSelect(next);
+      }}
+    >
       <button
         aria-label="上一个分支"
         disabled={!view.previous}
@@ -42,6 +51,15 @@ export function AgentBranchNavigator({
       </button>
     </nav>
   );
+}
+
+export function branchForArrowKey(
+  view: ReturnType<typeof branchNavigationView>,
+  key: string,
+): ConversationView | undefined {
+  if (key === 'ArrowLeft') return view.previous;
+  if (key === 'ArrowRight') return view.next;
+  return undefined;
 }
 
 export function branchNavigationView(
