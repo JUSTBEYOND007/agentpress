@@ -543,6 +543,47 @@ describeWithDatabase('Direct Run application flow', () => {
     await service.execute(run.runId);
   });
 
+  it('binds a regenerated Run to the copied fork message without duplicating the user turn', async () => {
+    const branchId = randomUUID();
+    const messageId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+      parentBranchId: ids.branch,
+    });
+    await connection.db.insert(conversationMessages).values({
+      id: messageId,
+      branchId,
+      role: 'user',
+      sequence: 1,
+      content: [
+        {
+          type: 'agentpress.runtime-message',
+          version: 1,
+          message: { role: 'user', content: '重新回答这条消息', timestamp: Date.now() },
+        },
+      ],
+      stable: true,
+    });
+
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: '重新回答这条消息',
+      existingMessageId: messageId,
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(run.messageId).toBe(messageId);
+    await expect(
+      connection.db
+        .select({ id: conversationMessages.id })
+        .from(conversationMessages)
+        .where(eq(conversationMessages.branchId, branchId)),
+    ).resolves.toHaveLength(1);
+  });
+
   it('versions declarative Skills and requires confirmation before recalling Agent memory', async () => {
     const markdown =
       '---\nid: fact-check\nversion: 2.0.0\ndescription: Verify facts\nallowedTools:\n  - web_research.search\n---\nRequire evidence for factual claims.';

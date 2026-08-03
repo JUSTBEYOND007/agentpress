@@ -28,6 +28,9 @@ export type ConversationView = {
   readonly title: string;
   readonly isDefault: boolean;
   readonly archivedAt?: string | null;
+  readonly parentBranchId?: string | null;
+  readonly forkedFromMessageId?: string | null;
+  readonly branchCreatedAt?: string;
 };
 
 export type Proposal = {

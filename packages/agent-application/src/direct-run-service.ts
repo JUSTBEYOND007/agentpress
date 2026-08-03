@@ -283,7 +283,31 @@ export class DirectRunService {
         .from(conversationMessages)
         .where(eq(conversationMessages.branchId, input.branchId));
       const messageSequence = (sequenceRows[0]?.sequence ?? 0) + 1;
-      const messageId = this.createId();
+      const existingMessage = input.existingMessageId
+        ? await transaction
+            .select({ id: conversationMessages.id, content: conversationMessages.content })
+            .from(conversationMessages)
+            .where(
+              and(
+                eq(conversationMessages.id, input.existingMessageId),
+                eq(conversationMessages.branchId, input.branchId),
+                eq(conversationMessages.role, 'user'),
+                eq(conversationMessages.stable, true),
+              ),
+            )
+            .limit(1)
+        : [];
+      const existingRoot = existingMessage[0];
+      if (input.existingMessageId) {
+        const decoded = existingRoot ? decodeRuntimeMessage(existingRoot.content) : undefined;
+        if (decoded?.role !== 'user' || decoded.content !== prompt) {
+          throw new AgentApplicationError(
+            'invalid_context',
+            'The existing root message is missing or does not match this Run',
+          );
+        }
+      }
+      const messageId = existingRoot?.id ?? this.createId();
       const rootRequestId = this.createId();
       const runId = this.createId();
       const outboxId = this.createId();
@@ -294,15 +318,16 @@ export class DirectRunService {
         timestamp: now.getTime(),
       };
 
-      await transaction.insert(conversationMessages).values({
-        id: messageId,
-        branchId: input.branchId,
-        role: 'user',
-        sequence: messageSequence,
-        content: encodeRuntimeMessage(userMessage),
-        stable: true,
-        createdAt: now,
-      });
+      if (!existingRoot)
+        await transaction.insert(conversationMessages).values({
+          id: messageId,
+          branchId: input.branchId,
+          role: 'user',
+          sequence: messageSequence,
+          content: encodeRuntimeMessage(userMessage),
+          stable: true,
+          createdAt: now,
+        });
       if (actionEnvelope.source === 'free_text') {
         await transaction
           .update(conversations)
@@ -886,7 +911,7 @@ export class DirectRunService {
         ? {
             context: {
               manifest: contextManifest,
-              contextHash: queuedEvent?.payload.contextHash,
+              contextHash: queuedEvent.payload.contextHash,
               ...(model
                 ? {
                     model: model.selectedModel,

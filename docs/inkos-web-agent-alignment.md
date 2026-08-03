@@ -51,9 +51,9 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P1 Conversation Branches
 
-- [ ] Reuse the existing branch fork API to add regenerate/fork actions to assistant messages.
-- [ ] Add previous/next branch navigation and branch count without duplicating messages.
-- [ ] Preserve the original branch and fork point as immutable facts.
+- [x] Reuse the existing branch fork API to add regenerate/fork actions to assistant messages.
+- [x] Add previous/next branch navigation and branch count without duplicating messages.
+- [x] Preserve the original branch and fork point as immutable facts.
 - [ ] Test fork authorization, exact message boundary, branch switching, and independent subsequent Runs.
 
 ## P2 Composer And Visual Polish

@@ -115,6 +115,7 @@ export function useAgentPressAssistantRuntime(
     readonly sendingDisabled?: boolean;
     readonly beforeSend?: () => Promise<void>;
     readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
+    readonly onBranchForked?: (branchId: string, forkedFromMessageId: string) => void;
   } = {},
 ) {
   const conversationId = context.conversationId;
@@ -421,9 +422,43 @@ export function useAgentPressAssistantRuntime(
     ],
   );
 
+  const isRunning = Boolean(activeProjection && !activeProjection.terminal);
   const onCancel = useCallback(async () => {
     if (activeRunId) await request(`${apiUrl}/runs/${activeRunId}/cancel`, {});
   }, [activeRunId]);
+
+  const onReload = useCallback(
+    async (parentId: string | null) => {
+      if (!parentId || !conversationId || !branchId || isRunning) return;
+      const source = stableMessages.find(({ id, role }) => id === parentId && role === 'user');
+      if (!source) return;
+      setPanelError(undefined);
+      try {
+        await context.beforeSend?.();
+        const fork = await request(
+          `${apiUrl}/conversations/${conversationId}/branches/${branchId}/fork`,
+          { messageId: parentId },
+        );
+        const nextBranchId = stringValue(fork.branchId);
+        const forkedMessageId = stringValue(fork.forkedMessageId);
+        if (!nextBranchId || !forkedMessageId) throw new Error('创建对话分支的响应不完整');
+        await request(
+          `${apiUrl}/conversations/${conversationId}/runs`,
+          {
+            branchId: nextBranchId,
+            prompt: source.content,
+            existingMessageId: forkedMessageId,
+            contextBindings,
+          },
+          true,
+        );
+        context.onBranchForked?.(nextBranchId, parentId);
+      } catch (error) {
+        setPanelError(error instanceof Error ? error.message : '重新生成失败');
+      }
+    },
+    [branchId, context, contextBindings, conversationId, isRunning, stableMessages],
+  );
 
   const cancelDirective = useCallback(
     async (directive: PendingDirective): Promise<void> => {
@@ -472,7 +507,6 @@ export function useAgentPressAssistantRuntime(
     [activeRunId, refreshProjection],
   );
 
-  const isRunning = Boolean(activeProjection && !activeProjection.terminal);
   const dictation = useMemo(
     () => new WebSpeechDictationAdapter({ language: 'zh-CN', continuous: true }),
     [],
@@ -482,6 +516,7 @@ export function useAgentPressAssistantRuntime(
     convertMessage,
     onNew,
     onCancel,
+    onReload,
     adapters: { dictation },
     isSendDisabled: readiness.status !== 'ready' || !conversationId || !branchId || sendingDisabled,
     isRunning,

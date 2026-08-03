@@ -45,6 +45,7 @@ type CreateRunBody = {
   readonly attachmentIds?: unknown;
   readonly skills?: unknown;
   readonly contextBindings?: unknown;
+  readonly existingMessageId?: unknown;
 };
 
 type RunDirectiveBody = {
@@ -162,6 +163,11 @@ export class AgentController {
       )
       .orderBy(asc(conversationMessages.sequence));
     const newBranchId = randomUUID();
+    const copied = messages.map((message) => ({
+      sourceId: message.id,
+      id: randomUUID(),
+      message,
+    }));
     await this.connection.db.transaction(async (transaction) => {
       await transaction.insert(conversationBranches).values({
         id: newBranchId,
@@ -169,10 +175,10 @@ export class AgentController {
         parentBranchId: branchId,
         forkedFromMessageId: messageId,
       });
-      if (messages.length > 0)
+      if (copied.length > 0)
         await transaction.insert(conversationMessages).values(
-          messages.map((message) => ({
-            id: randomUUID(),
+          copied.map(({ id, message }) => ({
+            id,
             branchId: newBranchId,
             role: message.role,
             sequence: message.sequence,
@@ -182,7 +188,13 @@ export class AgentController {
           })),
         );
     });
-    return { branchId: newBranchId, parentBranchId: branchId, forkedFromMessageId: messageId };
+    const forkedMessageId = copied.find(({ sourceId }) => sourceId === messageId)?.id;
+    return {
+      branchId: newBranchId,
+      parentBranchId: branchId,
+      forkedFromMessageId: messageId,
+      forkedMessageId,
+    };
   }
 
   @Post('conversations/:conversationId/runs')
@@ -199,6 +211,8 @@ export class AgentController {
     if (typeof body.branchId !== 'string' || typeof body.prompt !== 'string') {
       throw new BadRequestException('branchId and prompt must be strings');
     }
+    if (body.existingMessageId !== undefined && typeof body.existingMessageId !== 'string')
+      throw new BadRequestException('existingMessageId must be a string');
     const mentionTargetIds = parseStringArray(body.mentionTargetIds, 'mentionTargetIds', 20);
     const attachmentIds = parseStringArray(body.attachmentIds, 'attachmentIds', 10);
     const skills = parseSkills(body.skills);
@@ -215,6 +229,9 @@ export class AgentController {
         attachmentIds,
         skills,
         contextBindings,
+        ...(typeof body.existingMessageId === 'string'
+          ? { existingMessageId: body.existingMessageId }
+          : {}),
       });
     } catch (error) {
       throw mapApplicationError(error);

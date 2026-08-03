@@ -130,6 +130,19 @@ export function AgentWorkbench({
           sendingDisabled: uploadingAttachments > 0,
           ...(onArticleReviewChanged ? { onArticleReviewChanged } : {}),
           ...(beforeSend ? { beforeSend } : {}),
+          onBranchForked: (nextBranchId, forkedFromMessageId) => {
+            setSelectedConversation((current) =>
+              current
+                ? {
+                    ...current,
+                    branchId: nextBranchId,
+                    parentBranchId: current.branchId,
+                    forkedFromMessageId,
+                  }
+                : current,
+            );
+            void loadConversations();
+          },
         }
       : {},
   );
@@ -175,7 +188,7 @@ export function AgentWorkbench({
     setConversations(items);
     setSelectedConversation(
       (current) =>
-        items.find(({ id }) => id === current?.id) ??
+        items.find(({ id, branchId }) => id === current?.id && branchId === current.branchId) ??
         items.find(({ id }) => id === conversationId) ??
         items.find(({ isDefault }) => isDefault) ??
         items[0],

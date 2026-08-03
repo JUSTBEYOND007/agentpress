@@ -9,6 +9,7 @@ import {
   statusTone,
   type ConversationView,
 } from './agent-view-model';
+import { AgentBranchNavigator } from './agent-branch-navigator';
 
 export function AgentConversationHeader({
   conversations,
@@ -39,10 +40,11 @@ export function AgentConversationHeader({
   const [error, setError] = useState<string>();
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    return conversations.filter(
+    const matching = conversations.filter(
       ({ archivedAt, title }) =>
         !archivedAt && (!normalized || title.toLocaleLowerCase().includes(normalized)),
     );
+    return [...new Map(matching.map((conversation) => [conversation.id, conversation])).values()];
   }, [conversations, query]);
 
   const run = async (action: () => Promise<void>, closeAfter = false): Promise<boolean> => {
@@ -94,7 +96,7 @@ export function AgentConversationHeader({
               {visible.map((conversation) => (
                 <button
                   className={conversation.id === selected?.id ? 'is-selected' : ''}
-                  key={conversation.id}
+                  key={`${conversation.id}:${conversation.branchId}`}
                   onClick={() => {
                     onSelect(conversation);
                     setOpen(false);
@@ -208,6 +210,11 @@ export function AgentConversationHeader({
           </div>
         ) : null}
       </div>
+      <AgentBranchNavigator
+        conversations={conversations}
+        onSelect={onSelect}
+        {...(selected ? { selected } : {})}
+      />
       <span className={`status-dot status-${statusTone(status)}`}>{statusLabel(status)}</span>
       {onClose ? (
         <button

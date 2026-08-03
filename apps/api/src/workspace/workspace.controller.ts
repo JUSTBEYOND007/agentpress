@@ -119,6 +119,9 @@ export class WorkspaceController {
         articleId: conversations.articleId,
         conversationId: conversations.id,
         branchId: conversationBranches.id,
+        parentBranchId: conversationBranches.parentBranchId,
+        forkedFromMessageId: conversationBranches.forkedFromMessageId,
+        branchCreatedAt: conversationBranches.createdAt,
       })
       .from(conversations)
       .innerJoin(conversationBranches, eq(conversationBranches.conversationId, conversations.id))

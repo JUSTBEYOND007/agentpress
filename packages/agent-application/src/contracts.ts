@@ -86,6 +86,7 @@ export type CreateDirectRunInput = {
   readonly userId: string;
   readonly prompt: string;
   readonly idempotencyKey: string;
+  readonly existingMessageId?: string;
   readonly contextBindings?: readonly RunContextBinding[];
   readonly mentionTargetIds?: readonly string[];
   readonly attachmentIds?: readonly string[];
