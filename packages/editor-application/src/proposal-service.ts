@@ -255,18 +255,20 @@ export class ProposalService {
         .limit(1);
       const proposal = rows[0];
       if (!proposal) return undefined;
+      const hasNoOperations = parseOperations(proposal.operations).length === 0;
       const articleRows = await transaction
         .select({ currentRevisionId: articles.currentRevisionId })
         .from(articles)
         .where(eq(articles.id, proposal.articleId))
         .limit(1);
       if (
+        hasNoOperations ||
         proposal.expiresAt <= this.now() ||
         articleRows[0]?.currentRevisionId !== proposal.baseRevisionId
       ) {
         await transaction
           .update(editProposals)
-          .set({ status: 'expired', updatedAt: this.now() })
+          .set({ status: hasNoOperations ? 'rejected' : 'expired', updatedAt: this.now() })
           .where(and(eq(editProposals.id, proposal.id), eq(editProposals.status, 'pending')));
         return undefined;
       }

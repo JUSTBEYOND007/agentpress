@@ -301,6 +301,17 @@ describeWithInfra('editor persistence and recovery', () => {
       }),
     ).resolves.toMatchObject({ status: 'rejected', operations: [] });
     await expect(proposals.getPending(ids.article)).resolves.toBeUndefined();
+
+    await connection.db
+      .update(editProposals)
+      .set({ status: 'pending', operations: [], diffs: [] })
+      .where(eq(editProposals.id, onlyBatchProposal.proposalId));
+    await expect(proposals.getPending(ids.article)).resolves.toBeUndefined();
+    const [repaired] = await connection.db
+      .select({ status: editProposals.status })
+      .from(editProposals)
+      .where(eq(editProposals.id, onlyBatchProposal.proposalId));
+    expect(repaired?.status).toBe('rejected');
   });
 
   it('applies accepted proposal operations into an immutable revision', async () => {
@@ -575,6 +586,42 @@ describeWithInfra('editor persistence and recovery', () => {
       .from(editProposals)
       .where(eq(editProposals.id, proposal.proposalId));
     expect(expired?.status).toBe('expired');
+  });
+
+  it('settles a complete article write as one document decision', async () => {
+    const service = new ProposalService(connection.db);
+    const currentFirst = paragraph('block-a', 'New');
+    const proposal = await service.create({
+      articleId: ids.article,
+      reviewMode: 'document',
+      operations: [
+        {
+          operationId: 'document-replace-a',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(currentFirst),
+          block: paragraph('block-a', 'Document first'),
+        },
+        {
+          operationId: 'document-replace-b',
+          kind: 'replace',
+          blockId: 'block-b',
+          expectedHash: hashBlock(second),
+          block: paragraph('block-b', 'Document second'),
+        },
+      ],
+    });
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'document-replace-a': 'accepted' },
+      }),
+    ).resolves.toMatchObject({
+      status: 'accepted',
+      appliedOperationIds: ['document-replace-a', 'document-replace-b'],
+      reviewMode: 'document',
+    });
   });
 
   it('atomically promotes an acknowledged draft and schedules its index update', async () => {
