@@ -8,7 +8,7 @@ import {
   mentionBindings,
 } from '@agentpress/database';
 import type { ToolRegistry } from '@agentpress/tool-runtime';
-import { hashBlock, type ArticleDocument, type EditReviewMode } from '@agentpress/editor-patch';
+import { hashBlock, type ArticleDocument } from '@agentpress/editor-patch';
 import { Type } from '@sinclair/typebox';
 import { and, eq, sql } from 'drizzle-orm';
 
@@ -116,7 +116,7 @@ export function registerArticleTools(
           sourceToolCallId: context.toolCallId,
           baseRevisionId: current.revisionId,
           operations: proposedOperations,
-          reviewMode: (proposedReviewMode ?? 'granular') as EditReviewMode,
+          reviewMode: proposedReviewMode ?? 'granular',
         })
         .then((proposal) => ({ kind: 'article_edit_proposal' as const, ...proposal }));
     },

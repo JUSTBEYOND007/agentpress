@@ -119,7 +119,12 @@ function ArtifactDrawer({
           </footer>
         ) : (
           <footer>
-            <button onClick={() => downloadArtifact(artifact)} type="button">
+            <button
+              onClick={() => {
+                downloadArtifact(artifact);
+              }}
+              type="button"
+            >
               下载 <Download size={12} />
             </button>
           </footer>
@@ -139,7 +144,7 @@ function artifactLabel(type: string): string {
 }
 
 export function downloadArtifact(artifact: Readonly<Record<string, unknown>>): void {
-  const blob = new Blob([JSON.stringify(artifact.content ?? {}, null, 2) ?? '{}'], {
+  const blob = new Blob([JSON.stringify(artifact.content ?? {}, null, 2)], {
     type: 'application/json',
   });
   const url = URL.createObjectURL(blob);
