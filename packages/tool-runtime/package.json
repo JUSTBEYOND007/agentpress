@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.json --watch",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
