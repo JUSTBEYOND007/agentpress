@@ -38,7 +38,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Do not force-scroll while the user reads history.
 - [x] Keep the bottom anchor stable when Markdown, code highlighting, Mermaid, or tool details change height.
 - [x] Show the return-to-bottom control only when the viewport is not pinned.
-- [ ] Add browser tests for streaming, expanding steps, and switching conversations.
+- [x] Add browser tests for streaming, expanding steps, and switching conversations.
 
 ## P1 Artifacts And Context
 
@@ -113,6 +113,25 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 ## Completion Gates
 
 - [x] Upstream behavior references and immutable versions remain recorded in `docs/references/pi-ecosystem.md` and `THIRD_PARTY_NOTICES.md` when code is copied.
-- [ ] Web unit tests, projection contract tests, typecheck, lint, build, and PostgreSQL integration tests pass.
-- [ ] Browser verification covers Markdown streaming, tool timeline, recovery, scrolling, artifact drawer, context sources, and branch navigation.
-- [ ] A real Pi runtime/target-model scenario verifies normal Markdown, tool use, recovery, and a branch follow-up without duplicate content.
+- [x] Web unit tests, projection contract tests, typecheck, lint, build, and PostgreSQL integration tests pass.
+- [x] Browser verification covers Markdown streaming, tool timeline, recovery, scrolling, artifact drawer, context sources, and branch navigation.
+- [x] A real Pi runtime/target-model scenario verifies normal Markdown, tool use, recovery, and a branch follow-up without duplicate content.
+
+## Verification Evidence
+
+- 2026-08-04: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed for
+  all 23 workspace packages. Web completed 25 test files and 65 tests.
+- PostgreSQL integration tests ran against an isolated migrated database: database 4,
+  knowledge retrieval 2, media persistence 1, publication 4, demo seed 1, editor 8, and
+  Agent application 35 tests passed. The MinIO-only test remained outside this database gate.
+- `E2E_STORAGE_STATE=output/playwright/auth-state.json pnpm --filter @agentpress/web exec playwright test`
+  passed the deterministic desktop/mobile projection scenarios (`5 passed`, `5` device/history
+  conditionals skipped). It covers streamed Markdown, timeline expansion, recovery, scrolling,
+  artifact reload, context facts, branch navigation, and branch persistence after reload.
+- Real Pi `gpt-5.6-luna` facts are persisted under Markdown/fork Runs
+  `11379f69-5d6f-4a27-96ee-2c74f1fe8c6c` and `f21096b7-2a1d-4f2e-94b5-6e0d6c42011e`,
+  article tool Run `d94eb7e1-0fc1-4b24-8bbe-0989d3a3a2bf`, and recovery Run
+  `c764994d-c9a6-431d-b7d0-b72fbc43f970`. PostgreSQL records provider `agent-model`, model
+  `gpt-5.6-luna`, tool lifecycle events, `run.recovering`, and one user/assistant message on each
+  sibling branch. A real browser reload preserved branch `ba5d86e4-e407-44fc-a51f-a2c8960c112e`
+  at `2/2` without duplicate content.
