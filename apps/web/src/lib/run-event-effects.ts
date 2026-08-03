@@ -1,4 +1,4 @@
-import type { RunPart } from './agentpress-assistant-runtime';
+import type { RunPart, RunProjection } from './agentpress-assistant-runtime';
 
 export type ArticleReviewChange = {
   readonly proposalId: string;
@@ -16,6 +16,11 @@ export function isTerminalRunEvent(eventType: string): boolean {
 
 export function terminalRunStatus(eventType: string): string {
   return eventType.slice('run.'.length);
+}
+
+export function applyTerminalRunEvent(projection: RunProjection, eventType: string): RunProjection {
+  if (!isTerminalRunEvent(eventType)) return projection;
+  return { ...projection, status: terminalRunStatus(eventType), terminal: true };
 }
 
 export function articleReviewChangeFromPayload(

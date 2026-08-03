@@ -14,9 +14,9 @@ import { authenticatedFetch } from './authenticated-fetch';
 import {
   articleReviewChangeFromPart,
   articleReviewChangeFromPayload,
+  applyTerminalRunEvent,
   isTerminalRunEvent,
   takeUnseenArticleReviewChange,
-  terminalRunStatus,
   type ArticleReviewChange,
 } from './run-event-effects';
 
@@ -305,11 +305,7 @@ export function useAgentPressAssistantRuntime(
           setProjections((current) =>
             current.map((projection) =>
               projection.runId === activeRunId
-                ? {
-                    ...projection,
-                    status: terminalRunStatus(event.event),
-                    terminal: true,
-                  }
+                ? applyTerminalRunEvent(projection, event.event)
                 : projection,
             ),
           );
