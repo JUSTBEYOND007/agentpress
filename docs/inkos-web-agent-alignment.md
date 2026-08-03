@@ -45,8 +45,8 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Replace inline artifact dumps with an `ArtifactDrawer` backed by persisted artifact projections.
 - [ ] Render Markdown artifacts with Streamdown static mode; render typed assets with domain viewers.
 - [ ] Show title, type, version, summary, evidence, download/open actions, and provenance.
-- [ ] Add a compact context-source view backed by Context Pack/Turn Profile facts: article revision, selection, attachments, evidence, skills, provider/model, and budget.
-- [ ] Never reconstruct context provenance from composer state after a Run starts.
+- [x] Add a compact context-source view backed by Context Pack/Turn Profile facts: article revision, selection, attachments, evidence, skills, provider/model, and budget.
+- [x] Never reconstruct context provenance from composer state after a Run starts.
 - [ ] Test authorization, missing artifacts, stale versions, and restored Runs.
 
 ## P1 Conversation Branches

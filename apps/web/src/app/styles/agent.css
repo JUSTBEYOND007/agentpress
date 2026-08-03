@@ -291,6 +291,56 @@
   margin-top: 7px;
 }
 
+.run-context-sources {
+  color: #7b7c76;
+  font-size: 11px;
+}
+
+.run-context-sources summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.run-context-sources summary span {
+  color: #999a94;
+}
+.run-context-sources > div,
+.run-context-sources ul {
+  margin: 7px 0 0;
+}
+.context-source-runtime {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.run-context-sources ul {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+}
+.run-context-sources li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+.run-context-sources li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-context-sources li small {
+  color: #a0a19b;
+  font-size: 9px;
+}
+.run-context-sources p {
+  margin: 6px 0 0;
+  color: #9a7450;
+}
+
 .message-actions {
   display: flex;
   min-height: 18px;

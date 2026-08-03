@@ -35,6 +35,7 @@ import { ExecutionTimelineRenderer } from './agent-execution-timeline';
 import { NoticePart } from './agent-notice-part';
 import { ReasoningPart } from './agent-reasoning-part';
 import { ArtifactPart } from './agent-artifact-drawer';
+import { ContextSourcesPart } from './agent-context-sources';
 
 export type RunActions = {
   readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
@@ -89,6 +90,7 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
   if (part.type === 'tool-approval') return <ApprovalPart part={part} />;
   if (part.type === 'ask-user') return <AskUserPart part={part} />;
   if (part.type === 'artifact') return <ArtifactPart part={part} />;
+  if (part.type === 'context') return <ContextSourcesPart part={part} />;
   if (part.type === 'evidence') return <EvidencePart part={part} />;
   if (part.type === 'article-change') return <ArticleChangePart part={part} />;
   if (part.type === 'usage') return <UsagePart part={part} />;

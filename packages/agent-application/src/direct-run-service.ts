@@ -23,6 +23,7 @@ import {
   enqueueOutboxMessage,
   evidenceRecords,
   editProposals,
+  modelSelections,
   rootRequests,
   planRevisions,
   queuedFollowups,
@@ -727,6 +728,7 @@ export class DirectRunService {
       proposalRows,
       steeringRows,
       followUpRows,
+      modelRows,
     ] = await Promise.all([
       this.listEvents(runId),
       this.options.database
@@ -803,6 +805,16 @@ export class DirectRunService {
         .from(queuedFollowups)
         .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')))
         .orderBy(asc(queuedFollowups.sequence)),
+      this.options.database
+        .select({
+          selectedModel: modelSelections.selectedModel,
+          policySnapshot: modelSelections.policySnapshot,
+          fallbackUsed: modelSelections.fallbackUsed,
+        })
+        .from(modelSelections)
+        .where(eq(modelSelections.runId, runId))
+        .orderBy(asc(modelSelections.createdAt))
+        .limit(1),
     ]);
     const question = questionRows[0];
     const proposalStatuses = new Map<string, ProposalProjectionStatus>(
@@ -818,6 +830,9 @@ export class DirectRunService {
       : approvalRows.length > 0
         ? { type: 'tool-approval', approvals: approvalRows }
         : undefined;
+    const queuedEvent = events.find(({ eventType }) => eventType === 'run.queued');
+    const contextManifest = queuedEvent?.payload.contextManifest;
+    const model = modelRows[0];
     return {
       runId,
       rootMessageId: run.rootMessageId,
@@ -867,6 +882,23 @@ export class DirectRunService {
         }),
       ],
       artifacts: artifactRows,
+      ...(contextManifest && typeof contextManifest === 'object'
+        ? {
+            context: {
+              manifest: contextManifest,
+              contextHash: queuedEvent?.payload.contextHash,
+              ...(model
+                ? {
+                    model: model.selectedModel,
+                    provider: model.policySnapshot.provider,
+                    contextWindow: model.policySnapshot.contextWindow,
+                    maxOutputTokens: model.policySnapshot.maxOutputTokens,
+                    fallbackUsed: model.fallbackUsed,
+                  }
+                : {}),
+            },
+          }
+        : {}),
       ...(pendingInteraction ? { pendingInteraction } : {}),
       pendingDirectives: [
         ...steeringRows.map((directive) => ({

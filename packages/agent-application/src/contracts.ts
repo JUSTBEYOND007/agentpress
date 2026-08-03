@@ -168,6 +168,7 @@ export type RunProjection = {
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
+  readonly context?: Readonly<Record<string, unknown>>;
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
   readonly pendingDirectives: readonly {
     readonly id: string;

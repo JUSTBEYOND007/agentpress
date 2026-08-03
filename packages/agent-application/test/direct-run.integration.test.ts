@@ -528,6 +528,17 @@ describeWithDatabase('Direct Run application flow', () => {
     const manifest = packs[0]?.manifest as { readonly skillVersions?: unknown } | undefined;
     const skillVersions = manifest?.skillVersions as Record<string, unknown> | undefined;
     expect(skillVersions?.concise).toEqual(expect.stringMatching(/^1\.0\.0:/u));
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({
+      context: {
+        manifest: {
+          included: expect.arrayContaining([
+            expect.objectContaining({ id: `article:${ids.article}`, kind: 'mention' }),
+            expect.objectContaining({ id: 'skill:concise', kind: 'policy' }),
+          ]),
+        },
+        contextHash: packs[0]?.contentHash,
+      },
+    });
     await service.requestCancellation(run.runId);
     await service.execute(run.runId);
   });

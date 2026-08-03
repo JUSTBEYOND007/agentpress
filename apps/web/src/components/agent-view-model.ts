@@ -86,6 +86,7 @@ export function parseRunPart(value: unknown): RunPart | undefined {
     'evidence',
     'article-change',
     'artifact',
+    'context',
     'warning',
     'recovery',
     'usage',

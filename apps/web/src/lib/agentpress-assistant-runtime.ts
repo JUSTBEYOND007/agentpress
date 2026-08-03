@@ -39,6 +39,7 @@ export type RunPart = {
     | 'evidence'
     | 'article-change'
     | 'artifact'
+    | 'context'
     | 'warning'
     | 'recovery'
     | 'usage';
@@ -55,6 +56,7 @@ export type RunProjection = {
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
+  readonly context?: Readonly<Record<string, unknown>>;
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
   readonly pendingDirectives: readonly PendingDirective[];
   readonly lastEventId: number;
@@ -604,6 +606,20 @@ function projectionContent(
         type: 'artifact',
         status: 'artifact.available',
         payload: { artifacts: projection.artifacts },
+      } satisfies RunPart,
+    });
+  }
+  if (projection.context) {
+    parts.unshift({
+      type: 'data',
+      name: 'agentpress-run-part',
+      data: {
+        id: `${projection.runId}:context`,
+        runId: projection.runId,
+        sequence: -1,
+        type: 'context',
+        status: 'context.ready',
+        payload: projection.context,
       } satisfies RunPart,
     });
   }
