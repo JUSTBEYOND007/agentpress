@@ -84,8 +84,8 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 - [x] Show running, waiting-for-user, waiting-for-approval, failed, and pending-review status for every conversation from persisted facts.
 - [x] Preserve background progress and unread completion when the user leaves and returns to a conversation.
-- [ ] Offer recovery actions appropriate to provider failure, tool failure, protocol failure, stale article, cancellation, and degraded completion.
-- [ ] Show long-task phase, completed steps, outstanding interaction, and the latest safe recovery point without exposing hidden reasoning.
+- [x] Offer recovery actions appropriate to provider failure, tool failure, protocol failure, stale article, cancellation, and degraded completion.
+- [x] Show long-task phase, completed steps, outstanding interaction, and the latest safe recovery point without exposing hidden reasoning.
 
 ## P1 Actionable Results And Execution Facts
 

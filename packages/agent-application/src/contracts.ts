@@ -155,6 +155,7 @@ export type RunPart = {
     | 'artifact'
     | 'warning'
     | 'recovery'
+    | 'progress'
     | 'usage';
   readonly status: string;
   readonly payload: Readonly<Record<string, unknown>>;

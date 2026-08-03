@@ -1,6 +1,7 @@
 'use client';
 
-import { AlertTriangle, CircleX, RotateCcw, ShieldAlert } from 'lucide-react';
+import { ActionBarPrimitive } from '@assistant-ui/react';
+import { AlertTriangle, CircleX, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 
 import { recordValue, stringValue, type RunPart } from '../lib/agentpress-assistant-runtime';
 import { friendlyFailure } from './agent-view-model';
@@ -11,6 +12,7 @@ export function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Elem
   const error = recordValue(part.payload.error);
   const code = stringValue(error.code) || stringValue(part.payload.code);
   const message = noticeMessage(part, code, error);
+  const action = recoveryAction(part, code);
   const Icon = state === 'waiting' ? ShieldAlert : state === 'failed' ? CircleX : AlertTriangle;
   return (
     <div className={`run-part notice-part notice-${state}`} role="status">
@@ -20,8 +22,31 @@ export function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Elem
         <Icon aria-hidden="true" size={13} />
       )}
       <span>{message}</span>
+      {action ? (
+        <ActionBarPrimitive.Root className="notice-actions" hideWhenRunning={false}>
+          <ActionBarPrimitive.Reload aria-label={action.label} title={action.label}>
+            <RefreshCw aria-hidden="true" size={12} />
+            {action.label}
+          </ActionBarPrimitive.Reload>
+        </ActionBarPrimitive.Root>
+      ) : null}
     </div>
   );
+}
+
+export function recoveryAction(part: RunPart, code: string): { readonly label: string } | undefined {
+  if (part.type === 'recovery' || part.payload.pendingDraft === true) return undefined;
+  if (code.includes('stale') || code.includes('expired')) return { label: '基于最新正文重试' };
+  if (part.status === 'run.cancelled') return { label: '重新开始' };
+  if (part.status === 'run.completed_with_degradation') return { label: '重新生成完整结果' };
+  if (
+    part.status === 'run.failed' ||
+    code === 'provider_error' ||
+    code === 'protocol_error' ||
+    code === 'runtime_error'
+  )
+    return { label: '重试' };
+  return undefined;
 }
 
 export function noticeMessage(

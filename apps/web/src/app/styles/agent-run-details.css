@@ -409,3 +409,61 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.agent-progress-part {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid #e7e7e4;
+  border-bottom: 1px solid #e7e7e4;
+  padding: 8px 0;
+  color: #666762;
+  font-size: 11px;
+}
+
+.agent-progress-heading,
+.agent-progress-waiting,
+.agent-recovery-point {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-progress-heading strong {
+  color: #3f403c;
+  font-size: 12px;
+}
+
+.agent-progress-heading span {
+  margin-left: auto;
+  color: #8b8c86;
+  font-size: 10px;
+}
+
+.agent-progress-part p {
+  margin: 0 0 0 19px;
+  color: #6f706b;
+}
+
+.agent-progress-waiting {
+  color: #8a5a1d;
+}
+
+.agent-recovery-point {
+  color: #397257;
+}
+
+.notice-actions {
+  margin-left: auto;
+}
+
+.notice-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #f1f1ef;
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+}

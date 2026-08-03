@@ -101,6 +101,7 @@ export function parseRunPart(value: unknown): RunPart | undefined {
     'context',
     'warning',
     'recovery',
+    'progress',
     'usage',
   ];
   if (!allowed.includes(type as RunPart['type'])) return undefined;

@@ -33,6 +33,7 @@ import { ContextSourcesPart } from './agent-context-sources';
 import { AgentArticleChangePart } from './agent-article-change-part';
 import { useRunActions } from './agent-run-actions';
 import { AgentUsagePart } from './agent-usage-part';
+import { AgentProgressPart } from './agent-progress-part';
 
 export function UserMessage(): React.JSX.Element {
   return (
@@ -83,6 +84,7 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
   if (part.type === 'evidence') return <EvidencePart part={part} />;
   if (part.type === 'article-change') return <AgentArticleChangePart part={part} />;
   if (part.type === 'usage') return <AgentUsagePart part={part} />;
+  if (part.type === 'progress') return <AgentProgressPart part={part} />;
   if (part.type === 'warning' || part.type === 'recovery') return <NoticePart part={part} />;
   if (part.type === 'activity') {
     const proposal = proposalFromPart(part);

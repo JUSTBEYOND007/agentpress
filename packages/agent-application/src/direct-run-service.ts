@@ -21,6 +21,7 @@ import {
   conversationBranches,
   conversationMessages,
   conversations,
+  checkpoints,
   enqueueOutboxMessage,
   evidenceRecords,
   editProposals,
@@ -56,6 +57,7 @@ import { projectConversationHistory } from './agent-transcript-projector.js';
 import { RunContextService } from './run-context-service.js';
 import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
 import { projectRunExecutionFacts } from './run-execution-facts.js';
+import { projectRunProgress } from './run-progress.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -838,6 +840,7 @@ export class DirectRunService {
       followUpRows,
       modelRows,
       artifactEvidenceRows,
+      checkpointRows,
     ] = await Promise.all([
       this.listEvents(runId),
       this.options.database
@@ -939,6 +942,16 @@ export class DirectRunService {
         .innerJoin(evidenceRecords, eq(evidenceRecords.id, artifactEvidence.evidenceId))
         .where(eq(artifacts.runId, runId))
         .orderBy(asc(artifactEvidence.ordinal)),
+      this.options.database
+        .select({
+          sequence: checkpoints.sequence,
+          reason: checkpoints.reason,
+          createdAt: checkpoints.createdAt,
+        })
+        .from(checkpoints)
+        .where(eq(checkpoints.runId, runId))
+        .orderBy(desc(checkpoints.sequence))
+        .limit(1),
     ]);
     const question = questionRows[0];
     const proposalStatuses = new Map<string, ProposalProjectionStatus>(
@@ -964,6 +977,15 @@ export class DirectRunService {
       createdAt: run.createdAt,
       ...(run.completedAt ? { completedAt: run.completedAt } : {}),
     });
+    const latestCheckpoint = checkpointRows[0];
+    const progress = projectRunProgress({
+      runId,
+      mode: run.mode,
+      status: run.status,
+      events,
+      ...(pendingInteraction ? { pendingInteraction } : {}),
+      ...(latestCheckpoint ? { recoveryPoint: latestCheckpoint } : {}),
+    });
     const enrichedArtifactRows = artifactRows.map((artifact) => ({
       ...artifact,
       evidence: artifactEvidenceRows.filter(({ artifactId }) => artifactId === artifact.id),
@@ -977,6 +999,7 @@ export class DirectRunService {
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
       parts: [
         ...projectRunParts(events, proposalStatuses).filter(({ type }) => type !== 'usage'),
+        ...(progress ? [progress] : []),
         ...(executionFacts ? [executionFacts] : []),
         ...evidenceRows.map((evidence) => {
           const toolCallId =

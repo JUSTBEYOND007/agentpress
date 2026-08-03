@@ -44,6 +44,7 @@ export type RunPart = {
     | 'context'
     | 'warning'
     | 'recovery'
+    | 'progress'
     | 'usage';
   readonly status: string;
   readonly payload: Readonly<Record<string, unknown>>;
