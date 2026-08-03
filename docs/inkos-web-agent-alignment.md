@@ -113,6 +113,9 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 ## Completion Gates
 
 - [x] Upstream behavior references and immutable versions remain recorded in `docs/references/pi-ecosystem.md` and `THIRD_PARTY_NOTICES.md` when code is copied.
+- [x] Agent-facing TypeScript/TSX modules stay below 500 lines; Composer context, controls,
+      drafts, runtime contracts, API transport, SSE streaming, and message projection have separate
+      ownership boundaries.
 - [x] Web unit tests, projection contract tests, typecheck, lint, build, and PostgreSQL integration tests pass.
 - [x] Browser verification covers Markdown streaming, tool timeline, recovery, scrolling, artifact drawer, context sources, and branch navigation.
 - [x] A real Pi runtime/target-model scenario verifies normal Markdown, tool use, recovery, and a branch follow-up without duplicate content.
@@ -121,6 +124,9 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 - 2026-08-04: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed for
   all 23 workspace packages. Web completed 25 test files and 65 tests.
+- Architecture audit commits `f01d469` and `17711bd` reduced the Composer from 761 to 437 lines
+  and the assistant runtime adapter from 755 to 408 lines. `pnpm check:file-lengths` now enforces
+  a 500-line limit for Agent-facing TypeScript/TSX modules in addition to the general source gate.
 - PostgreSQL integration tests ran against an isolated migrated database: database 4,
   knowledge retrieval 2, media persistence 1, publication 4, demo seed 1, editor 8, and
   Agent application 35 tests passed. The MinIO-only test remained outside this database gate.
