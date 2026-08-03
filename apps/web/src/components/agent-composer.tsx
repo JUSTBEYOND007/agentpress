@@ -19,12 +19,14 @@ import {
   ChevronRight,
   FileText,
   LoaderCircle,
+  LockKeyhole,
   Mic,
   Paperclip,
   Plus,
   ListChecks,
   Square,
   WandSparkles,
+  Workflow,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -45,7 +47,7 @@ export function AgentComposer({
   attachmentError,
   attachments,
   conversationId,
-  mentionActiveArticle,
+  pendingReview,
   onArticleMentionChange,
   onAttachmentErrorDismiss,
   onMentionChange,
@@ -68,11 +70,15 @@ export function AgentComposer({
   readonly activeArticleTitle?: string;
   readonly activeArticleId?: string;
   readonly articleSelection?: ArticleSelectionView;
-  readonly articles: readonly { readonly id: string; readonly revisionId: string; readonly title: string }[];
+  readonly articles: readonly {
+    readonly id: string;
+    readonly revisionId: string;
+    readonly title: string;
+  }[];
   readonly attachmentError?: string;
   readonly attachments: readonly AttachmentView[];
   readonly conversationId?: string;
-  readonly mentionActiveArticle: boolean;
+  readonly pendingReview: boolean;
   readonly onArticleMentionChange: (value: readonly string[]) => void;
   readonly onMentionChange: (value: boolean) => void;
   readonly onPendingDirectiveCancel: (directive: PendingDirective) => Promise<void>;
@@ -297,14 +303,22 @@ export function AgentComposer({
             </div>
           ) : null}
           <div className="composer-context" aria-label="本次对话上下文">
-            {activeArticleTitle && mentionActiveArticle ? (
-              <ContextChip
+            {activeArticleTitle ? (
+              <ContextIndicator
                 icon={<FileText aria-hidden="true" size={12} />}
-                label={activeArticleTitle}
-                onRemove={() => {
-                  onMentionChange(false);
-                }}
-                removeLabel="移除当前文章"
+                label={`当前：${activeArticleTitle}`}
+              />
+            ) : null}
+            {running ? (
+              <ContextIndicator
+                icon={<Workflow aria-hidden="true" size={12} />}
+                label={sendMode === 'steering' ? '补充当前任务' : '完成后继续'}
+              />
+            ) : null}
+            {pendingReview ? (
+              <ContextIndicator
+                icon={<LockKeyhole aria-hidden="true" size={12} />}
+                label="正文修改待审阅"
               />
             ) : null}
             {articleSelection && selectionIncluded ? (
@@ -538,6 +552,21 @@ function ContextChip({
       <button aria-label={removeLabel} onClick={onRemove} title={removeLabel} type="button">
         <X aria-hidden="true" size={11} />
       </button>
+    </span>
+  );
+}
+
+function ContextIndicator({
+  icon,
+  label,
+}: {
+  readonly icon: React.ReactNode;
+  readonly label: string;
+}): React.JSX.Element {
+  return (
+    <span className="composer-context-chip is-fixed">
+      {icon}
+      <span>{label}</span>
     </span>
   );
 }

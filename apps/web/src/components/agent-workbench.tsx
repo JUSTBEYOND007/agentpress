@@ -28,6 +28,7 @@ export function AgentWorkbench({
   activeArticleId,
   activeArticleTitle,
   articleSelection,
+  pendingReview = false,
   articles,
   beforeSend,
 }: {
@@ -39,6 +40,7 @@ export function AgentWorkbench({
   readonly activeArticleId?: string;
   readonly activeArticleTitle?: string;
   readonly articleSelection?: ArticleSelectionView;
+  readonly pendingReview?: boolean;
   readonly beforeSend?: () => Promise<void>;
   readonly articles: readonly {
     readonly id: string;
@@ -284,7 +286,7 @@ export function AgentWorkbench({
               attachments={attachments}
               {...(attachmentError ? { attachmentError } : {})}
               {...(selectedConversation ? { conversationId: selectedConversation.id } : {})}
-              mentionActiveArticle={mentionActiveArticle}
+              pendingReview={pendingReview}
               onArticleMentionChange={setSelectedArticleIds}
               onAttachmentRemove={(id) => {
                 setAttachments((current) => current.filter((item) => item.id !== id));

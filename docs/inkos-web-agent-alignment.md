@@ -58,7 +58,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P2 Composer And Visual Polish
 
-- [ ] Make current article, selection, attachments, skills, steering/follow-up mode, and pending-review lock visible in one composer context row.
+- [x] Make current article, selection, attachments, skills, steering/follow-up mode, and pending-review lock visible in one composer context row.
 - [ ] Ensure cancel, stop, steering, follow-up, and send-disabled states have distinct semantics.
 - [ ] Align typography, spacing, table overflow, code blocks, long links, focus states, and reduced motion with the Notion reference and InkOS density.
 - [ ] Verify desktop and mobile layouts with browser screenshots and overlap checks.

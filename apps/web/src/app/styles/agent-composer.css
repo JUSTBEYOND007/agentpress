@@ -354,6 +354,12 @@
   text-overflow: ellipsis;
 }
 
+.composer-context-chip.is-fixed {
+  border-color: #e3e3df;
+  background: #f4f4f1;
+  color: #62635e;
+}
+
 .composer-context-chip > button {
   display: grid;
   width: 18px;
