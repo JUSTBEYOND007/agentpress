@@ -14,7 +14,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Render user messages as literal text and assistant messages as Markdown.
 - [x] Use animated rendering only for the active streamed part; use static rendering for completed and restored messages.
 - [x] Add a collapsed reasoning-summary part with streaming, completed, and elapsed-time states. Never expose hidden chain of thought.
-- [ ] Test headings, emphasis, lists, tables, code, math, Mermaid, links, unsafe HTML, CJK, and incomplete streamed Markdown.
+- [x] Test headings, emphasis, lists, tables, code, math, Mermaid, links, unsafe HTML, CJK, and incomplete streamed Markdown.
 
 ## P0 Run Timeline
 
