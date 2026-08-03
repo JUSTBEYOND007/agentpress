@@ -23,7 +23,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Preserve approval, ask-user, article review, evidence, and artifact interactions as typed domain parts.
 - [x] Show duration and concise result/error summaries without dumping raw tool payloads by default.
 - [x] Derive every state from RunEvent projection; the Web must not infer lifecycle state from labels or timers.
-- [ ] Add projection and component tests for interleaved tools, retries, approvals, terminal events, and replay.
+- [x] Add projection and component tests for interleaved tools, retries, approvals, terminal events, and replay.
 
 ## P1 Recovery And Failure
 

@@ -21,13 +21,13 @@ export function ExecutionTimelineRenderer({
       })
     : [];
   if (steps.length === 0) return null;
-  const active = steps.some((step) => ['active', 'waiting'].includes(runVisualState(step.status)));
+  const view = executionTimelineView(steps);
   return (
-    <details className="run-part execution-timeline" open={active}>
+    <details className="run-part execution-timeline" open={view.open}>
       <summary>
-        <TimelineIcon state={timelineState(steps)} />
+        <TimelineIcon state={view.state} />
         <strong>执行步骤</strong>
-        <small>{timelineSummary(steps)}</small>
+        <small>{view.summary}</small>
         <ChevronDown className="timeline-chevron" aria-hidden="true" size={13} />
       </summary>
       <ol>
@@ -70,6 +70,14 @@ function timelineState(steps: readonly RunPart[]): RunVisualState {
     if (states.includes(state)) return state;
   }
   return states.every((state) => state === 'succeeded') ? 'succeeded' : 'queued';
+}
+
+export function executionTimelineView(steps: readonly RunPart[]) {
+  return {
+    state: timelineState(steps),
+    open: steps.some((step) => ['active', 'waiting'].includes(runVisualState(step.status))),
+    summary: timelineSummary(steps),
+  };
 }
 
 function timelineSummary(steps: readonly RunPart[]): string {

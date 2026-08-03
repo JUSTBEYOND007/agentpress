@@ -88,6 +88,46 @@ describe('run projection', () => {
       payload: { id: 'action-1', confirmedRunId: 'run-2' },
     });
   });
+
+  it('keeps interleaved tools and retries isolated by durable tool call identity', () => {
+    const events = [
+      event(1, 'tool.executing', { toolCallId: 'tool-a', summary: 'A attempt 1' }),
+      event(2, 'tool.executing', { toolCallId: 'tool-b', summary: 'B' }),
+      event(3, 'tool.failed', { toolCallId: 'tool-a', error: { code: 'timeout' } }),
+      event(4, 'tool.succeeded', { toolCallId: 'tool-b' }),
+      event(5, 'tool.executing', { toolCallId: 'tool-a-retry', summary: 'A attempt 2' }),
+      event(6, 'tool.succeeded', { toolCallId: 'tool-a-retry' }),
+    ];
+
+    expect(projectRunParts(events).map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: 'run-1:tool:tool-a', status: 'tool.failed' },
+      { id: 'run-1:tool:tool-b', status: 'tool.succeeded' },
+      { id: 'run-1:tool:tool-a-retry', status: 'tool.succeeded' },
+    ]);
+    expect(projectRunParts(events)).toEqual(projectRunParts(events));
+  });
+
+  it('projects approval while waiting and folds it into execution after continuation', () => {
+    expect(
+      projectRunParts([
+        event(1, 'tool.proposed', { toolCallId: 'tool-1' }),
+        event(2, 'tool.approval_requested', { toolCallId: 'tool-1' }),
+      ])[0],
+    ).toMatchObject({ type: 'tool-approval', status: 'tool.approval_requested' });
+
+    expect(
+      projectRunParts([
+        event(1, 'tool.proposed', { toolCallId: 'tool-1' }),
+        event(2, 'tool.approval_requested', { toolCallId: 'tool-1' }),
+        event(3, 'tool.executing', { toolCallId: 'tool-1' }),
+        event(4, 'tool.succeeded', { toolCallId: 'tool-1' }),
+        event(5, 'run.completed', {}),
+      ]).map(({ type, status }) => ({ type, status })),
+    ).toEqual([
+      { type: 'activity', status: 'tool.succeeded' },
+      { type: 'usage', status: 'run.completed' },
+    ]);
+  });
 });
 
 function event(
