@@ -1,6 +1,16 @@
 'use client';
 
-import { ActionBarPrimitive, MessagePartPrimitive, MessagePrimitive } from '@assistant-ui/react';
+import {
+  ActionBarPrimitive,
+  MessagePrimitive,
+  useMessagePartText,
+  useSmooth,
+} from '@assistant-ui/react';
+import { cjk } from '@streamdown/cjk';
+import { code } from '@streamdown/code';
+import { math } from '@streamdown/math';
+import { mermaid } from '@streamdown/mermaid';
+import { Streamdown } from 'streamdown';
 import {
   Check,
   CircleAlert,
@@ -73,7 +83,16 @@ export function AssistantMessage(): React.JSX.Element {
 }
 
 function MessageText(): React.JSX.Element {
-  return <MessagePartPrimitive.Text className="message-text" smooth />;
+  const part = useSmooth(useMessagePartText(), true);
+  return (
+    <Streamdown
+      className="message-text message-markdown"
+      isAnimating={part.status.type === 'running'}
+      plugins={{ cjk, code, math, mermaid }}
+    >
+      {part.text}
+    </Streamdown>
+  );
 }
 
 function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Element | null {

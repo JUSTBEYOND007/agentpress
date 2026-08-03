@@ -18,6 +18,10 @@
     "@assistant-ui/react": "catalog:",
     "@logto/react": "catalog:",
     "@microsoft/fetch-event-source": "catalog:",
+    "@streamdown/cjk": "1.0.3",
+    "@streamdown/code": "1.1.1",
+    "@streamdown/math": "1.0.2",
+    "@streamdown/mermaid": "1.0.2",
     "@tiptap/core": "catalog:",
     "@tiptap/extension-image": "catalog:",
     "@tiptap/extension-placeholder": "3.29.2",
@@ -31,7 +35,8 @@
     "lucide-react": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "streamdown": "2.5.0"
   },
   "devDependencies": {
     "@types/react": "catalog:types",
