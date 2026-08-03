@@ -1,8 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../lib/authenticated-fetch';
+import {
+  readConversationSelection,
+  resolveConversationSelection,
+  writeConversationSelection,
+  type ConversationSelection,
+} from './agent-conversation-selection';
 import type { ConversationView } from './agent-view-model';
 
 export function useAgentConversations(input: {
@@ -12,43 +18,67 @@ export function useAgentConversations(input: {
   readonly initialBranchId?: string;
 }) {
   const [conversations, setConversations] = useState<readonly ConversationView[]>([]);
-  const [selected, setSelected] = useState<ConversationView | undefined>(
-    input.initialConversationId && input.initialBranchId
-      ? {
-          id: input.initialConversationId,
-          branchId: input.initialBranchId,
-          title: '写作助手',
-          isDefault: true,
-        }
-      : undefined,
-  );
+  const [selected, setSelected] = useState<ConversationView>();
   const [error, setError] = useState<string>();
   const markingRead = useRef(new Set<string>());
+  const activeArticleId = useRef(input.articleId);
+  const resolvedSelection = useRef<
+    { readonly articleId: string; readonly selection?: ConversationSelection } | undefined
+  >(undefined);
+  activeArticleId.current = input.articleId;
+
+  const initialSelection = useMemo(
+    () =>
+      input.initialConversationId && input.initialBranchId
+        ? {
+            conversationId: input.initialConversationId,
+            branchId: input.initialBranchId,
+          }
+        : undefined,
+    [input.initialBranchId, input.initialConversationId],
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (!input.articleId) {
+    const articleId = input.articleId;
+    if (!articleId) {
       setConversations([]);
       setSelected(undefined);
+      resolvedSelection.current = undefined;
       return;
     }
     const response = await authenticatedFetch(
-      `${input.apiUrl}/articles/${input.articleId}/conversations`,
+      `${input.apiUrl}/articles/${articleId}/conversations`,
     );
     if (!response.ok) throw new Error('对话列表加载失败');
     const items = (await response.json()) as readonly ConversationView[];
+    if (activeArticleId.current !== articleId) return;
+    const currentResolution = resolvedSelection.current;
+    const firstLoad = currentResolution?.articleId !== articleId;
+    const persisted = readConversationSelection(articleId);
+    const next = resolveConversationSelection(items, {
+      firstLoad,
+      ...(persisted ? { persisted } : {}),
+      ...(initialSelection ? { initial: initialSelection } : {}),
+      ...(!firstLoad && currentResolution.selection
+        ? { current: currentResolution.selection }
+        : {}),
+    });
     setConversations(items);
-    setSelected(
-      (current) =>
-        items.find(({ id, branchId }) => id === current?.id && branchId === current.branchId) ??
-        items.find(
-          ({ id, branchId }) =>
-            id === input.initialConversationId && branchId === input.initialBranchId,
-        ) ??
-        items.find(({ isDefault }) => isDefault) ??
-        items[0],
-    );
+    setSelected(next);
+    resolvedSelection.current = {
+      articleId,
+      ...(next
+        ? { selection: { conversationId: next.id, branchId: next.branchId } }
+        : {}),
+    };
+    if (next) {
+      writeConversationSelection(articleId, {
+        conversationId: next.id,
+        branchId: next.branchId,
+      });
+    }
     setError(undefined);
-  }, [input.apiUrl, input.articleId, input.initialBranchId, input.initialConversationId]);
+  }, [initialSelection, input.apiUrl, input.articleId]);
 
   useEffect(() => {
     void refresh().catch((reason: unknown) => {
@@ -93,6 +123,18 @@ export function useAgentConversations(input: {
       });
   }, [input.apiUrl, selected]);
 
+  const select = useCallback(
+    (conversation: ConversationView): void => {
+      const articleId = input.articleId;
+      if (!articleId) return;
+      const selection = { conversationId: conversation.id, branchId: conversation.branchId };
+      resolvedSelection.current = { articleId, selection };
+      setSelected(conversation);
+      writeConversationSelection(articleId, selection);
+    },
+    [input.articleId],
+  );
+
   const create = useCallback(async (): Promise<void> => {
     if (!input.articleId) return;
     const response = await authenticatedFetch(
@@ -106,8 +148,8 @@ export function useAgentConversations(input: {
     if (!response.ok) throw new Error(await response.text());
     const created = (await response.json()) as ConversationView;
     setConversations((current) => [created, ...current]);
-    setSelected(created);
-  }, [input.apiUrl, input.articleId]);
+    select(created);
+  }, [input.apiUrl, input.articleId, select]);
 
   const update = useCallback(
     async (
@@ -128,7 +170,7 @@ export function useAgentConversations(input: {
   return {
     conversations,
     selected,
-    select: setSelected,
+    select,
     create,
     update,
     refresh,

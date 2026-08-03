@@ -142,16 +142,12 @@ export function AgentWorkbench({
           ...(onArticleReviewChanged ? { onArticleReviewChanged } : {}),
           ...(beforeSend ? { beforeSend } : {}),
           onBranchForked: (nextBranchId, forkedFromMessageId) => {
-            setSelectedConversation((current) =>
-              current
-                ? {
-                    ...current,
-                    branchId: nextBranchId,
-                    parentBranchId: current.branchId,
-                    forkedFromMessageId,
-                  }
-                : current,
-            );
+            setSelectedConversation({
+              ...selectedConversation,
+              branchId: nextBranchId,
+              parentBranchId: selectedConversation.branchId,
+              forkedFromMessageId,
+            });
             void loadConversations();
           },
         }
