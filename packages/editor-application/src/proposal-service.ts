@@ -26,6 +26,10 @@ import { and, asc, eq, max, sql } from 'drizzle-orm';
 import { EditorApplicationError } from './contracts.js';
 
 type Decision = 'accepted' | 'rejected';
+type StaleProposalOutcome = {
+  readonly outcome: 'stale';
+  readonly message: string;
+};
 
 export class ProposalService {
   public constructor(
@@ -47,7 +51,7 @@ export class ProposalService {
     if (!Number.isSafeInteger(ttlMs) || ttlMs < 60_000 || ttlMs > 24 * 60 * 60_000) {
       throw new RangeError('Edit proposal TTL must be between 1 minute and 24 hours');
     }
-    return this.database.transaction(async (transaction) => {
+    const result = await this.database.transaction(async (transaction) => {
       if (input.sourceToolCallId) {
         const [proposalReplay, batchReplay] = await Promise.all([
           transaction
@@ -92,9 +96,6 @@ export class ProposalService {
       const revision = await loadRevision(transaction, article.currentRevisionId);
       const operations = parseOperations(input.operations);
       const reviewMode = input.reviewMode ?? 'granular';
-      if (reviewMode !== 'granular' && reviewMode !== 'document') {
-        throw new EditorApplicationError('invalid_batch', 'Unknown edit review mode');
-      }
       if (operations.length === 0 || operations.length > 100) {
         throw new EditorApplicationError(
           'invalid_batch',
@@ -111,7 +112,7 @@ export class ProposalService {
           .where(
             and(eq(editProposals.id, existingProposal.id), eq(editProposals.status, 'pending')),
           );
-        throw new StaleEditError('proposal', 'Article changed while the working draft was open');
+        return staleProposal('Article changed while the working draft was open');
       }
       if (existingProposal) {
         if (existingProposal.reviewMode !== reviewMode) {
@@ -241,6 +242,7 @@ export class ProposalService {
       });
       return this.snapshot(transaction, persistedProposal);
     });
+    return unwrapStaleProposal(result);
   }
 
   public async getPending(articleId: string) {
@@ -253,7 +255,15 @@ export class ProposalService {
         .limit(1);
       const proposal = rows[0];
       if (!proposal) return undefined;
-      if (proposal.expiresAt <= this.now()) {
+      const articleRows = await transaction
+        .select({ currentRevisionId: articles.currentRevisionId })
+        .from(articles)
+        .where(eq(articles.id, proposal.articleId))
+        .limit(1);
+      if (
+        proposal.expiresAt <= this.now() ||
+        articleRows[0]?.currentRevisionId !== proposal.baseRevisionId
+      ) {
         await transaction
           .update(editProposals)
           .set({ status: 'expired', updatedAt: this.now() })
@@ -270,13 +280,14 @@ export class ProposalService {
     readonly userId: string;
     readonly decision: Decision;
   }) {
-    return this.database.transaction((transaction) =>
+    const result = await this.database.transaction((transaction) =>
       this.recordDecisions(transaction, {
         proposalId: input.proposalId,
         userId: input.userId,
         decisions: new Map([[input.operationId, input.decision]]),
       }),
     );
+    return unwrapStaleProposal(result);
   }
 
   public async decide(input: {
@@ -291,13 +302,14 @@ export class ProposalService {
         'At least one explicit decision is required',
       );
     }
-    return this.database.transaction((transaction) =>
+    const result = await this.database.transaction((transaction) =>
       this.recordDecisions(transaction, {
         proposalId: input.proposalId,
         userId: input.userId,
         decisions: new Map(entries),
       }),
     );
+    return unwrapStaleProposal(result);
   }
 
   public async revertBatch(input: {
@@ -377,6 +389,23 @@ export class ProposalService {
     const proposal = proposals[0];
     if (!proposal) {
       throw new EditorApplicationError('article_not_found', 'Edit proposal does not exist');
+    }
+    const articleRows = await transaction
+      .select({ currentRevisionId: articles.currentRevisionId })
+      .from(articles)
+      .where(eq(articles.id, proposal.articleId))
+      .for('update')
+      .limit(1);
+    if (
+      proposal.status === 'pending' &&
+      (proposal.expiresAt <= this.now() ||
+        articleRows[0]?.currentRevisionId !== proposal.baseRevisionId)
+    ) {
+      await transaction
+        .update(editProposals)
+        .set({ status: 'expired', updatedAt: this.now() })
+        .where(and(eq(editProposals.id, proposal.id), eq(editProposals.status, 'pending')));
+      return staleProposal('Edit proposal is stale because the article revision changed');
     }
     const operations = parseOperations(proposal.operations);
     const operationIds = new Set(operations.map(({ operationId }) => operationId));
@@ -562,6 +591,21 @@ export class ProposalService {
       appliedOperationIds: result.appliedOperationIds,
     };
   }
+}
+
+function staleProposal(message: string): StaleProposalOutcome {
+  return { outcome: 'stale', message };
+}
+
+function unwrapStaleProposal<T>(result: T | StaleProposalOutcome): T {
+  if (isStaleProposalOutcome(result)) throw new StaleEditError('proposal', result.message);
+  return result;
+}
+
+function isStaleProposalOutcome(value: unknown): value is StaleProposalOutcome {
+  return (
+    typeof value === 'object' && value !== null && 'outcome' in value && value.outcome === 'stale'
+  );
 }
 
 async function persistRevision(

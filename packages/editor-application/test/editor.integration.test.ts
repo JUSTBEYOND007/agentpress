@@ -403,6 +403,150 @@ describeWithInfra('editor persistence and recovery', () => {
     ).resolves.toMatchObject({ status: 'rejected' });
   });
 
+  it('commits proposal expiry before returning a stale settlement error', async () => {
+    const articleId = randomUUID();
+    const baseRevisionId = randomUUID();
+    const currentRevisionId = randomUUID();
+    const currentDocument: ArticleDocument = {
+      type: 'doc',
+      content: [paragraph('block-a', 'Manual revision'), second],
+    };
+    await connection.db.insert(articles).values({
+      id: articleId,
+      workspaceId: ids.workspace,
+      title: 'Stale settlement',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: baseRevisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash: hashDocument(document),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: baseRevisionId })
+      .where(eq(articles.id, articleId));
+    const service = new ProposalService(connection.db);
+    const proposal = await service.create({
+      articleId,
+      operations: [
+        {
+          operationId: 'stale-settlement',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(first),
+          block: paragraph('block-a', 'Agent draft'),
+        },
+      ],
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: currentRevisionId,
+      articleId,
+      revisionNumber: 2,
+      schemaVersion: 1,
+      document: currentDocument,
+      documentHash: hashDocument(currentDocument),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId })
+      .where(eq(articles.id, articleId));
+
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'stale-settlement': 'accepted' },
+      }),
+    ).rejects.toThrow('stale');
+    const [expired] = await connection.db
+      .select({ status: editProposals.status })
+      .from(editProposals)
+      .where(eq(editProposals.id, proposal.proposalId));
+    expect(expired?.status).toBe('expired');
+    await expect(service.getPending(articleId)).resolves.toBeUndefined();
+  });
+
+  it('expires a stale working draft before rejecting a new append', async () => {
+    const articleId = randomUUID();
+    const baseRevisionId = randomUUID();
+    const currentRevisionId = randomUUID();
+    const currentFirst = paragraph('block-a', 'Manual revision');
+    const currentDocument: ArticleDocument = { type: 'doc', content: [currentFirst, second] };
+    await connection.db.insert(articles).values({
+      id: articleId,
+      workspaceId: ids.workspace,
+      title: 'Stale append',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: baseRevisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash: hashDocument(document),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: baseRevisionId })
+      .where(eq(articles.id, articleId));
+    const service = new ProposalService(connection.db);
+    const proposal = await service.create({
+      articleId,
+      operations: [
+        {
+          operationId: 'initial-draft',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(first),
+          block: paragraph('block-a', 'Agent draft'),
+        },
+      ],
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: currentRevisionId,
+      articleId,
+      revisionNumber: 2,
+      schemaVersion: 1,
+      document: currentDocument,
+      documentHash: hashDocument(currentDocument),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId })
+      .where(eq(articles.id, articleId));
+
+    await expect(
+      service.create({
+        articleId,
+        operations: [
+          {
+            operationId: 'new-draft',
+            kind: 'replace',
+            blockId: 'block-a',
+            expectedHash: hashBlock(currentFirst),
+            block: paragraph('block-a', 'New agent draft'),
+          },
+        ],
+      }),
+    ).rejects.toThrow('working draft');
+    const [expired] = await connection.db
+      .select({ status: editProposals.status })
+      .from(editProposals)
+      .where(eq(editProposals.id, proposal.proposalId));
+    expect(expired?.status).toBe('expired');
+  });
+
   it('atomically promotes an acknowledged draft and schedules its index update', async () => {
     const articleId = randomUUID();
     const revisionId = randomUUID();
