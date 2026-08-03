@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
+import { fixtureArtifactId, installAgentProjectionFixture } from './agent-projection-fixture';
+
 const hasAuthenticatedState = Boolean(process.env.E2E_STORAGE_STATE);
 
 test.describe('Agent workbench browser contracts', () => {
@@ -8,9 +10,54 @@ test.describe('Agent workbench browser contracts', () => {
     'Set E2E_STORAGE_STATE to an authenticated Playwright state file.',
   );
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    if (testInfo.title.includes('fixture renders streamed Markdown')) return;
     await page.goto('/');
     await openAgentWorkbench(page);
+  });
+
+  test('fixture renders streamed Markdown, typed context, tool steps, recovery and artifact facts', async ({
+    page,
+  }) => {
+    // The fixture is installed before navigation in this test so the browser still exercises
+    // the production assistant-ui/SSE projection path without depending on personal history.
+    const fixture = installAgentProjectionFixture(page);
+    await page.goto('/');
+    await page.evaluate(() => {
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith('agentpress:conversation-selection:')) {
+          window.localStorage.removeItem(key);
+        }
+      }
+    });
+    await page.reload();
+    await openAgentWorkbench(page);
+    await expect(page.locator('.message-markdown').last()).toContainText('流式标题');
+    await expect(page.locator('.execution-timeline')).toBeVisible();
+    await expect(page.locator('.execution-step')).toHaveCount(2);
+    const context = page.locator('.run-context-sources');
+    await context.locator('summary').click();
+    await expect(context).toContainText('gpt-5.6-sol');
+    await expect(page.locator('.notice-part')).toContainText('正在恢复当前工作');
+    const artifact = page.locator('.artifact-card').first();
+    await artifact.click();
+    await expect(page.getByRole('dialog', { name: '产物详情' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '产物详情' })).toContainText('流式验收产物');
+    await page.getByRole('button', { name: '关闭产物详情' }).click();
+    const branchNavigator = page.getByRole('navigation', { name: '对话分支' });
+    await expect(branchNavigator).toContainText('1/2');
+    await branchNavigator.getByRole('button', { name: '下一个分支' }).press('ArrowRight');
+    await expect(branchNavigator).toContainText('2/2');
+    await expect(page.locator('.aui-user-message')).toHaveCount(1);
+    await expect(page.locator('.aui-assistant-message')).toHaveCount(1);
+    await page.reload();
+    await openAgentWorkbench(page);
+    await expect(page.getByRole('navigation', { name: '对话分支' })).toContainText('2/2');
+    await expect(page.locator('.aui-user-message')).toHaveCount(1);
+    await expect(page.locator('.aui-assistant-message')).toHaveCount(1);
+    expect(fixture.getState()).toBe('completed');
+    expect(fixtureArtifactId).toMatch(/[a-f0-9-]{36}/u);
   });
 
   test('keeps conversation drafts isolated while switching', async ({ page }, testInfo) => {
