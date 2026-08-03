@@ -32,6 +32,7 @@ type AutosaveBody = {
 };
 type ProposalBody = { readonly decisions?: unknown };
 type OperationDecisionBody = { readonly decision?: unknown };
+type RevertBatchBody = { readonly userId?: never };
 type CommitDraftBody = {
   readonly writerLeaseId?: unknown;
   readonly expectedServerSequence?: unknown;
@@ -189,6 +190,22 @@ export class EditorController {
         userId: user.id,
         decision: body.decision,
       });
+    } catch (error) {
+      throw mapEditorError(error);
+    }
+  }
+
+  @Post('edit-proposals/:proposalId/batches/:batchId/revert')
+  @HttpCode(200)
+  public async revertBatch(
+    @Param('proposalId') proposalId: string,
+    @Param('batchId') batchId: string,
+    @Body() _body: RevertBatchBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertProposalAccess(proposalId, user.id);
+    try {
+      return await this.proposals.revertBatch({ proposalId, batchId, userId: user.id });
     } catch (error) {
       throw mapEditorError(error);
     }

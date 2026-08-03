@@ -1194,6 +1194,38 @@ export const editProposals = pgTable(
   ],
 );
 
+export const editProposalBatches = pgTable(
+  'edit_proposal_batches',
+  {
+    id: uuid('id').primaryKey(),
+    proposalId: uuid('proposal_id')
+      .notNull()
+      .references(() => editProposals.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'cascade' }),
+    sourceToolCallId: uuid('source_tool_call_id').references(() => toolCalls.id, {
+      onDelete: 'restrict',
+    }),
+    batchNumber: integer('batch_number').notNull(),
+    operations: jsonb('operations').$type<readonly unknown[]>().notNull(),
+    diffs: jsonb('diffs')
+      .$type<readonly unknown[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    beforeHash: varchar('before_hash', { length: 80 }).notNull(),
+    afterHash: varchar('after_hash', { length: 80 }).notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    unique('edit_proposal_batches_proposal_number_unique').on(table.proposalId, table.batchNumber),
+    unique('edit_proposal_batches_source_tool_call_unique').on(table.sourceToolCallId),
+    index('edit_proposal_batches_proposal_idx').on(table.proposalId, table.batchNumber),
+    check('edit_proposal_batches_number_check', sql`${table.batchNumber} > 0`),
+    check('edit_proposal_batches_status_check', sql`${table.status} in ('active', 'reverted')`),
+  ],
+);
+
 export const editProposalDecisions = pgTable(
   'edit_proposal_decisions',
   {

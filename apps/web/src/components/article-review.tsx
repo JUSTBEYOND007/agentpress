@@ -17,6 +17,7 @@ export type ArticleReviewState = {
   readonly phase: 'pending' | 'submitting' | 'conflict' | 'error';
   readonly error?: string | undefined;
   readonly onDecision: (operationId: string, decision: 'accepted' | 'rejected') => void;
+  readonly onUndoBatch?: () => void;
 };
 
 export function useArticleReview(
@@ -27,6 +28,7 @@ export function useArticleReview(
   const [resolved, setResolved] = useState<ReadonlySet<string>>(new Set());
   const reviewRef = useRef<ArticleReviewState | undefined>(undefined);
   const decisionHandlerRef = useRef<ArticleReviewState['onDecision']>(() => undefined);
+  const undoBatchHandlerRef = useRef<() => void>(() => undefined);
   const loadSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -61,6 +63,7 @@ export function useArticleReview(
         decisionHandlerRef.current(operationId, decision);
       }),
       decisions: proposal.decisions ?? {},
+      onUndoBatch: () => undoBatchHandlerRef.current(),
     };
     reviewRef.current = restored;
     setReview(restored);
@@ -191,7 +194,10 @@ export function useArticleReview(
       setReview((current) =>
         current?.proposal.proposalId === proposal.proposalId
           ? { ...current, visible: true, onDecision }
-          : createArticleReviewState(proposal, onDecision),
+          : {
+              ...createArticleReviewState(proposal, onDecision),
+              onUndoBatch: () => undoBatchHandlerRef.current(),
+            },
       );
     },
     [articleId, onDecision, resolved],
@@ -228,6 +234,27 @@ export function useArticleReview(
     setReview((current) => (current ? { ...current, error: undefined } : current));
   }, []);
 
+  const undoLatestBatch = useCallback(async (): Promise<void> => {
+    const current = reviewRef.current;
+    const batch = [...(current?.proposal.batches ?? [])]
+      .reverse()
+      .find(({ status }) => status === 'active');
+    if (!current || !batch) return;
+    setReview((value) => (value ? { ...value, phase: 'submitting' } : value));
+    const response = await authenticatedFetch(
+      `${apiUrl}/edit-proposals/${current.proposal.proposalId}/batches/${batch.id}/revert`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    );
+    if (!response.ok) throw new Error(await response.text());
+    await reload();
+  }, [reload]);
+
+  useEffect(() => {
+    undoBatchHandlerRef.current = () => {
+      void undoLatestBatch();
+    };
+  }, [undoLatestBatch]);
+
   const operationIds = useMemo(
     () => review?.proposal.operations.map(({ operationId }) => operationId) ?? [],
     [review],
@@ -255,6 +282,7 @@ export function useArticleReview(
     dismissError,
     moveFocus,
     activeIndex,
+    undoLatestBatch,
   };
 }
 
@@ -330,6 +358,17 @@ export function ArticleReviewToolbar({
           <X size={13} />
           全部拒绝
         </button>
+        {review.onUndoBatch ? (
+          <button
+            aria-label="撤销最近一批修改"
+            disabled={review.phase === 'submitting'}
+            onClick={review.onUndoBatch}
+            title="撤销最近一批修改"
+            type="button"
+          >
+            <RotateCcw size={14} />
+          </button>
+        ) : null}
         <button
           aria-label="隐藏修改"
           onClick={() => {

@@ -225,6 +225,44 @@ describeWithInfra('editor persistence and recovery', () => {
       .from(editProposals)
       .where(eq(editProposals.id, String(created.proposalId)));
     expect(rows[0]).toMatchObject({ articleId: ids.article, runId: ids.run, status: 'pending' });
+    const secondToolCallId = randomUUID();
+    await connection.db.insert(toolCalls).values({
+      id: secondToolCallId,
+      runId: ids.run,
+      toolId: 'article.propose_edits',
+      toolVersion: '1.0.0',
+      arguments: {},
+      argumentsHash: 'test-2',
+      risk: 'draft_write',
+      sideEffect: 'test proposal 2',
+      status: 'executing',
+    });
+    const appended = (await registry.execute(
+      registry.get('article.propose_edits', '1.0.0'),
+      {
+        operations: [
+          {
+            operationId: 'tool-delete-b',
+            kind: 'delete',
+            blockId: 'block-b',
+            expectedHash: hashBlock(second),
+          },
+        ],
+      },
+      { runId: ids.run, toolCallId: secondToolCallId },
+    )) as Record<string, unknown>;
+    expect(appended).toMatchObject({
+      operations: [{ operationId: 'tool-replace-a' }, { operationId: 'tool-delete-b' }],
+    });
+    const batchIds = (appended.batches as readonly { id: string; status: string }[]).filter(
+      ({ status }) => status === 'active',
+    );
+    expect(batchIds).toHaveLength(2);
+    await proposals.revertBatch({
+      proposalId: String(created.proposalId),
+      batchId: batchIds[1]?.id ?? '',
+      userId: ids.user,
+    });
     await expect(
       proposals.decideOperation({
         proposalId: String(created.proposalId),

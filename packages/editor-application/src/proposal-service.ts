@@ -11,6 +11,7 @@ import {
 import {
   articles,
   articleRevisions,
+  editProposalBatches,
   editProposalDecisions,
   editProposals,
   enqueueOutboxMessage,
@@ -18,6 +19,7 @@ import {
   type DatabaseTransaction,
 } from '@agentpress/database';
 import { ARTICLE_INDEX_COMMAND_TOPIC } from '@agentpress/knowledge-retrieval';
+import { hashBlock } from '@agentpress/editor-patch';
 import { and, asc, eq, max, sql } from 'drizzle-orm';
 
 import { EditorApplicationError } from './contracts.js';
@@ -45,12 +47,27 @@ export class ProposalService {
     }
     return this.database.transaction(async (transaction) => {
       if (input.sourceToolCallId) {
-        const replay = await transaction
-          .select()
-          .from(editProposals)
-          .where(eq(editProposals.sourceToolCallId, input.sourceToolCallId))
-          .limit(1);
-        if (replay[0]) return this.snapshot(transaction, replay[0]);
+        const [proposalReplay, batchReplay] = await Promise.all([
+          transaction
+            .select()
+            .from(editProposals)
+            .where(eq(editProposals.sourceToolCallId, input.sourceToolCallId))
+            .limit(1),
+          transaction
+            .select({ proposalId: editProposalBatches.proposalId })
+            .from(editProposalBatches)
+            .where(eq(editProposalBatches.sourceToolCallId, input.sourceToolCallId))
+            .limit(1),
+        ]);
+        if (proposalReplay[0]) return this.snapshot(transaction, proposalReplay[0]);
+        if (batchReplay[0]) {
+          const replay = await transaction
+            .select()
+            .from(editProposals)
+            .where(eq(editProposals.id, batchReplay[0].proposalId))
+            .limit(1);
+          if (replay[0]) return this.snapshot(transaction, replay[0]);
+        }
       }
       const articleRows = await transaction
         .select()
@@ -66,23 +83,105 @@ export class ProposalService {
         throw new StaleEditError('proposal', 'Article changed after the Agent Run was authorized');
       }
       const pending = await transaction
-        .select({ id: editProposals.id })
+        .select()
         .from(editProposals)
         .where(and(eq(editProposals.articleId, article.id), eq(editProposals.status, 'pending')))
         .limit(1);
-      if (pending[0]) {
-        throw new EditorApplicationError(
-          'invalid_batch',
-          'Article already has a pending edit proposal; finish that review first',
-        );
-      }
       const revision = await loadRevision(transaction, article.currentRevisionId);
       const operations = parseOperations(input.operations);
-      if (operations.length === 0 || operations.length > 200) {
+      if (operations.length === 0 || operations.length > 100) {
         throw new EditorApplicationError(
           'invalid_batch',
-          'Edit proposal must contain between 1 and 200 operations',
+          'Edit batch must contain between 1 and 100 operations',
         );
+      }
+      const now = this.now();
+      const expiresAt = new Date(now.getTime() + ttlMs);
+      const existingProposal = pending[0];
+      if (existingProposal && existingProposal.baseRevisionId !== revision.id) {
+        await transaction
+          .update(editProposals)
+          .set({ status: 'expired', updatedAt: now })
+          .where(
+            and(eq(editProposals.id, existingProposal.id), eq(editProposals.status, 'pending')),
+          );
+        throw new StaleEditError('proposal', 'Article changed while the working draft was open');
+      }
+      if (existingProposal) {
+        const activeBatches = await transaction
+          .select()
+          .from(editProposalBatches)
+          .where(
+            and(
+              eq(editProposalBatches.proposalId, existingProposal.id),
+              eq(editProposalBatches.status, 'active'),
+            ),
+          )
+          .orderBy(asc(editProposalBatches.batchNumber));
+        const existingOperations =
+          activeBatches.length > 0
+            ? activeBatches.flatMap((batch) => parseOperations(batch.operations))
+            : parseOperations(existingProposal.operations);
+        if (existingOperations.length + operations.length > 200) {
+          throw new EditorApplicationError(
+            'invalid_batch',
+            'Working draft cannot exceed 200 operations',
+          );
+        }
+        const working = applyProposal({
+          document: revision.document as ArticleDocument,
+          currentRevision: revision.id,
+          proposal: {
+            proposalId: existingProposal.id,
+            articleId: article.id,
+            baseRevision: revision.id,
+            operations: existingOperations,
+          },
+        });
+        const next = applyProposal({
+          document: working.document,
+          currentRevision: revision.id,
+          proposal: {
+            proposalId: existingProposal.id,
+            articleId: article.id,
+            baseRevision: revision.id,
+            operations,
+          },
+        });
+        const batchNumber = (activeBatches.at(-1)?.batchNumber ?? 0) + 1;
+        await transaction.insert(editProposalBatches).values({
+          id: this.createId(),
+          proposalId: existingProposal.id,
+          ...(input.runId || existingProposal.runId
+            ? { runId: input.runId ?? existingProposal.runId ?? undefined }
+            : {}),
+          ...(input.sourceToolCallId ? { sourceToolCallId: input.sourceToolCallId } : {}),
+          batchNumber,
+          operations,
+          diffs: next.diffs,
+          beforeHash: working.revisionHash,
+          afterHash: next.revisionHash,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const allOperations = [...existingOperations, ...operations];
+        const allDiffs = previewProposal(revision.document as ArticleDocument, revision.id, {
+          proposalId: existingProposal.id,
+          articleId: article.id,
+          baseRevision: revision.id,
+          operations: allOperations,
+        });
+        await transaction
+          .update(editProposals)
+          .set({ operations: allOperations, diffs: allDiffs, expiresAt, updatedAt: now })
+          .where(eq(editProposals.id, existingProposal.id));
+        const updated = {
+          ...existingProposal,
+          operations: allOperations,
+          diffs: allDiffs,
+          expiresAt,
+        };
+        return this.snapshot(transaction, updated);
       }
       const proposalId = this.createId();
       const diffs = previewProposal(revision.document as ArticleDocument, revision.id, {
@@ -91,8 +190,6 @@ export class ProposalService {
         baseRevision: revision.id,
         operations,
       });
-      const now = this.now();
-      const expiresAt = new Date(now.getTime() + ttlMs);
       const rows = await transaction
         .insert(editProposals)
         .values({
@@ -108,9 +205,27 @@ export class ProposalService {
           updatedAt: now,
         })
         .returning();
-      const proposal = rows[0];
-      if (!proposal) throw new Error('Edit proposal was not persisted');
-      return this.snapshot(transaction, proposal);
+      const persistedProposal = rows[0];
+      if (!persistedProposal) throw new Error('Edit proposal was not persisted');
+      const applied = applyProposal({
+        document: revision.document as ArticleDocument,
+        currentRevision: revision.id,
+        proposal: { proposalId, articleId: article.id, baseRevision: revision.id, operations },
+      });
+      await transaction.insert(editProposalBatches).values({
+        id: this.createId(),
+        proposalId,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.sourceToolCallId ? { sourceToolCallId: input.sourceToolCallId } : {}),
+        batchNumber: 1,
+        operations,
+        diffs,
+        beforeHash: revision.documentHash,
+        afterHash: applied.revisionHash,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return this.snapshot(transaction, persistedProposal);
     });
   }
 
@@ -169,6 +284,66 @@ export class ProposalService {
         decisions: new Map(entries),
       }),
     );
+  }
+
+  public async revertBatch(input: {
+    readonly proposalId: string;
+    readonly batchId: string;
+    readonly userId: string;
+  }) {
+    if (!input.userId) throw new EditorApplicationError('invalid_batch', 'User is required');
+    return this.database.transaction(async (transaction) => {
+      const batchRows = await transaction
+        .select()
+        .from(editProposalBatches)
+        .innerJoin(editProposals, eq(editProposals.id, editProposalBatches.proposalId))
+        .where(
+          and(
+            eq(editProposalBatches.id, input.batchId),
+            eq(editProposalBatches.proposalId, input.proposalId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      const row = batchRows[0];
+      if (row?.edit_proposals.status !== 'pending') {
+        throw new EditorApplicationError('invalid_batch', 'Edit batch is no longer pending');
+      }
+      if (row.edit_proposal_batches.status === 'reverted') {
+        return this.snapshot(transaction, row.edit_proposals);
+      }
+      await transaction
+        .update(editProposalBatches)
+        .set({ status: 'reverted', updatedAt: this.now() })
+        .where(eq(editProposalBatches.id, input.batchId));
+      const active = await transaction
+        .select()
+        .from(editProposalBatches)
+        .where(
+          and(
+            eq(editProposalBatches.proposalId, row.edit_proposals.id),
+            eq(editProposalBatches.status, 'active'),
+          ),
+        )
+        .orderBy(asc(editProposalBatches.batchNumber));
+      const operations = active.flatMap((batch) => parseOperations(batch.operations));
+      const revision = await loadRevision(transaction, row.edit_proposals.baseRevisionId);
+      const diffs = previewProposal(revision.document as ArticleDocument, revision.id, {
+        proposalId: row.edit_proposals.id,
+        articleId: row.edit_proposals.articleId,
+        baseRevision: revision.id,
+        operations,
+      });
+      await transaction
+        .update(editProposals)
+        .set({ operations, diffs, updatedAt: this.now() })
+        .where(eq(editProposals.id, row.edit_proposals.id));
+      return this.snapshot(transaction, {
+        ...row.edit_proposals,
+        operations,
+        diffs,
+      });
+    });
   }
 
   private async recordDecisions(
@@ -247,6 +422,29 @@ export class ProposalService {
         .where(eq(editProposals.id, proposal.id));
     }
     const decisions = await loadDecisions(transaction, proposal.id);
+    const baseRevision = await loadRevision(transaction, proposal.baseRevisionId);
+    const working = applyProposal({
+      document: baseRevision.document as ArticleDocument,
+      currentRevision: baseRevision.id,
+      proposal: {
+        proposalId: proposal.id,
+        articleId: proposal.articleId,
+        baseRevision: baseRevision.id,
+        operations,
+      },
+    });
+    const batches = await transaction
+      .select({
+        id: editProposalBatches.id,
+        runId: editProposalBatches.runId,
+        batchNumber: editProposalBatches.batchNumber,
+        status: editProposalBatches.status,
+        beforeHash: editProposalBatches.beforeHash,
+        afterHash: editProposalBatches.afterHash,
+      })
+      .from(editProposalBatches)
+      .where(eq(editProposalBatches.proposalId, proposal.id))
+      .orderBy(asc(editProposalBatches.batchNumber));
     return {
       proposalId: proposal.id,
       articleId: proposal.articleId,
@@ -254,6 +452,12 @@ export class ProposalService {
       operations,
       diffs,
       decisions: Object.fromEntries(decisions),
+      batches,
+      workingRevisionHash: working.revisionHash,
+      workingDocument: working.document,
+      workingBlockHashes: Object.fromEntries(
+        working.document.content.map((block) => [block.attrs.blockId, hashBlock(block)]),
+      ),
       status: proposal.status,
       expiresAt: proposal.expiresAt.toISOString(),
     };

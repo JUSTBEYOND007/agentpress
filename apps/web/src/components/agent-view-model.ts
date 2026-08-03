@@ -37,6 +37,11 @@ export type Proposal = {
   readonly baseRevisionId?: string;
   readonly operations: readonly EditOperation[];
   readonly diffs: readonly DiffEntry[];
+  readonly batches?: readonly {
+    readonly id: string;
+    readonly batchNumber: number;
+    readonly status: string;
+  }[];
 };
 
 export function proposalFromPart(part: RunPart): Proposal | undefined {
@@ -59,6 +64,9 @@ export function proposalFromPart(part: RunPart): Proposal | undefined {
       : {}),
     operations: value.operations as readonly EditOperation[],
     diffs: value.diffs as readonly DiffEntry[],
+    batches: Array.isArray(value.batches)
+      ? (value.batches as NonNullable<Proposal['batches']>)
+      : [],
   };
 }
 
