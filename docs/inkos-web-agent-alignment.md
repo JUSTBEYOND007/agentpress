@@ -100,7 +100,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Respect reduced-motion preferences for streamed Markdown, spinners, drawers, menus, and scrolling.
 - [x] Keep tables, code, Mermaid, CJK, and long links inside the Agent viewport at desktop and mobile widths.
 - [x] Prevent the workspace header, global account actions, Agent header, composer, and mobile safe areas from overlapping by assigning layout ownership explicitly.
-- [ ] Verify these contracts with automated browser assertions and desktop/mobile screenshots, not screenshots alone.
+- [x] Verify these contracts with automated browser assertions and desktop/mobile screenshots, not screenshots alone.
 
 ## Deliberate Non-Adoption
 
@@ -112,7 +112,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## Completion Gates
 
-- [ ] Upstream behavior references and immutable versions remain recorded in `docs/references/pi-ecosystem.md` and `THIRD_PARTY_NOTICES.md` when code is copied.
+- [x] Upstream behavior references and immutable versions remain recorded in `docs/references/pi-ecosystem.md` and `THIRD_PARTY_NOTICES.md` when code is copied.
 - [ ] Web unit tests, projection contract tests, typecheck, lint, build, and PostgreSQL integration tests pass.
 - [ ] Browser verification covers Markdown streaming, tool timeline, recovery, scrolling, artifact drawer, context sources, and branch navigation.
 - [ ] A real Pi runtime/target-model scenario verifies normal Markdown, tool use, recovery, and a branch follow-up without duplicate content.
