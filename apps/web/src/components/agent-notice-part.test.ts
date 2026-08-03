@@ -17,6 +17,13 @@ describe('noticeMessage', () => {
     expect(noticeMessage(part('run.cancelled'), '', {})).toContain('停止');
     expect(noticeMessage(part('run.completed_with_degradation'), '', {})).toContain('警告');
     expect(noticeMessage(part('run.failed'), 'protocol_error', {})).toContain('协议');
+    expect(
+      noticeMessage(
+        { ...part('run.failed'), payload: { pendingDraft: true } },
+        'runtime_error',
+        {},
+      ),
+    ).toContain('草稿仍已保留');
   });
 
   it('does not expose internal runtime payloads', () => {

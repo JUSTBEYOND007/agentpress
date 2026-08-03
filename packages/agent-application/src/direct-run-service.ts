@@ -905,6 +905,21 @@ export class DirectRunService {
             payload: artifact,
           };
         }),
+        ...(run.status === 'failed' &&
+        [...proposalStatuses.values()].some(
+          (status) => status === 'pending' || status === 'partially_accepted',
+        )
+          ? [
+              {
+                id: `${runId}:pending-draft-preserved`,
+                runId,
+                sequence: events.at(-1)?.sequence ?? 0,
+                type: 'warning' as const,
+                status: 'run.failed',
+                payload: { pendingDraft: true },
+              },
+            ]
+          : []),
       ],
       artifacts: artifactRows,
       ...(contextManifest && typeof contextManifest === 'object'

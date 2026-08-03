@@ -30,6 +30,8 @@ export function noticeMessage(
   error: Readonly<Record<string, unknown>>,
 ): string {
   if (part.type === 'recovery') return '连接中断，正在恢复当前工作。';
+  if (part.payload.pendingDraft === true)
+    return '本次运行未完成，但正文修改草稿仍已保留，可以继续审阅。';
   if (part.status === 'run.cancelled') return '本次运行已停止。';
   if (part.status === 'run.completed_with_degradation') return '已完成，但部分步骤出现警告。';
   if (code.includes('stale') || code.includes('expired')) {

@@ -27,9 +27,9 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P1 Recovery And Failure
 
-- [ ] Give recovery, retry, degraded completion, cancellation, protocol error, provider error, and stale edit distinct views.
-- [ ] Preserve an existing article working draft when a later Run fails and show that fact explicitly.
-- [ ] Show actionable public error messages while keeping internal stack traces and credentials hidden.
+- [x] Give recovery, retry, degraded completion, cancellation, protocol error, provider error, and stale edit distinct views.
+- [x] Preserve an existing article working draft when a later Run fails and show that fact explicitly.
+- [x] Show actionable public error messages while keeping internal stack traces and credentials hidden.
 - [ ] Test live SSE and restored projection parity for every terminal state.
 
 ## P1 Scrolling
