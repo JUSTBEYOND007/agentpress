@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  AuiIf,
   ComposerPrimitive,
   WebSpeechDictationAdapter,
   unstable_useMentionAdapter,
@@ -12,21 +11,9 @@ import {
 import {
   ArrowUp,
   AtSign,
-  AudioLines,
-  Check,
-  ChevronLeft,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  LoaderCircle,
-  LockKeyhole,
-  Mic,
   Paperclip,
   Plus,
-  ListChecks,
   Square,
-  WandSparkles,
-  Workflow,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -34,8 +21,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentSendMode } from '../lib/agentpress-assistant-runtime';
 import type { PendingDirective } from '../lib/agentpress-assistant-runtime';
 import type { ArticleSelectionView } from './article-selection';
+import {
+  ComposerDictationControl,
+  ComposerSendModeControl,
+  ComposerTriggerMenu,
+} from './agent-composer-controls';
+import { ComposerContextRow, ComposerPendingDirectives } from './agent-composer-context';
+import { AgentComposerDraft } from './agent-composer-draft';
 import { prepareComposerFiles } from './agent-composer-files';
-import { composerDraftStorageKey, deriveAgentComposerState } from './agent-composer-state';
+import { deriveAgentComposerState } from './agent-composer-state';
 import type { AttachmentView, SkillView } from './agent-view-model';
 
 type ComposerMenu = 'mode';
@@ -111,7 +105,6 @@ export function AgentComposer({
   const [openMenu, setOpenMenu] = useState<ComposerMenu>();
   const [dropActive, setDropActive] = useState(false);
   const [fileNotice, setFileNotice] = useState<string>();
-  const [cancellingDirectiveId, setCancellingDirectiveId] = useState<string>();
   const [dictationSupported, setDictationSupported] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLFormElement>(null);
@@ -251,7 +244,7 @@ export function AgentComposer({
             }}
             removeOnExecute
           />
-          <TriggerMenu heading="添加上下文" />
+          <ComposerTriggerMenu heading="添加上下文" />
         </ComposerPrimitive.Unstable_TriggerPopover>
         <ComposerPrimitive.Unstable_TriggerPopover
           adapter={running ? undefined : slash.adapter}
@@ -260,7 +253,7 @@ export function AgentComposer({
           className="composer-trigger-menu"
         >
           <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
-          <TriggerMenu heading="写作技能" />
+          <ComposerTriggerMenu heading="写作技能" />
         </ComposerPrimitive.Unstable_TriggerPopover>
         <ComposerPrimitive.Root
           className={dropActive ? 'agent-composer is-drop-active' : 'agent-composer'}
@@ -287,115 +280,30 @@ export function AgentComposer({
           }}
           ref={root}
         >
-          <ComposerDraft
+          <AgentComposerDraft
             {...(conversationId && branchId ? { threadKey: `${conversationId}:${branchId}` } : {})}
           />
-          {pendingDirectives.length > 0 ? (
-            <div className="composer-pending" aria-label="待处理的补充要求">
-              {pendingDirectives.map((directive) => (
-                <span className={`pending-directive pending-${directive.kind}`} key={directive.id}>
-                  <ListChecks aria-hidden="true" size={12} />
-                  <span>
-                    <small>{directive.kind === 'steering' ? '待应用' : '完成后继续'}</small>
-                    {directive.content}
-                  </span>
-                  <button
-                    aria-label="撤销这条补充要求"
-                    disabled={cancellingDirectiveId === directive.id}
-                    onClick={() => {
-                      setCancellingDirectiveId(directive.id);
-                      void onPendingDirectiveCancel(directive)
-                        .catch(() => {
-                          setFileNotice('这条补充要求未能撤销，请稍后重试。');
-                        })
-                        .finally(() => {
-                          setCancellingDirectiveId(undefined);
-                        });
-                    }}
-                    type="button"
-                  >
-                    {cancellingDirectiveId === directive.id ? (
-                      <LoaderCircle className="is-spinning" size={11} />
-                    ) : (
-                      <X size={11} />
-                    )}
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : null}
-          <div className="composer-context" aria-label="本次对话上下文">
-            {activeArticleTitle ? (
-              <ContextIndicator
-                icon={<FileText aria-hidden="true" size={12} />}
-                label={`当前：${activeArticleTitle}`}
-              />
-            ) : null}
-            {running ? (
-              <ContextIndicator
-                icon={<Workflow aria-hidden="true" size={12} />}
-                label={lifecycle.contextLabel ?? ''}
-              />
-            ) : null}
-            {pendingReview ? (
-              <ContextIndicator
-                icon={<LockKeyhole aria-hidden="true" size={12} />}
-                label="正文修改待审阅"
-              />
-            ) : null}
-            {articleSelection && selectionIncluded ? (
-              <ContextChip
-                icon={<ListChecks aria-hidden="true" size={12} />}
-                label={`选中 ${String(articleSelection.blocks.length)} 个段落`}
-                onRemove={() => {
-                  onSelectionIncludedChange(false);
-                }}
-                removeLabel="移除正文选区"
-              />
-            ) : null}
-            {selectedArticleIds.map((id) => {
-              const article = articles.find((candidate) => candidate.id === id);
-              return article ? (
-                <ContextChip
-                  icon={<FileText aria-hidden="true" size={12} />}
-                  key={id}
-                  label={article.title}
-                  onRemove={() => {
-                    onArticleMentionChange(selectedArticleIds.filter((item) => item !== id));
-                  }}
-                  removeLabel={`移除 ${article.title}`}
-                />
-              ) : null;
-            })}
-            {selectedSkillKeys.map((key) => (
-              <ContextChip
-                icon={<WandSparkles aria-hidden="true" size={12} />}
-                key={key}
-                label={`/${key.split('@')[0] ?? key}`}
-                onRemove={() => {
-                  onSkillChange(selectedSkillKeys.filter((item) => item !== key));
-                }}
-                removeLabel="移除技能"
-              />
-            ))}
-            {attachments.map((attachment) => (
-              <ContextChip
-                icon={<Paperclip aria-hidden="true" size={12} />}
-                key={attachment.id}
-                label={attachment.filename}
-                onRemove={() => {
-                  onAttachmentRemove(attachment.id);
-                }}
-                removeLabel={`移除 ${attachment.filename}`}
-              />
-            ))}
-            {uploadingAttachments > 0 ? (
-              <span className="composer-upload-chip" role="status">
-                <LoaderCircle aria-hidden="true" className="is-spinning" size={12} />
-                正在解析 {uploadingAttachments} 个附件
-              </span>
-            ) : null}
-          </div>
+          <ComposerPendingDirectives
+            directives={pendingDirectives}
+            onCancel={onPendingDirectiveCancel}
+            onError={setFileNotice}
+          />
+          <ComposerContextRow
+            {...(activeArticleTitle ? { activeArticleTitle } : {})}
+            {...(articleSelection ? { articleSelection } : {})}
+            articles={articles}
+            attachments={attachments}
+            {...(running && lifecycle.contextLabel ? { contextLabel: lifecycle.contextLabel } : {})}
+            onArticleMentionChange={onArticleMentionChange}
+            onAttachmentRemove={onAttachmentRemove}
+            onSelectionIncludedChange={onSelectionIncludedChange}
+            onSkillChange={onSkillChange}
+            pendingReview={pendingReview}
+            selectedArticleIds={selectedArticleIds}
+            selectedSkillKeys={selectedSkillKeys}
+            selectionIncluded={selectionIncluded}
+            uploadingAttachments={uploadingAttachments}
+          />
           <input
             accept=".pdf,.docx,.md,.markdown,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
             hidden
@@ -482,9 +390,9 @@ export function AgentComposer({
               >
                 /
               </button>
-              {dictationSupported ? <DictationControl /> : null}
+              {dictationSupported ? <ComposerDictationControl /> : null}
               {running ? (
-                <SendModeControl
+                <ComposerSendModeControl
                   open={openMenu === 'mode'}
                   onOpenChange={() => {
                     setOpenMenu((value) => (value === 'mode' ? undefined : 'mode'));
@@ -525,237 +433,5 @@ export function AgentComposer({
         </ComposerPrimitive.Root>
       </div>
     </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-  );
-}
-
-function ComposerDraft({ threadKey }: { readonly threadKey?: string }): null {
-  const aui = useAui();
-  const value = useAuiState((state) => state.composer.text);
-  const activeKey = useRef<string | null>(null);
-  const skippedValue = useRef<string | null>(null);
-  const currentValue = useRef(value);
-  currentValue.current = value;
-  useEffect(() => {
-    const key = threadKey ? composerDraftStorageKey(threadKey) : null;
-    activeKey.current = key;
-    skippedValue.current = currentValue.current;
-    try {
-      aui.composer.setText(key ? (window.localStorage.getItem(key) ?? '') : '');
-    } catch {
-      aui.composer.setText('');
-    }
-  }, [aui, threadKey]);
-  useEffect(() => {
-    if (skippedValue.current === value) {
-      skippedValue.current = null;
-      return;
-    }
-    const key = activeKey.current;
-    if (!key) return;
-    try {
-      if (value) window.localStorage.setItem(key, value);
-      else window.localStorage.removeItem(key);
-    } catch {
-      // Draft persistence is best-effort when browser storage is unavailable.
-    }
-  }, [value]);
-  return null;
-}
-
-function ContextChip({
-  icon,
-  label,
-  onRemove,
-  removeLabel,
-}: {
-  readonly icon: React.ReactNode;
-  readonly label: string;
-  readonly onRemove: () => void;
-  readonly removeLabel: string;
-}): React.JSX.Element {
-  return (
-    <span className="composer-context-chip">
-      {icon}
-      <span>{label}</span>
-      <button aria-label={removeLabel} onClick={onRemove} title={removeLabel} type="button">
-        <X aria-hidden="true" size={11} />
-      </button>
-    </span>
-  );
-}
-
-function ContextIndicator({
-  icon,
-  label,
-}: {
-  readonly icon: React.ReactNode;
-  readonly label: string;
-}): React.JSX.Element {
-  return (
-    <span className="composer-context-chip is-fixed">
-      {icon}
-      <span>{label}</span>
-    </span>
-  );
-}
-
-function TriggerMenu({ heading }: { readonly heading: string }): React.JSX.Element {
-  return (
-    <div className="composer-trigger-content">
-      <div className="composer-trigger-heading">
-        <ComposerPrimitive.Unstable_TriggerPopoverBack
-          aria-label="返回分类"
-          className="composer-trigger-back"
-        >
-          <ChevronLeft aria-hidden="true" size={14} />
-        </ComposerPrimitive.Unstable_TriggerPopoverBack>
-        <span>{heading}</span>
-      </div>
-      <ComposerPrimitive.Unstable_TriggerPopoverCategories className="composer-trigger-list">
-        {(categories) =>
-          categories.map((category) => (
-            <ComposerPrimitive.Unstable_TriggerPopoverCategoryItem
-              categoryId={category.id}
-              className="composer-trigger-item"
-              key={category.id}
-            >
-              {category.id === 'current' ? (
-                <ListChecks aria-hidden="true" size={14} />
-              ) : (
-                <FileText aria-hidden="true" size={14} />
-              )}
-              <span>
-                <strong>{category.label}</strong>
-              </span>
-              <ChevronRight aria-hidden="true" size={13} />
-            </ComposerPrimitive.Unstable_TriggerPopoverCategoryItem>
-          ))
-        }
-      </ComposerPrimitive.Unstable_TriggerPopoverCategories>
-      <ComposerPrimitive.Unstable_TriggerPopoverItems className="composer-trigger-list">
-        {(items) =>
-          items.map((item, index) => (
-            <ComposerPrimitive.Unstable_TriggerPopoverItem
-              className="composer-trigger-item"
-              index={index}
-              item={item}
-              key={`${item.type}:${item.id}`}
-            >
-              {item.type === 'selection' ? (
-                <ListChecks aria-hidden="true" size={14} />
-              ) : item.type === 'article' ? (
-                <FileText aria-hidden="true" size={14} />
-              ) : (
-                <WandSparkles aria-hidden="true" size={14} />
-              )}
-              <span>
-                <strong>{item.label}</strong>
-                {item.description ? <small>{item.description}</small> : null}
-              </span>
-            </ComposerPrimitive.Unstable_TriggerPopoverItem>
-          ))
-        }
-      </ComposerPrimitive.Unstable_TriggerPopoverItems>
-    </div>
-  );
-}
-
-function DictationControl(): React.JSX.Element {
-  return (
-    <>
-      <AuiIf condition={(state) => !state.composer.dictation}>
-        <ComposerPrimitive.Dictate asChild>
-          <button
-            aria-label="语音输入"
-            className="composer-tool-button"
-            title="语音输入"
-            type="button"
-          >
-            <Mic size={15} />
-          </button>
-        </ComposerPrimitive.Dictate>
-      </AuiIf>
-      <AuiIf condition={(state) => Boolean(state.composer.dictation)}>
-        <ComposerPrimitive.StopDictation asChild>
-          <button
-            aria-label="停止语音输入"
-            className="composer-tool-button is-listening"
-            title="停止语音输入"
-            type="button"
-          >
-            <AudioLines size={15} />
-          </button>
-        </ComposerPrimitive.StopDictation>
-      </AuiIf>
-    </>
-  );
-}
-
-function SendModeControl({
-  onOpenChange,
-  onSelect,
-  open,
-  value,
-}: {
-  readonly onOpenChange: () => void;
-  readonly onSelect: (mode: AgentSendMode) => void;
-  readonly open: boolean;
-  readonly value: AgentSendMode;
-}): React.JSX.Element {
-  return (
-    <div className="send-mode-wrap">
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="send-behavior"
-        onClick={onOpenChange}
-        type="button"
-      >
-        {value === 'steering' ? '调整当前任务' : '完成后继续'}
-        <ChevronDown size={12} />
-      </button>
-      {open ? (
-        <div aria-label="发送方式" className="send-mode-menu" role="menu">
-          <ModeOption
-            active={value === 'steering'}
-            description="立即让助手按新要求调整"
-            label="调整当前任务"
-            onSelect={() => {
-              onSelect('steering');
-            }}
-          />
-          <ModeOption
-            active={value === 'follow-up'}
-            description="当前工作完成后再处理"
-            label="完成后继续"
-            onSelect={() => {
-              onSelect('follow-up');
-            }}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ModeOption({
-  active,
-  description,
-  label,
-  onSelect,
-}: {
-  readonly active: boolean;
-  readonly description: string;
-  readonly label: string;
-  readonly onSelect: () => void;
-}): React.JSX.Element {
-  return (
-    <button aria-checked={active} onClick={onSelect} role="menuitemradio" type="button">
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-      {active ? <Check size={14} /> : null}
-    </button>
   );
 }
