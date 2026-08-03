@@ -1419,6 +1419,14 @@ export class DirectRunService {
 
       if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
         await transaction
+          .update(runDirectives)
+          .set({ status: 'cancelled' })
+          .where(and(eq(runDirectives.runId, runId), eq(runDirectives.status, 'pending')));
+        await transaction
+          .update(queuedFollowups)
+          .set({ status: 'cancelled' })
+          .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')));
+        await transaction
           .update(agentRuns)
           .set({
             status: 'cancelled',
@@ -1488,10 +1496,11 @@ export class DirectRunService {
       return events;
     });
 
+    const terminal = durableEvents.at(-1)?.eventType;
+    if (terminal !== 'run.cancelled') await this.activateNextFollowUp(branchId);
     for (const event of durableEvents) {
       await this.options.publisher.publish({ durable: true, event });
     }
-    const terminal = durableEvents.at(-1)?.eventType;
     const response: ExecuteDirectRunResult = {
       runId,
       status:
@@ -1503,7 +1512,6 @@ export class DirectRunService {
             ? 'cancelled'
             : 'failed',
     };
-    await this.activateNextFollowUp(branchId);
     return response;
   }
 

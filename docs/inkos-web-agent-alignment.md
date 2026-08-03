@@ -59,23 +59,23 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 ## P2 Composer And Visual Polish
 
 - [x] Make current article, selection, attachments, skills, steering/follow-up mode, and pending-review lock visible in one composer context row.
-- [ ] Ensure cancel, stop, steering, follow-up, and send-disabled states have distinct semantics.
+- [x] Ensure cancel, stop, steering, follow-up, and send-disabled states have distinct semantics.
 - [ ] Align typography, spacing, table overflow, code blocks, long links, focus states, and reduced motion with the Notion reference and InkOS density.
 - [ ] Verify desktop and mobile layouts with browser screenshots and overlap checks.
 
 ## P0 Composer And Run Lifecycle
 
-- [ ] Derive composer actions from one pure Run lifecycle model instead of independent Web booleans.
-- [ ] Keep new-send, stop-generation, cancel-Run, in-flight steering, queued follow-up, and disabled-send as distinct commands with distinct labels and effects.
-- [ ] Preserve per-conversation composer drafts and pending directives while switching conversations; never submit one conversation's draft to another branch.
-- [ ] Make stopping and cancellation idempotent and project their acknowledged, cancelling, and terminal states from persisted Run facts.
-- [ ] Add opposite-semantics tests proving steering does not become a follow-up, follow-up does not interrupt the current Run, and stopping does not create a new message.
+- [x] Derive composer actions from one pure Run lifecycle model instead of independent Web booleans.
+- [x] Keep new-send, stop-generation, cancel-Run, in-flight steering, queued follow-up, and disabled-send as distinct commands with distinct labels and effects.
+- [x] Preserve per-conversation composer drafts and pending directives while switching conversations; never submit one conversation's draft to another branch.
+- [x] Make stopping and cancellation idempotent and project their acknowledged, cancelling, and terminal states from persisted Run facts.
+- [x] Add opposite-semantics tests proving steering does not become a follow-up, follow-up does not interrupt the current Run, and stopping does not create a new message.
 
 ## P0 Durable Sessions And Review Loop
 
 - [ ] Keep an active Run executing when the user switches articles or conversations and expose its durable status in the conversation picker.
-- [ ] Restore the same Run after refresh or SSE reconnect from PostgreSQL projections without duplicate messages, tool calls, edit batches, or optimistic content.
-- [ ] Resume event streaming from the last durable event ID and fall back to a full projection refresh when the stream cursor is stale.
+- [x] Restore the same Run after refresh or SSE reconnect from PostgreSQL projections without duplicate messages, tool calls, edit batches, or optimistic content.
+- [x] Resume event streaming from the last durable event ID and fall back to a full projection refresh when the stream cursor is stale.
 - [ ] Represent one complete article write as one reviewable document batch while retaining granular batches for targeted edits.
 - [ ] Link an article-change part to its working draft, first changed block, latest batch undo, partial accept, reject, and stale-reload actions.
 - [ ] Keep review settlement and Run settlement independent: a completed Run may leave a durable pending article review.

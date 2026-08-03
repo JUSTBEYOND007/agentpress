@@ -681,6 +681,27 @@
   cursor: pointer;
 }
 
+.composer-primary-actions {
+  gap: 6px;
+}
+
+.run-termination-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #dededb;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #5f605b;
+  cursor: pointer;
+}
+
+.run-termination-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .send-button:disabled {
   background: #d8d8d4;
   cursor: default;
@@ -693,6 +714,7 @@
 .composer-context-chip > button:focus-visible,
 .composer-inline-notice button:focus-visible,
 .send-behavior:focus-visible,
+.run-termination-button:focus-visible,
 .send-button:focus-visible,
 .composer-menu button:focus-visible,
 .send-mode-menu button:focus-visible {

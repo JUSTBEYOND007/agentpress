@@ -120,10 +120,8 @@ export function AgentWorkbench({
     cancelDirective,
     readiness,
     panelError,
-    isRunning,
     submissionSequence,
   } = useAgentPressAssistantRuntime(
-    sendMode,
     selectedConversation
       ? {
           conversationId: selectedConversation.id,
@@ -286,6 +284,8 @@ export function AgentWorkbench({
               attachments={attachments}
               {...(attachmentError ? { attachmentError } : {})}
               {...(selectedConversation ? { conversationId: selectedConversation.id } : {})}
+              {...(selectedConversation ? { branchId: selectedConversation.branchId } : {})}
+              {...(activeProjection ? { activeRun: activeProjection } : {})}
               pendingReview={pendingReview}
               onArticleMentionChange={setSelectedArticleIds}
               onAttachmentRemove={(id) => {
@@ -352,7 +352,6 @@ export function AgentWorkbench({
               selectionIncluded={selectionIncluded}
               onSkillChange={setSelectedSkillKeys}
               readiness={readiness.status}
-              running={isRunning}
               selectedSkillKeys={selectedSkillKeys}
               sendMode={sendMode}
               setSendMode={setSendMode}

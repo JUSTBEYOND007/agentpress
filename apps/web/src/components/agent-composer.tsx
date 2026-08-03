@@ -35,6 +35,7 @@ import type { AgentSendMode } from '../lib/agentpress-assistant-runtime';
 import type { PendingDirective } from '../lib/agentpress-assistant-runtime';
 import type { ArticleSelectionView } from './article-selection';
 import { prepareComposerFiles } from './agent-composer-files';
+import { composerDraftStorageKey, deriveAgentComposerState } from './agent-composer-state';
 import type { AttachmentView, SkillView } from './agent-view-model';
 
 type ComposerMenu = 'mode';
@@ -46,6 +47,8 @@ export function AgentComposer({
   articles,
   attachmentError,
   attachments,
+  activeRun,
+  branchId,
   conversationId,
   pendingReview,
   onArticleMentionChange,
@@ -57,7 +60,6 @@ export function AgentComposer({
   onAttachmentUpload,
   onSkillChange,
   readiness,
-  running,
   pendingDirectives,
   selectedArticleIds,
   selectionIncluded,
@@ -77,6 +79,12 @@ export function AgentComposer({
   }[];
   readonly attachmentError?: string;
   readonly attachments: readonly AttachmentView[];
+  readonly activeRun?: {
+    readonly mode: 'direct' | 'planned';
+    readonly status: string;
+    readonly terminal: boolean;
+  };
+  readonly branchId?: string;
   readonly conversationId?: string;
   readonly pendingReview: boolean;
   readonly onArticleMentionChange: (value: readonly string[]) => void;
@@ -88,7 +96,6 @@ export function AgentComposer({
   readonly onAttachmentUpload: (files: readonly File[]) => Promise<void>;
   readonly onSkillChange: (value: readonly string[]) => void;
   readonly readiness: 'checking' | 'ready' | 'unavailable';
-  readonly running: boolean;
   readonly pendingDirectives: readonly PendingDirective[];
   readonly selectedArticleIds: readonly string[];
   readonly selectionIncluded: boolean;
@@ -108,6 +115,7 @@ export function AgentComposer({
   const [dictationSupported, setDictationSupported] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLFormElement>(null);
+  const running = Boolean(activeRun && !activeRun.terminal);
 
   useEffect(() => {
     setDictationSupported(WebSpeechDictationAdapter.isSupported());
@@ -207,6 +215,13 @@ export function AgentComposer({
     removeOnExecute: true,
   });
   const notice = attachmentError ?? fileNotice;
+  const lifecycle = deriveAgentComposerState({
+    readiness,
+    hasConversation: Boolean(conversationId && branchId),
+    uploadingAttachments,
+    ...(activeRun ? { activeRun } : {}),
+    sendMode,
+  });
 
   const insertTrigger = (trigger: '@' | '/'): void => {
     const separator = composerText.length > 0 && !composerText.endsWith(' ') ? ' ' : '';
@@ -249,6 +264,11 @@ export function AgentComposer({
         </ComposerPrimitive.Unstable_TriggerPopover>
         <ComposerPrimitive.Root
           className={dropActive ? 'agent-composer is-drop-active' : 'agent-composer'}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (lifecycle.sendDisabledReason) return;
+            aui.composer.send({ steer: lifecycle.submissionKind === 'steering' });
+          }}
           onDragEnter={(event) => {
             if (event.dataTransfer.types.includes('Files')) setDropActive(true);
           }}
@@ -267,7 +287,9 @@ export function AgentComposer({
           }}
           ref={root}
         >
-          <ComposerDraft {...(conversationId ? { conversationId } : {})} />
+          <ComposerDraft
+            {...(conversationId && branchId ? { threadKey: `${conversationId}:${branchId}` } : {})}
+          />
           {pendingDirectives.length > 0 ? (
             <div className="composer-pending" aria-label="待处理的补充要求">
               {pendingDirectives.map((directive) => (
@@ -312,7 +334,7 @@ export function AgentComposer({
             {running ? (
               <ContextIndicator
                 icon={<Workflow aria-hidden="true" size={12} />}
-                label={sendMode === 'steering' ? '补充当前任务' : '完成后继续'}
+                label={lifecycle.contextLabel ?? ''}
               />
             ) : null}
             {pendingReview ? (
@@ -397,7 +419,7 @@ export function AgentComposer({
               event.preventDefault();
               void addFiles(files);
             }}
-            placeholder={composerPlaceholder(readiness, running, sendMode)}
+            placeholder={lifecycle.placeholder}
             submitMode="enter"
             unstable_insertNewlineOnTouchEnter
           />
@@ -475,24 +497,30 @@ export function AgentComposer({
                 />
               ) : null}
             </div>
-            {threadRunning ? (
-              <ComposerPrimitive.Cancel asChild>
-                <button aria-label="停止生成" className="send-button" title="停止" type="button">
-                  <Square size={13} />
-                </button>
-              </ComposerPrimitive.Cancel>
-            ) : (
-              <ComposerPrimitive.Send asChild>
-                <button
-                  aria-label="发送消息"
-                  className="send-button"
-                  title="发送（Enter）"
-                  type="submit"
-                >
-                  <ArrowUp size={17} />
-                </button>
-              </ComposerPrimitive.Send>
-            )}
+            <div className="composer-primary-actions">
+              {threadRunning && lifecycle.termination ? (
+                <ComposerPrimitive.Cancel asChild>
+                  <button
+                    aria-label={lifecycle.termination.label}
+                    className="run-termination-button"
+                    disabled={lifecycle.termination.disabled}
+                    title={lifecycle.termination.label}
+                    type="button"
+                  >
+                    <Square size={13} />
+                  </button>
+                </ComposerPrimitive.Cancel>
+              ) : null}
+              <button
+                aria-label={lifecycle.submissionLabel}
+                className="send-button"
+                disabled={Boolean(lifecycle.sendDisabledReason) || composerText.trim().length === 0}
+                title={lifecycle.sendDisabledReason ?? `${lifecycle.submissionLabel}（Enter）`}
+                type="submit"
+              >
+                <ArrowUp size={17} />
+              </button>
+            </div>
           </div>
         </ComposerPrimitive.Root>
       </div>
@@ -500,7 +528,7 @@ export function AgentComposer({
   );
 }
 
-function ComposerDraft({ conversationId }: { readonly conversationId?: string }): null {
+function ComposerDraft({ threadKey }: { readonly threadKey?: string }): null {
   const aui = useAui();
   const value = useAuiState((state) => state.composer.text);
   const activeKey = useRef<string | null>(null);
@@ -508,7 +536,7 @@ function ComposerDraft({ conversationId }: { readonly conversationId?: string })
   const currentValue = useRef(value);
   currentValue.current = value;
   useEffect(() => {
-    const key = conversationId ? `agentpress:composer-draft:${conversationId}` : null;
+    const key = threadKey ? composerDraftStorageKey(threadKey) : null;
     activeKey.current = key;
     skippedValue.current = currentValue.current;
     try {
@@ -516,7 +544,7 @@ function ComposerDraft({ conversationId }: { readonly conversationId?: string })
     } catch {
       aui.composer.setText('');
     }
-  }, [aui, conversationId]);
+  }, [aui, threadKey]);
   useEffect(() => {
     if (skippedValue.current === value) {
       skippedValue.current = null;
@@ -730,16 +758,4 @@ function ModeOption({
       {active ? <Check size={14} /> : null}
     </button>
   );
-}
-
-function composerPlaceholder(
-  readiness: 'checking' | 'ready' | 'unavailable',
-  running: boolean,
-  mode: AgentSendMode,
-): string {
-  if (readiness === 'checking') return '正在连接写作助手…';
-  if (readiness === 'unavailable') return '写作助手暂时不可用';
-  if (running && mode === 'steering') return '补充要求，助手会调整当前任务…';
-  if (running) return '输入下一项任务，当前工作完成后开始…';
-  return '告诉我你想写什么，或希望怎样修改正文…';
 }

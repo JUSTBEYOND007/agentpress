@@ -4,12 +4,14 @@ import {
   WebSpeechDictationAdapter,
   useExternalStoreRuntime,
   type AppendMessage,
+  type ExternalThreadQueueAdapter,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { clearLiveRunContent, updateLiveRunContent, type LiveRunContent } from './agent-streaming';
+import { loadAgentThreadSnapshot, type StableAgentMessage } from './agent-thread-snapshot';
 import { authenticatedFetch } from './authenticated-fetch';
 import {
   articleReviewChangeFromPart,
@@ -84,12 +86,6 @@ export type AgentContextBinding =
     }
   | { readonly type: 'skill'; readonly skillId: string; readonly version: string };
 
-type StableMessage = {
-  readonly id: string;
-  readonly role: 'user' | 'assistant';
-  readonly content: string;
-};
-
 type AgentMessage = {
   readonly id: string;
   readonly role: 'user' | 'assistant';
@@ -104,7 +100,6 @@ export type AgentRuntimeReadiness =
   | { readonly status: 'unavailable'; readonly missing: readonly string[] };
 
 export function useAgentPressAssistantRuntime(
-  sendMode: AgentSendMode,
   context: {
     readonly conversationId?: string;
     readonly branchId?: string;
@@ -125,7 +120,7 @@ export function useAgentPressAssistantRuntime(
   const selectedSkills = context.skills ?? [];
   const contextBindings = context.contextBindings ?? [];
   const sendingDisabled = context.sendingDisabled ?? false;
-  const [stableMessages, setStableMessages] = useState<readonly StableMessage[]>([]);
+  const [stableMessages, setStableMessages] = useState<readonly StableAgentMessage[]>([]);
   const [optimisticMessages, setOptimisticMessages] = useState<readonly AgentMessage[]>([]);
   const [projections, setProjections] = useState<readonly RunProjection[]>([]);
   const [liveContent, setLiveContent] = useState<readonly LiveRunContent[]>([]);
@@ -140,6 +135,9 @@ export function useAgentPressAssistantRuntime(
   const runModes = useRef(new Map<string, RunProjection['mode']>());
   const notifiedArticleProposals = useRef(new Set<string>());
   const onArticleReviewChangedRef = useRef(context.onArticleReviewChanged);
+  const threadKey = conversationId && branchId ? `${conversationId}:${branchId}` : undefined;
+  const currentThreadKey = useRef(threadKey);
+  currentThreadKey.current = threadKey;
 
   useEffect(() => {
     onArticleReviewChangedRef.current = context.onArticleReviewChanged;
@@ -170,8 +168,23 @@ export function useAgentPressAssistantRuntime(
     [notifyArticleReviewChanged],
   );
 
+  const refreshThread = useCallback(async (): Promise<void> => {
+    if (!conversationId || !branchId || !threadKey) return;
+    const snapshot = await loadAgentThreadSnapshot(apiUrl, conversationId, branchId);
+    if (currentThreadKey.current !== threadKey) return;
+    setStableMessages(snapshot.messages);
+    setOptimisticMessages([]);
+    setProjections(snapshot.runs);
+    for (const run of snapshot.runs) {
+      lastEventIds.current.set(run.runId, run.lastEventId);
+      runModes.current.set(run.runId, run.mode);
+    }
+    const activeRun = [...snapshot.runs].reverse().find((run) => !run.terminal);
+    setActiveRunId(activeRun?.runId);
+  }, [branchId, conversationId, threadKey]);
+
   useEffect(() => {
-    if (!conversationId || !branchId) {
+    if (!threadKey) {
       setStableMessages([]);
       setProjections([]);
       setLiveContent([]);
@@ -180,38 +193,13 @@ export function useAgentPressAssistantRuntime(
     }
     let active = true;
     setPanelError(undefined);
-    void Promise.all([
-      authenticatedFetch(`${apiUrl}/conversations/${conversationId}/branches/${branchId}/messages`),
-      authenticatedFetch(`${apiUrl}/conversations/${conversationId}/branches/${branchId}/runs`),
-    ])
-      .then(async ([messageResponse, runResponse]) => {
-        if (!messageResponse.ok)
-          throw new Error(`对话历史加载失败 (${String(messageResponse.status)})`);
-        if (!runResponse.ok) throw new Error(`运行历史加载失败 (${String(runResponse.status)})`);
-        return Promise.all([
-          messageResponse.json() as Promise<readonly StableMessage[]>,
-          runResponse.json() as Promise<readonly RunProjection[]>,
-        ]);
-      })
-      .then(([history, runs]) => {
-        if (!active) return;
-        setStableMessages(history);
-        setOptimisticMessages([]);
-        setProjections(runs);
-        for (const run of runs) {
-          lastEventIds.current.set(run.runId, run.lastEventId);
-          runModes.current.set(run.runId, run.mode);
-        }
-        const activeRun = [...runs].reverse().find((run) => !run.terminal);
-        setActiveRunId(activeRun?.runId);
-      })
-      .catch((error: unknown) => {
-        if (active) setPanelError(error instanceof Error ? error.message : '对话历史加载失败');
-      });
+    void refreshThread().catch((error: unknown) => {
+      if (active) setPanelError(error instanceof Error ? error.message : '对话历史加载失败');
+    });
     return () => {
       active = false;
     };
-  }, [branchId, conversationId]);
+  }, [refreshThread, threadKey]);
 
   useEffect(() => {
     let active = true;
@@ -257,6 +245,7 @@ export function useAgentPressAssistantRuntime(
         setPanelError(undefined);
         if (projection.terminal) {
           setActiveRunId(undefined);
+          await refreshThread();
           stream.abort();
         }
       } catch (error) {
@@ -312,7 +301,7 @@ export function useAgentPressAssistantRuntime(
           setLiveContent((current) => clearLiveRunContent(current, activeRunId));
           setActiveRunId(undefined);
           stream.abort();
-          void refreshProjection(activeRunId);
+          void refreshProjection(activeRunId).then(refreshThread, () => refreshThread());
           return;
         }
         const sequence = numberValue(data.sequence);
@@ -341,15 +330,15 @@ export function useAgentPressAssistantRuntime(
     return () => {
       stream.abort();
     };
-  }, [activeRunId, notifyArticleReviewChanged, refreshProjection]);
+  }, [activeRunId, notifyArticleReviewChanged, refreshProjection, refreshThread]);
 
   const messages = useMemo(
     () => [...buildRunTurns(stableMessages, projections, liveContent), ...optimisticMessages],
     [liveContent, optimisticMessages, projections, stableMessages],
   );
 
-  const onNew = useCallback(
-    async (message: AppendMessage) => {
+  const submitMessage = useCallback(
+    async (message: AppendMessage, requestedMode?: AgentSendMode) => {
       const prompt = messageText(message);
       if (!prompt || !conversationId || !branchId) return;
       const optimisticId = crypto.randomUUID();
@@ -361,8 +350,7 @@ export function useAgentPressAssistantRuntime(
       try {
         await context.beforeSend?.();
         if (activeProjection && !activeProjection.terminal) {
-          const endpoint = sendMode === 'steering' ? 'steering' : 'follow-ups';
-          await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, {
+          await request(`${apiUrl}/${runDirectivePath(activeProjection.runId, requestedMode)}`, {
             content: prompt,
           });
           setOptimisticMessages((current) => current.filter(({ id }) => id !== optimisticId));
@@ -414,14 +402,15 @@ export function useAgentPressAssistantRuntime(
       mentionTargetIds,
       refreshProjection,
       selectedSkills,
-      sendMode,
     ],
   );
 
   const isRunning = Boolean(activeProjection && !activeProjection.terminal);
   const onCancel = useCallback(async () => {
-    if (activeRunId) await request(`${apiUrl}/runs/${activeRunId}/cancel`, {});
-  }, [activeRunId]);
+    if (!activeRunId || activeProjection?.status === 'cancelling') return;
+    await request(`${apiUrl}/runs/${activeRunId}/cancel`, {});
+    await refreshProjection(activeRunId);
+  }, [activeProjection?.status, activeRunId, refreshProjection]);
 
   const onReload = useCallback(
     async (parentId: string | null) => {
@@ -469,6 +458,30 @@ export function useAgentPressAssistantRuntime(
     [activeRunId, refreshProjection],
   );
 
+  const queue = useMemo<ExternalThreadQueueAdapter>(
+    () => ({
+      items: (activeProjection?.pendingDirectives ?? []).map(({ id, content }) => ({
+        id,
+        prompt: content,
+      })),
+      enqueue: (message, options) => {
+        void submitMessage(message, options.steer ? 'steering' : 'follow-up');
+      },
+      steer: () => {
+        // AgentPress exposes steering before persistence, not as a lossy conversion
+        // of an already persisted follow-up.
+      },
+      remove: (queueItemId) => {
+        const directive = activeProjection?.pendingDirectives.find(({ id }) => id === queueItemId);
+        if (directive) void cancelDirective(directive);
+      },
+      clear: () => {
+        // Cancelling the durable Run settles its pending directives atomically.
+      },
+    }),
+    [activeProjection?.pendingDirectives, cancelDirective, submitMessage],
+  );
+
   const decideTool = useCallback(
     async (toolCallId: string, decision: 'approved' | 'denied') => {
       await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision });
@@ -510,11 +523,17 @@ export function useAgentPressAssistantRuntime(
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage,
-    onNew,
+    onNew: submitMessage,
     onCancel,
     onReload,
+    queue,
     adapters: { dictation },
-    isSendDisabled: readiness.status !== 'ready' || !conversationId || !branchId || sendingDisabled,
+    isSendDisabled:
+      readiness.status !== 'ready' ||
+      !conversationId ||
+      !branchId ||
+      sendingDisabled ||
+      activeProjection?.status === 'cancelling',
     isRunning,
   });
 
@@ -533,8 +552,12 @@ export function useAgentPressAssistantRuntime(
   };
 }
 
+export function runDirectivePath(runId: string, requestedMode?: AgentSendMode): string {
+  return `runs/${runId}/${requestedMode === 'steering' ? 'steering' : 'follow-ups'}`;
+}
+
 function buildRunTurns(
-  messages: readonly StableMessage[],
+  messages: readonly StableAgentMessage[],
   projections: readonly RunProjection[],
   liveContent: readonly { readonly runId: string; readonly text: string }[],
 ): readonly AgentMessage[] {

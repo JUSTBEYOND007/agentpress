@@ -31,6 +31,7 @@ import {
   memoryCandidates,
   modelSelections,
   mentionBindings,
+  queuedFollowups,
   taskResults,
   toolCalls,
   workspaceMembers,
@@ -38,7 +39,7 @@ import {
 } from '@agentpress/database';
 import { hashToolArguments, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -534,7 +535,7 @@ describeWithDatabase('Direct Run application flow', () => {
           included: expect.arrayContaining([
             expect.objectContaining({ id: `article:${ids.article}`, kind: 'mention' }),
             expect.objectContaining({ id: 'skill:concise', kind: 'policy' }),
-          ]),
+          ]) as unknown,
         },
         contextHash: packs[0]?.contentHash,
       },
@@ -677,7 +678,10 @@ describeWithDatabase('Direct Run application flow', () => {
       async publish(event) {
         if (!event.durable && event.event.type === 'content.delta' && !cancellationRequested) {
           cancellationRequested = true;
-          await serviceReference.current?.requestCancellation(event.runId);
+          const first = await serviceReference.current?.requestCancellation(event.runId);
+          const repeated = await serviceReference.current?.requestCancellation(event.runId);
+          expect(first).toMatchObject({ outcome: 'accepted', status: 'cancelling' });
+          expect(repeated).toMatchObject({ outcome: 'accepted', status: 'cancelling' });
           controller.abort();
         }
       },
@@ -702,6 +706,7 @@ describeWithDatabase('Direct Run application flow', () => {
       prompt: '开始取消测试',
       idempotencyKey: randomUUID(),
     });
+    const queued = await cancellationService.enqueueFollowUp(run.runId, '取消后不应继续');
 
     await expect(cancellationService.execute(run.runId, controller.signal)).resolves.toMatchObject({
       status: 'cancelled',
@@ -711,6 +716,26 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(agentRuns)
       .where(eq(agentRuns.id, run.runId));
     expect(rows[0]?.status).toBe('cancelled');
+    const userMessages = await connection.db
+      .select({ id: conversationMessages.id })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.branchId, cancellationBranch),
+          eq(conversationMessages.role, 'user'),
+        ),
+      );
+    expect(userMessages).toHaveLength(1);
+    const followUps = await connection.db
+      .select({ status: queuedFollowups.status })
+      .from(queuedFollowups)
+      .where(eq(queuedFollowups.id, queued.directiveId));
+    expect(followUps).toEqual([{ status: 'cancelled' }]);
+    const branchRuns = await connection.db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.branchId, cancellationBranch));
+    expect(branchRuns).toHaveLength(1);
   });
 
   it('persists and executes a five-Specialist DAG with isolated Context Packs', async () => {
@@ -1334,9 +1359,26 @@ describeWithDatabase('Direct Run application flow', () => {
         });
       },
     };
+    let nextRunVisibleAtTerminal = false;
+    let observedRootRunId = '';
+    const followUpPublisher: RunEventPublisher = {
+      async publish(event) {
+        if (
+          event.durable &&
+          event.event.runId === observedRootRunId &&
+          event.event.eventType === 'run.completed'
+        ) {
+          const visibleRuns = await connection.db
+            .select({ id: agentRuns.id })
+            .from(agentRuns)
+            .where(eq(agentRuns.branchId, branchId));
+          nextRunVisibleAtTerminal = visibleRuns.some(({ id }) => id !== run.runId);
+        }
+      },
+    };
     const followUpService = new DirectRunService({
       database: connection.db,
-      publisher,
+      publisher: followUpPublisher,
       runtimeFactory: { create: () => runtime },
       systemPrompt: 'You are AgentPress.',
     });
@@ -1347,6 +1389,7 @@ describeWithDatabase('Direct Run application flow', () => {
       prompt: '你好',
       idempotencyKey: randomUUID(),
     });
+    observedRootRunId = run.runId;
     const firstDirective = await followUpService.enqueueFollowUp(run.runId, '继续补充');
     const secondDirective = await followUpService.enqueueFollowUp(run.runId, '再给一个例子');
     await expect(followUpService.getProjection(run.runId)).resolves.toMatchObject({
@@ -1366,6 +1409,7 @@ describeWithDatabase('Direct Run application flow', () => {
       ],
     });
     await followUpService.execute(run.runId);
+    expect(nextRunVisibleAtTerminal).toBe(true);
 
     const queuedRuns = await connection.db
       .select({ id: agentRuns.id })
