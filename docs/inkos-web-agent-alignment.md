@@ -76,9 +76,9 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [x] Keep an active Run executing when the user switches articles or conversations and expose its durable status in the conversation picker.
 - [x] Restore the same Run after refresh or SSE reconnect from PostgreSQL projections without duplicate messages, tool calls, edit batches, or optimistic content.
 - [x] Resume event streaming from the last durable event ID and fall back to a full projection refresh when the stream cursor is stale.
-- [ ] Represent one complete article write as one reviewable document batch while retaining granular batches for targeted edits.
-- [ ] Link an article-change part to its working draft, first changed block, latest batch undo, partial accept, reject, and stale-reload actions.
-- [ ] Keep review settlement and Run settlement independent: a completed Run may leave a durable pending article review.
+- [x] Represent one complete article write as one reviewable document batch while retaining granular batches for targeted edits.
+- [x] Link an article-change part to its working draft, first changed block, latest batch undo, partial accept, reject, and stale-reload actions.
+- [x] Keep review settlement and Run settlement independent: a completed Run may leave a durable pending article review.
 
 ## P1 Conversation And Background Work
 
@@ -90,7 +90,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 ## P1 Actionable Results And Execution Facts
 
 - [ ] Give tool results, evidence, artifacts, and article changes typed open, locate, download, retry, and provenance actions where applicable.
-- [ ] Locate the editor at the first affected block when an article-change part or review batch is opened, without moving the viewport during unrelated streaming.
+- [x] Locate the editor at the first affected block when an article-change part or review batch is opened, without moving the viewport during unrelated streaming.
 - [ ] Display the actual provider, model, context window, output limit, duration, tokens, and cost facts captured by the Run; never substitute current settings for historical facts.
 - [ ] Test artifact and context authorization, missing resources, stale versions, restored Runs, and hostile external URLs.
 

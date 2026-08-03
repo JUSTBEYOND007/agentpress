@@ -6,9 +6,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AgentComposer } from './agent-composer';
 import type { ArticleSelectionView } from './article-selection';
 import { AgentConversationHeader } from './agent-conversation-header';
-import { RunActionsContext, type RunActions } from './agent-run-parts';
+import { RunActionsContext, type RunActions } from './agent-run-actions';
 import { AgentThread } from './agent-thread';
-import type { AttachmentView, MemoryView, SkillView } from './agent-view-model';
+import type { AttachmentView, MemoryView, Proposal, SkillView } from './agent-view-model';
 import { useAgentConversations } from './use-agent-conversations';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
@@ -24,6 +24,7 @@ export function AgentWorkbench({
   conversationId,
   branchId,
   onArticleReviewChanged,
+  onOpenArticleProposal,
   onClose,
   workspaceId,
   activeArticleId,
@@ -36,6 +37,7 @@ export function AgentWorkbench({
   readonly conversationId?: string;
   readonly branchId?: string;
   readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
+  readonly onOpenArticleProposal?: (proposal: Proposal) => Promise<void>;
   readonly onClose?: () => void;
   readonly workspaceId?: string;
   readonly activeArticleId?: string;
@@ -201,8 +203,9 @@ export function AgentWorkbench({
       decideTool,
       answerQuestion,
       decideActionProposal,
+      ...(onOpenArticleProposal ? { openArticleProposal: onOpenArticleProposal } : {}),
     }),
-    [answerQuestion, decideActionProposal, decideTool],
+    [answerQuestion, decideActionProposal, decideTool, onOpenArticleProposal],
   );
   const status =
     activeProjection?.status ?? (readiness.status === 'ready' ? 'ready' : readiness.status);

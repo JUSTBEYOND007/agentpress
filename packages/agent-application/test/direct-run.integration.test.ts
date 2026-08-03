@@ -456,6 +456,7 @@ describeWithDatabase('Direct Run application flow', () => {
       connection.db.select().from(mentionBindings).where(eq(mentionBindings.runId, run.runId)),
     ]);
     expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.status).toBe('pending');
     expect(plans).toHaveLength(0);
     expect(bindings).toMatchObject([{ targetId: ids.article }]);
   });

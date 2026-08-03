@@ -39,7 +39,7 @@ export type ConversationView = {
 
 export type Proposal = {
   readonly proposalId: string;
-  readonly status: 'pending';
+  readonly status: 'pending' | 'partially_accepted' | 'accepted' | 'rejected' | 'expired';
   readonly articleId?: string;
   readonly baseRevisionId?: string;
   readonly operations: readonly EditOperation[];
@@ -56,16 +56,12 @@ export function proposalFromPart(part: RunPart): Proposal | undefined {
   const output = recordValue(part.payload.output);
   const value = Object.keys(output).length > 0 ? output : part.payload;
   const proposalId = stringValue(value.proposalId);
-  if (
-    !proposalId ||
-    stringValue(part.payload.proposalStatus) !== 'pending' ||
-    !Array.isArray(value.operations) ||
-    !Array.isArray(value.diffs)
-  )
+  if (!proposalId || !Array.isArray(value.operations) || !Array.isArray(value.diffs))
     return undefined;
+  const status = proposalStatus(part.payload.proposalStatus);
   return {
     proposalId,
-    status: 'pending',
+    status,
     ...(stringValue(value.articleId) ? { articleId: stringValue(value.articleId) } : {}),
     ...(stringValue(value.baseRevisionId)
       ? { baseRevisionId: stringValue(value.baseRevisionId) }
@@ -77,6 +73,15 @@ export function proposalFromPart(part: RunPart): Proposal | undefined {
       ? (value.batches as NonNullable<Proposal['batches']>)
       : [],
   };
+}
+
+function proposalStatus(value: unknown): Proposal['status'] {
+  return value === 'partially_accepted' ||
+    value === 'accepted' ||
+    value === 'rejected' ||
+    value === 'expired'
+    ? value
+    : 'pending';
 }
 
 export function parseRunPart(value: unknown): RunPart | undefined {

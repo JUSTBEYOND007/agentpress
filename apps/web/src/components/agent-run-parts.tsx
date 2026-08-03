@@ -14,7 +14,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import { createContext, useContext, useState } from 'react';
+import { useState } from 'react';
 
 import {
   activityLabel,
@@ -23,7 +23,6 @@ import {
   proposalFromPart,
   safeExternalUrl,
   statusLabel,
-  type Proposal,
 } from './agent-view-model';
 import {
   numberValue,
@@ -37,17 +36,8 @@ import { NoticePart } from './agent-notice-part';
 import { ReasoningPart } from './agent-reasoning-part';
 import { ArtifactPart } from './agent-artifact-drawer';
 import { ContextSourcesPart } from './agent-context-sources';
-
-export type RunActions = {
-  readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
-  readonly answerQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
-  readonly decideActionProposal: (
-    proposalId: string,
-    decision: 'confirmed' | 'rejected',
-  ) => Promise<Readonly<Record<string, unknown>>>;
-};
-
-export const RunActionsContext = createContext<RunActions | undefined>(undefined);
+import { AgentArticleChangePart } from './agent-article-change-part';
+import { useRunActions } from './agent-run-actions';
 
 export function UserMessage(): React.JSX.Element {
   return (
@@ -96,13 +86,13 @@ function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Elemen
   if (part.type === 'artifact') return <ArtifactPart part={part} />;
   if (part.type === 'context') return <ContextSourcesPart part={part} />;
   if (part.type === 'evidence') return <EvidencePart part={part} />;
-  if (part.type === 'article-change') return <ArticleChangePart part={part} />;
+  if (part.type === 'article-change') return <AgentArticleChangePart part={part} />;
   if (part.type === 'usage') return <UsagePart part={part} />;
   if (part.type === 'warning' || part.type === 'recovery') return <NoticePart part={part} />;
   if (part.type === 'activity') {
     const proposal = proposalFromPart(part);
     return proposal ? (
-      <ArticleChangePart part={part} proposal={proposal} />
+      <AgentArticleChangePart part={{ ...part, type: 'article-change' }} />
     ) : (
       <ActivityPart part={part} />
     );
@@ -356,31 +346,6 @@ function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
   );
 }
 
-function ArticleChangePart({
-  part,
-  proposal = proposalFromPart(part),
-}: {
-  readonly part: RunPart;
-  readonly proposal?: Proposal;
-}): React.JSX.Element | null {
-  if (!proposal) return null;
-  return (
-    <section className="run-part proposal-preview">
-      <div className="proposal-heading">
-        <div>
-          <strong>文章修改</strong>
-          <span>
-            {proposal.reviewMode === 'document'
-              ? '整篇文章草稿'
-              : `${String(proposal.operations.length)} 处修改`}
-          </span>
-        </div>
-        <span className="proposal-view-status">已在正文中显示</span>
-      </div>
-    </section>
-  );
-}
-
 function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const usage = recordValue(part.payload.usage);
   const tokens = numberValue(usage.inputTokens) + numberValue(usage.outputTokens);
@@ -404,10 +369,4 @@ function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
 function formatDuration(durationMs: number): string {
   if (durationMs < 60_000) return `${String(Math.max(1, Math.round(durationMs / 1000)))} 秒`;
   return `${String(Math.round(durationMs / 60_000))} 分钟`;
-}
-
-function useRunActions(): RunActions {
-  const actions = useContext(RunActionsContext);
-  if (!actions) throw new Error('Run actions are unavailable');
-  return actions;
 }

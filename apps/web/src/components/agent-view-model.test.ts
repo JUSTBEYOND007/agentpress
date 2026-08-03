@@ -43,6 +43,6 @@ describe('agent view model', () => {
     expect(proposalFromPart(part)).toMatchObject({ proposalId: 'proposal-1', status: 'pending' });
     expect(
       proposalFromPart({ ...part, payload: { ...part.payload, proposalStatus: 'accepted' } }),
-    ).toBeUndefined();
+    ).toMatchObject({ proposalId: 'proposal-1', status: 'accepted' });
   });
 });

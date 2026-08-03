@@ -1,6 +1,5 @@
 'use client';
 
-import { Check, ChevronLeft, ChevronRight, EyeOff, RotateCcw, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../lib/authenticated-fetch';
@@ -18,6 +17,7 @@ export type ArticleReviewState = {
   readonly error?: string | undefined;
   readonly onDecision: (operationId: string, decision: 'accepted' | 'rejected') => void;
   readonly onUndoBatch?: () => void;
+  readonly onReload?: () => void;
 };
 
 export function useArticleReview(
@@ -29,6 +29,7 @@ export function useArticleReview(
   const reviewRef = useRef<ArticleReviewState | undefined>(undefined);
   const decisionHandlerRef = useRef<ArticleReviewState['onDecision']>(() => undefined);
   const undoBatchHandlerRef = useRef<() => void>(() => undefined);
+  const reloadHandlerRef = useRef<() => void>(() => undefined);
   const loadSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -63,11 +64,27 @@ export function useArticleReview(
         decisionHandlerRef.current(operationId, decision);
       }),
       decisions: proposal.decisions ?? {},
-      onUndoBatch: () => undoBatchHandlerRef.current(),
+      onUndoBatch: () => {
+        undoBatchHandlerRef.current();
+      },
+      onReload: () => {
+        reloadHandlerRef.current();
+      },
     };
     reviewRef.current = restored;
     setReview(restored);
   }, [articleId]);
+
+  const reloadFromSource = useCallback(async (): Promise<void> => {
+    await onArticleUpdated();
+    await reload();
+  }, [onArticleUpdated, reload]);
+
+  useEffect(() => {
+    reloadHandlerRef.current = () => {
+      void reloadFromSource().catch(() => undefined);
+    };
+  }, [reloadFromSource]);
 
   useEffect(() => {
     reviewRef.current = undefined;
@@ -107,6 +124,9 @@ export function useArticleReview(
             visible: false,
             phase: 'conflict' as const,
             onDecision: () => undefined,
+            onReload: () => {
+              reloadHandlerRef.current();
+            },
           }),
           phase: 'conflict',
           visible: false,
@@ -183,26 +203,6 @@ export function useArticleReview(
     decisionHandlerRef.current = onDecision;
   }, [onDecision]);
 
-  const showProposal = useCallback(
-    (proposal: Proposal): void => {
-      if (
-        !articleId ||
-        (proposal.articleId && proposal.articleId !== articleId) ||
-        resolved.has(proposal.proposalId)
-      )
-        return;
-      setReview((current) =>
-        current?.proposal.proposalId === proposal.proposalId
-          ? { ...current, visible: true, onDecision }
-          : {
-              ...createArticleReviewState(proposal, onDecision),
-              onUndoBatch: () => undoBatchHandlerRef.current(),
-            },
-      );
-    },
-    [articleId, onDecision, resolved],
-  );
-
   const setAll = useCallback(
     (decision: 'accepted' | 'rejected'): void => {
       const current = reviewRef.current;
@@ -220,11 +220,33 @@ export function useArticleReview(
   const focus = useCallback((operationId: string): void => {
     setReview((current) => (current ? { ...current, activeOperationId: operationId } : current));
     window.requestAnimationFrame(() => {
-      document
-        .querySelector(`[data-ai-diff-id="${CSS.escape(operationId)}"]`)
-        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector(`[data-ai-diff-id="${CSS.escape(operationId)}"]`)
+          ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
     });
   }, []);
+
+  const openProposal = useCallback(
+    async (proposal: Proposal): Promise<void> => {
+      if (!articleId || (proposal.articleId && proposal.articleId !== articleId)) {
+        throw new Error('这批修改不属于当前文章。');
+      }
+      if (resolved.has(proposal.proposalId)) throw new Error('这批正文修改已经结束。');
+      await reload();
+      const current = reviewRef.current;
+      if (current?.proposal.proposalId !== proposal.proposalId) {
+        throw new Error('这批正文修改已经失效，请查看最新正文。');
+      }
+      const visible = { ...current, visible: true, onDecision };
+      reviewRef.current = visible;
+      setReview(visible);
+      const firstOperationId = current.proposal.operations[0]?.operationId;
+      if (firstOperationId) focus(firstOperationId);
+    },
+    [articleId, focus, onDecision, reload, resolved],
+  );
 
   const setVisible = useCallback((visible: boolean): void => {
     setReview((current) => (current ? { ...current, visible } : current));
@@ -241,12 +263,26 @@ export function useArticleReview(
       .find(({ status }) => status === 'active');
     if (!current || !batch) return;
     setReview((value) => (value ? { ...value, phase: 'submitting' } : value));
-    const response = await authenticatedFetch(
-      `${apiUrl}/edit-proposals/${current.proposal.proposalId}/batches/${batch.id}/revert`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-    );
-    if (!response.ok) throw new Error(await response.text());
-    await reload();
+    try {
+      const response = await authenticatedFetch(
+        `${apiUrl}/edit-proposals/${current.proposal.proposalId}/batches/${batch.id}/revert`,
+        { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+      );
+      if (!response.ok) throw new Error(await response.text());
+      const result = (await response.json()) as { readonly status?: unknown };
+      if (result.status !== 'pending') {
+        setResolved((items) => new Set([...items, current.proposal.proposalId]));
+      }
+      await reload();
+    } catch (reason) {
+      const failed: ArticleReviewState = {
+        ...current,
+        phase: 'conflict',
+        error: friendlyFailure(reason, '最近一批修改没有撤销，请重新加载正文。'),
+      };
+      reviewRef.current = failed;
+      setReview(failed);
+    }
   }, [reload]);
 
   useEffect(() => {
@@ -275,7 +311,7 @@ export function useArticleReview(
   return {
     review,
     reload,
-    showProposal,
+    openProposal,
     onDecision,
     setAll,
     setVisible,
@@ -284,112 +320,6 @@ export function useArticleReview(
     activeIndex,
     undoLatestBatch,
   };
-}
-
-export function ArticleReviewToolbar({
-  review,
-  activeIndex,
-  onDecisionAll,
-  onMove,
-  onVisibleChange,
-}: {
-  readonly review: ArticleReviewState;
-  readonly activeIndex: number;
-  readonly onDecisionAll: (decision: 'accepted' | 'rejected') => void;
-  readonly onMove: (offset: number) => void;
-  readonly onVisibleChange: (visible: boolean) => void;
-}): React.JSX.Element {
-  const count = review.proposal.operations.length;
-  const wholeDocument = review.proposal.reviewMode === 'document';
-  const selected = Object.keys(review.decisions).length;
-  return (
-    <section className="article-review-toolbar" aria-label="AI 修改审阅" aria-live="polite">
-      <div className="article-review-title">
-        <Sparkles aria-hidden="true" size={14} />
-        <strong>{wholeDocument ? '整篇文章修改' : '建议修改'}</strong>
-        <span>{wholeDocument ? '1 个整体变更' : `${count} 处`}</span>
-      </div>
-      <div className="article-review-navigation">
-        <button
-          aria-label="上一处修改"
-          disabled={wholeDocument || count < 2 || review.phase === 'submitting'}
-          onClick={() => {
-            onMove(-1);
-          }}
-          title="上一处"
-          type="button"
-        >
-          <ChevronLeft size={14} />
-        </button>
-        <span>{wholeDocument ? '整体' : `${activeIndex + 1}/${count}`}</span>
-        <button
-          aria-label="下一处修改"
-          disabled={wholeDocument || count < 2 || review.phase === 'submitting'}
-          onClick={() => {
-            onMove(1);
-          }}
-          title="下一处"
-          type="button"
-        >
-          <ChevronRight size={14} />
-        </button>
-      </div>
-      <div className="article-review-actions">
-        <button
-          className="article-review-accept"
-          disabled={review.phase === 'submitting'}
-          onClick={() => {
-            onDecisionAll('accepted');
-          }}
-          type="button"
-        >
-          <Check size={13} />
-          全部接受
-        </button>
-        <button
-          className="article-review-reject"
-          disabled={review.phase === 'submitting'}
-          onClick={() => {
-            onDecisionAll('rejected');
-          }}
-          type="button"
-        >
-          <X size={13} />
-          全部拒绝
-        </button>
-        {review.onUndoBatch ? (
-          <button
-            aria-label="撤销最近一批修改"
-            disabled={review.phase === 'submitting'}
-            onClick={review.onUndoBatch}
-            title="撤销最近一批修改"
-            type="button"
-          >
-            <RotateCcw size={14} />
-          </button>
-        ) : null}
-        <button
-          aria-label="隐藏修改"
-          onClick={() => {
-            onVisibleChange(false);
-          }}
-          title="隐藏修改"
-          type="button"
-        >
-          <EyeOff size={14} />
-        </button>
-      </div>
-      <span className="article-review-progress" aria-hidden="true">
-        {selected > 0 ? `${String(selected)} 处已处理` : null}
-      </span>
-      {review.error ? (
-        <p className="article-review-error">
-          <RotateCcw size={12} />
-          {review.error}
-        </p>
-      ) : null}
-    </section>
-  );
 }
 
 export function createArticleReviewState(

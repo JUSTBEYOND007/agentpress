@@ -8,10 +8,11 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { RotateCcw, X } from 'lucide-react';
+import { RefreshCw, RotateCcw, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ArticleReviewExtension, articleReviewPluginKey } from './article-review-extension';
-import { ArticleReviewToolbar, type ArticleReviewState } from './article-review';
+import type { ArticleReviewState } from './article-review';
+import { ArticleReviewToolbar } from './article-review-toolbar';
 import { readArticleSelection, type ArticleSelectionView } from './article-selection';
 import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../lib/autosave-queue';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
@@ -279,6 +280,16 @@ export function ArticleCanvas({
         <div className="article-review-error article-review-error-standalone" role="alert">
           <RotateCcw aria-hidden="true" size={12} />
           <span>{review.error}</span>
+          {review.onReload ? (
+            <button
+              aria-label="重新加载最新正文"
+              onClick={review.onReload}
+              title="重新加载最新正文"
+              type="button"
+            >
+              <RefreshCw aria-hidden="true" size={13} />
+            </button>
+          ) : null}
           <button
             aria-label="关闭正文修改提示"
             onClick={() => {

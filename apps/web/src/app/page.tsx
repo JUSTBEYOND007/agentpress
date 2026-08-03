@@ -616,6 +616,7 @@ function WorkspacePage(): React.JSX.Element {
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
           onArticleReviewChanged={articleReview.reload}
+          onOpenArticleProposal={articleReview.openProposal}
           beforeSend={prepareAgentSend}
           pendingReview={Boolean(articleReview.review)}
           onClose={() => {
