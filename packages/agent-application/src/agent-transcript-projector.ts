@@ -10,6 +10,7 @@ import {
   type AgentPressDatabase,
 } from '@agentpress/database';
 import { and, asc, desc, eq } from 'drizzle-orm';
+import { ExecutionFactCache, executionFactKey } from './execution-fact-cache.js';
 
 const DEFAULT_DIALOGUE_LIMIT = 12;
 const DEFAULT_TOOL_SUMMARY_LIMIT = 8;
@@ -29,6 +30,10 @@ type TranscriptEntry = {
 };
 
 export class AgentTranscriptProjector {
+  private readonly projectionCache = new ExecutionFactCache<readonly RuntimeTranscriptMessage[]>(
+    64,
+  );
+
   public constructor(
     private readonly database: AgentPressDatabase,
     private readonly now: () => Date = () => new Date(),
@@ -59,7 +64,12 @@ export class AgentTranscriptProjector {
           : and(eq(agentSessions.runId, runId), eq(agentSessions.kind, 'main')),
       )
       .orderBy(asc(agentSessions.createdAt), asc(agentTranscriptEntries.sequence));
-    return projectCommittedTranscript(rows);
+    const key = executionFactKey({ runId, taskId: taskId ?? null, rows });
+    const cached = this.projectionCache.get(key);
+    if (cached) return cached;
+    const projection = projectCommittedTranscript(rows);
+    this.projectionCache.set(key, projection);
+    return projection;
   }
 
   public async restoreApprovedToolCall(

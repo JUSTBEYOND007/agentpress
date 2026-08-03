@@ -84,6 +84,12 @@ export class AgentSessionRunner {
       policySnapshot: {
         purpose: modelPurpose,
         provider: runtime.identity?.provider ?? 'unknown',
+        ...(runtime.identity?.contextWindow
+          ? { contextWindow: runtime.identity.contextWindow }
+          : {}),
+        ...(runtime.identity?.maxOutputTokens
+          ? { maxOutputTokens: runtime.identity.maxOutputTokens }
+          : {}),
       },
       selectedModel,
       fallbackUsed: false,

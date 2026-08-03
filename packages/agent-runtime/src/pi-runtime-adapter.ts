@@ -73,10 +73,20 @@ export type FauxRuntimeConfig = {
 export class PiRuntimeAdapter implements AgentRuntime {
   private activeAgent: Agent | undefined;
 
-  public readonly identity: { readonly provider: string; readonly model: string };
+  public readonly identity: {
+    readonly provider: string;
+    readonly model: string;
+    readonly contextWindow: number;
+    readonly maxOutputTokens: number;
+  };
 
   private constructor(private readonly backend: PiBackend) {
-    this.identity = { provider: backend.model.provider, model: backend.model.id };
+    this.identity = {
+      provider: backend.model.provider,
+      model: backend.model.id,
+      contextWindow: backend.model.contextWindow,
+      maxOutputTokens: backend.model.maxTokens,
+    };
   }
 
   public static forArk(config: ArkRuntimeConfig): PiRuntimeAdapter {
@@ -107,6 +117,17 @@ export class PiRuntimeAdapter implements AgentRuntime {
     sink: RuntimeEventSink,
     signal?: AbortSignal,
   ): Promise<RuntimeResult> {
+    const budget = this.identity.contextWindow - this.identity.maxOutputTokens;
+    const estimatedInput = estimateRequestTokens(request);
+    if (estimatedInput > budget) {
+      const error: RuntimeFailure = {
+        code: 'invalid_history',
+        message: `Model input budget exceeded (${String(estimatedInput)} > ${String(budget)} tokens)`,
+        retryable: false,
+      };
+      await sink({ type: 'run.failed', error });
+      return { status: 'failed', messages: [], error };
+    }
     const stableMessages: RuntimeMessage[] = request.history.filter(
       (message): message is RuntimeMessage => message.role !== 'tool',
     );
@@ -279,6 +300,20 @@ export class PiRuntimeAdapter implements AgentRuntime {
     agent.steer(toPiMessage(message));
     return true;
   }
+}
+
+function estimateRequestTokens(request: RuntimeRequest): number {
+  const serialized = JSON.stringify({
+    systemPrompt: request.systemPrompt,
+    history: request.history,
+    currentTurn: request.currentTurn,
+    tools: request.tools?.map(({ name, description, parameters }) => ({
+      name,
+      description,
+      parameters,
+    })),
+  });
+  return Math.ceil(Buffer.byteLength(serialized, 'utf8') / 4);
 }
 
 function toPiTool(tool: RuntimeTool, runId: string): AgentTool {
