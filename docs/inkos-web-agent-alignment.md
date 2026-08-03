@@ -73,7 +73,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P0 Durable Sessions And Review Loop
 
-- [ ] Keep an active Run executing when the user switches articles or conversations and expose its durable status in the conversation picker.
+- [x] Keep an active Run executing when the user switches articles or conversations and expose its durable status in the conversation picker.
 - [x] Restore the same Run after refresh or SSE reconnect from PostgreSQL projections without duplicate messages, tool calls, edit batches, or optimistic content.
 - [x] Resume event streaming from the last durable event ID and fall back to a full projection refresh when the stream cursor is stale.
 - [ ] Represent one complete article write as one reviewable document batch while retaining granular batches for targeted edits.
@@ -82,8 +82,8 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P1 Conversation And Background Work
 
-- [ ] Show running, waiting-for-user, waiting-for-approval, failed, and pending-review status for every conversation from persisted facts.
-- [ ] Preserve background progress and unread completion when the user leaves and returns to a conversation.
+- [x] Show running, waiting-for-user, waiting-for-approval, failed, and pending-review status for every conversation from persisted facts.
+- [x] Preserve background progress and unread completion when the user leaves and returns to a conversation.
 - [ ] Offer recovery actions appropriate to provider failure, tool failure, protocol failure, stale article, cancellation, and degraded completion.
 - [ ] Show long-task phase, completed steps, outstanding interaction, and the latest safe recovery point without exposing hidden reasoning.
 

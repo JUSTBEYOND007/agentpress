@@ -8,7 +8,8 @@ import type { ArticleSelectionView } from './article-selection';
 import { AgentConversationHeader } from './agent-conversation-header';
 import { RunActionsContext, type RunActions } from './agent-run-parts';
 import { AgentThread } from './agent-thread';
-import type { AttachmentView, ConversationView, MemoryView, SkillView } from './agent-view-model';
+import type { AttachmentView, MemoryView, SkillView } from './agent-view-model';
+import { useAgentConversations } from './use-agent-conversations';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
@@ -59,12 +60,20 @@ export function AgentWorkbench({
   const [attachmentError, setAttachmentError] = useState<string>();
   const [memories, setMemories] = useState<readonly MemoryView[]>([]);
   const [contextError, setContextError] = useState<string>();
-  const [conversations, setConversations] = useState<readonly ConversationView[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<ConversationView | undefined>(
-    conversationId && branchId
-      ? { id: conversationId, branchId, title: '写作助手', isDefault: true }
-      : undefined,
-  );
+  const {
+    conversations,
+    selected: selectedConversation,
+    select: setSelectedConversation,
+    create: createConversation,
+    update: updateConversation,
+    refresh: loadConversations,
+    error: conversationError,
+  } = useAgentConversations({
+    apiUrl,
+    ...(activeArticleId ? { articleId: activeArticleId } : {}),
+    ...(conversationId ? { initialConversationId: conversationId } : {}),
+    ...(branchId ? { initialBranchId: branchId } : {}),
+  });
   const selectedSkills = useMemo(
     () =>
       skills
@@ -153,15 +162,6 @@ export function AgentWorkbench({
     setAttachmentError(undefined);
   }, [submissionSequence]);
 
-  useEffect(() => {
-    if (!conversationId || !branchId) return;
-    setSelectedConversation((current) =>
-      current?.id === conversationId
-        ? current
-        : { id: conversationId, branchId, title: '写作助手', isDefault: true },
-    );
-  }, [branchId, conversationId]);
-
   const loadContext = useCallback(async (): Promise<void> => {
     if (!workspaceId) return;
     try {
@@ -178,58 +178,9 @@ export function AgentWorkbench({
     }
   }, [workspaceId]);
 
-  const loadConversations = useCallback(async (): Promise<void> => {
-    if (!activeArticleId) return;
-    const response = await authenticatedFetch(
-      `${apiUrl}/articles/${activeArticleId}/conversations`,
-    );
-    if (!response.ok) throw new Error('对话列表加载失败');
-    const items = (await response.json()) as readonly ConversationView[];
-    setConversations(items);
-    setSelectedConversation(
-      (current) =>
-        items.find(({ id, branchId }) => id === current?.id && branchId === current.branchId) ??
-        items.find(({ id }) => id === conversationId) ??
-        items.find(({ isDefault }) => isDefault) ??
-        items[0],
-    );
-  }, [activeArticleId, conversationId]);
-
   useEffect(() => {
     void loadContext();
-    void loadConversations().catch((error: unknown) => {
-      setContextError(error instanceof Error ? error.message : '对话列表加载失败');
-    });
-  }, [loadContext, loadConversations]);
-
-  const createConversation = async (): Promise<void> => {
-    if (!activeArticleId) return;
-    const response = await authenticatedFetch(
-      `${apiUrl}/articles/${activeArticleId}/conversations`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: '新对话' }),
-      },
-    );
-    if (!response.ok) throw new Error(await response.text());
-    const created = (await response.json()) as ConversationView;
-    setConversations((current) => [created, ...current]);
-    setSelectedConversation(created);
-  };
-
-  const updateConversation = async (
-    target: ConversationView,
-    update: { readonly title?: string; readonly archived?: boolean },
-  ): Promise<void> => {
-    const response = await authenticatedFetch(`${apiUrl}/conversations/${target.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(update),
-    });
-    if (!response.ok) throw new Error(await response.text());
-    await loadConversations();
-  };
+  }, [loadContext]);
 
   const decideMemory = async (candidateId: string, decision: 'accepted' | 'rejected') => {
     if (!workspaceId) return;
@@ -269,9 +220,9 @@ export function AgentWorkbench({
             {...(selectedConversation ? { selected: selectedConversation } : {})}
             status={status}
           />
-          {panelError || contextError ? (
+          {panelError || contextError || conversationError ? (
             <div className="agent-status-banner" role="status">
-              {panelError ?? contextError}
+              {panelError ?? contextError ?? conversationError}
             </div>
           ) : null}
           <ThreadPrimitive.Root className="aui-thread">

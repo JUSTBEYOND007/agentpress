@@ -31,6 +31,10 @@ export type ConversationView = {
   readonly parentBranchId?: string | null;
   readonly forkedFromMessageId?: string | null;
   readonly branchCreatedAt?: string;
+  readonly status?: string;
+  readonly latestRunId?: string;
+  readonly pendingReview?: boolean;
+  readonly unread?: boolean;
 };
 
 export type Proposal = {

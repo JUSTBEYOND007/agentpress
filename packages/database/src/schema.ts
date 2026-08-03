@@ -266,6 +266,23 @@ export const conversationBranches = pgTable(
   (table) => [index('conversation_branches_conversation_idx').on(table.conversationId)],
 );
 
+export const conversationReadStates = pgTable(
+  'conversation_read_states',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => appUsers.id, { onDelete: 'cascade' }),
+    branchId: uuid('branch_id')
+      .notNull()
+      .references(() => conversationBranches.id, { onDelete: 'cascade' }),
+    lastReadAt: timestamp('last_read_at', { withTimezone: true, precision: 3 })
+      .notNull()
+      .defaultNow(),
+    updatedAt,
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.branchId] })],
+);
+
 export const conversationMessages = pgTable(
   'conversation_messages',
   {

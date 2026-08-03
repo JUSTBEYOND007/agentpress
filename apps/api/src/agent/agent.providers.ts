@@ -1,5 +1,6 @@
 import {
   ActionProposalService,
+  ConversationOverviewService,
   ContextGovernanceService,
   DirectRunService,
   ToolCallService,
@@ -111,6 +112,11 @@ export const agentProviders: Provider[] = [
   {
     provide: ContextGovernanceService,
     useFactory: (connection: DatabaseConnection) => new ContextGovernanceService(connection.db),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: ConversationOverviewService,
+    useFactory: (connection: DatabaseConnection) => new ConversationOverviewService(connection.db),
     inject: [DATABASE_CONNECTION],
   },
   {

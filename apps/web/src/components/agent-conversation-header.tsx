@@ -103,8 +103,20 @@ export function AgentConversationHeader({
                   }}
                   type="button"
                 >
-                  <span>{conversation.title}</span>
-                  {conversation.isDefault ? <small>默认</small> : null}
+                  <span className="conversation-item-title">
+                    <span>{conversation.title}</span>
+                    {conversation.isDefault ? <small>默认</small> : null}
+                  </span>
+                  <span className="conversation-item-state">
+                    {conversation.unread ? (
+                      <span aria-label="有未读更新" className="conversation-unread" />
+                    ) : null}
+                    <small>
+                      {conversation.pendingReview
+                        ? '待审阅'
+                        : statusLabel(conversation.status ?? 'ready')}
+                    </small>
+                  </span>
                 </button>
               ))}
               {visible.length === 0 ? <p>没有匹配的对话</p> : null}

@@ -1,5 +1,6 @@
 export * from './contracts.js';
 export * from './context-governance-service.js';
+export * from './conversation-overview-service.js';
 export * from './action-capability-policy.js';
 export * from './agent-turn-profile.js';
 export * from './agent-session-runner.js';

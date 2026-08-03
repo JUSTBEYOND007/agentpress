@@ -12,6 +12,7 @@ import {
   enqueueOutboxMessage,
 } from '@agentpress/database';
 import { ARTICLE_INDEX_COMMAND_TOPIC } from '@agentpress/knowledge-retrieval';
+import { ConversationOverviewService } from '@agentpress/agent-application';
 import {
   BadRequestException,
   Body,
@@ -59,6 +60,8 @@ export class WorkspaceController {
   public constructor(
     @Inject(DATABASE_CONNECTION) private readonly connection: DatabaseConnection,
     @Inject(AuthorizationService) private readonly authorization: AuthorizationService,
+    @Inject(ConversationOverviewService)
+    private readonly conversationOverviews: ConversationOverviewService,
   ) {}
 
   @Get('me/workspace')
@@ -320,19 +323,18 @@ export class WorkspaceController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     await this.authorization.assertArticleAccess(articleId, user.id);
-    return this.connection.db
-      .select({
-        id: conversations.id,
-        title: conversations.title,
-        isDefault: conversations.isDefault,
-        archivedAt: conversations.archivedAt,
-        branchId: conversationBranches.id,
-        updatedAt: conversations.updatedAt,
-      })
-      .from(conversations)
-      .innerJoin(conversationBranches, eq(conversationBranches.conversationId, conversations.id))
-      .where(eq(conversations.articleId, articleId))
-      .orderBy(desc(conversations.updatedAt));
+    return this.conversationOverviews.listForArticle(articleId, user.id);
+  }
+
+  @Post('conversations/:conversationId/branches/:branchId/read')
+  public async markConversationRead(
+    @Param('conversationId') conversationId: string,
+    @Param('branchId') branchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertConversationBranchAccess(conversationId, branchId, user.id);
+    await this.conversationOverviews.markRead(user.id, branchId);
+    return { read: true };
   }
 
   @Post('articles/:articleId/conversations')

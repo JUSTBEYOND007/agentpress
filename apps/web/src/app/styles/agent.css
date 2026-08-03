@@ -119,10 +119,34 @@
   background: #f1f1ef;
 }
 
-.conversation-menu button span {
+.conversation-item-title,
+.conversation-item-state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.conversation-item-title {
+  flex: 1;
+}
+
+.conversation-item-title > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-item-state {
+  flex: 0 0 auto;
+}
+
+.conversation-unread {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #2f7650;
 }
 
 .conversation-menu small {
