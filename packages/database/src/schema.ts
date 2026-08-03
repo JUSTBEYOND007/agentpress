@@ -1171,6 +1171,7 @@ export const editProposals = pgTable(
       .notNull()
       .references(() => articleRevisions.id, { onDelete: 'restrict' }),
     operations: jsonb('operations').$type<readonly unknown[]>().notNull(),
+    reviewMode: varchar('review_mode', { length: 16 }).notNull().default('granular'),
     diffs: jsonb('diffs')
       .$type<readonly unknown[]>()
       .notNull()
@@ -1191,6 +1192,7 @@ export const editProposals = pgTable(
     uniqueIndex('edit_proposals_one_pending_article_unique')
       .on(table.articleId)
       .where(sql`${table.status} = 'pending'`),
+    check('edit_proposals_review_mode_check', sql`${table.reviewMode} in ('granular', 'document')`),
   ],
 );
 

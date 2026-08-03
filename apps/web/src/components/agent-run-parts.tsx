@@ -389,7 +389,11 @@ function ArticleChangePart({
       <div className="proposal-heading">
         <div>
           <strong>文章修改</strong>
-          <span>{proposal.operations.length} 处修改</span>
+          <span>
+            {proposal.reviewMode === 'document'
+              ? '整篇文章草稿'
+              : `${proposal.operations.length} 处修改`}
+          </span>
         </div>
         <span className="proposal-view-status">已在正文中显示</span>
       </div>

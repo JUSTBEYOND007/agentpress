@@ -300,18 +300,19 @@ export function ArticleReviewToolbar({
   readonly onVisibleChange: (visible: boolean) => void;
 }): React.JSX.Element {
   const count = review.proposal.operations.length;
+  const wholeDocument = review.proposal.reviewMode === 'document';
   const selected = Object.keys(review.decisions).length;
   return (
     <section className="article-review-toolbar" aria-label="AI 修改审阅" aria-live="polite">
       <div className="article-review-title">
         <Sparkles aria-hidden="true" size={14} />
-        <strong>建议修改</strong>
-        <span>{count} 处</span>
+        <strong>{wholeDocument ? '整篇文章修改' : '建议修改'}</strong>
+        <span>{wholeDocument ? '1 个整体变更' : `${count} 处`}</span>
       </div>
       <div className="article-review-navigation">
         <button
           aria-label="上一处修改"
-          disabled={count < 2 || review.phase === 'submitting'}
+          disabled={wholeDocument || count < 2 || review.phase === 'submitting'}
           onClick={() => {
             onMove(-1);
           }}
@@ -320,12 +321,10 @@ export function ArticleReviewToolbar({
         >
           <ChevronLeft size={14} />
         </button>
-        <span>
-          {activeIndex + 1}/{count}
-        </span>
+        <span>{wholeDocument ? '整体' : `${activeIndex + 1}/${count}`}</span>
         <button
           aria-label="下一处修改"
-          disabled={count < 2 || review.phase === 'submitting'}
+          disabled={wholeDocument || count < 2 || review.phase === 'submitting'}
           onClick={() => {
             onMove(1);
           }}

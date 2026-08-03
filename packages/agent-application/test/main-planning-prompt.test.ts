@@ -7,6 +7,8 @@ describe('mainPlanningPrompt', () => {
     const prompt = mainPlanningPrompt(['article.read', 'article.propose']);
 
     expect(prompt).toContain('call article.propose_edits directly');
+    expect(prompt).toContain('reviewMode="document"');
+    expect(prompt).toContain('reviewMode="granular"');
     expect(prompt).toContain('do not call action_propose');
   });
 

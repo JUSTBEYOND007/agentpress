@@ -28,6 +28,7 @@ export type EditProposal = {
   readonly baseRevision: string;
   readonly operations: readonly EditOperation[];
 };
+export type EditReviewMode = 'granular' | 'document';
 export type OperationDecision = 'accepted' | 'rejected';
 export type DiffEntry = {
   readonly operationId: string;

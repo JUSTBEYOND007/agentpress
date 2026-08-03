@@ -1,0 +1,1 @@
+ALTER TABLE "edit_proposals" ADD COLUMN "review_mode" varchar(16) DEFAULT 'granular' NOT NULL;

@@ -388,7 +388,11 @@ export class PlannedRunExecutor {
       signal,
     );
     const editRows = await this.options.database
-      .select({ id: editProposals.id, operations: editProposals.operations })
+      .select({
+        id: editProposals.id,
+        operations: editProposals.operations,
+        reviewMode: editProposals.reviewMode,
+      })
       .from(editProposals)
       .leftJoin(editProposalBatches, eq(editProposalBatches.proposalId, editProposals.id))
       .where(
@@ -1553,7 +1557,7 @@ export function mainPlanningPrompt(
   }));
   const canProposeArticleEdits = capabilities.includes('article.propose');
   const articleInstruction = canProposeArticleEdits
-    ? 'If currentRequest asks to create, continue, rewrite, delete, or otherwise change the current article, call article.propose_edits directly and stop. This creates a visible reviewable draft; do not call action_propose, plan_submit, or a Specialist for this simple article edit.'
+    ? 'If currentRequest asks to create or write a complete article, call article.propose_edits directly with reviewMode="document" and stop. If it asks to revise a specific part, use reviewMode="granular". This creates a visible reviewable draft; do not call action_propose, plan_submit, or a Specialist for this simple article edit.'
     : actionSource === 'free_text'
       ? 'If currentRequest asks to change an article but no article.propose capability is available, explain that the current turn has no article editing capability and do not claim the article was changed.'
       : 'This host-confirmed article edit may use only capabilities listed in actionEnvelope.grantedCapabilities.';
@@ -1622,7 +1626,11 @@ function terminalProductionResult(task: SettledTask | undefined, now: Date): Run
 
 function articleEditResult(
   result: RuntimeResult,
-  proposal: { readonly id: string; readonly operations: readonly unknown[] },
+  proposal: {
+    readonly id: string;
+    readonly operations: readonly unknown[];
+    readonly reviewMode: string;
+  },
 ): RuntimeResult {
   if (result.status !== 'completed') return result;
   const source = [...result.messages]
@@ -1630,11 +1638,17 @@ function articleEditResult(
     .find((message): message is RuntimeAssistantMessage => message.role === 'assistant');
   const assistant: RuntimeAssistantMessage = {
     role: 'assistant',
-    content: `已在正文中生成 ${String(proposal.operations.length)} 处修改，等待审阅。`,
+    content:
+      proposal.reviewMode === 'document'
+        ? '已在正文中生成一份整篇文章草稿，等待审阅。'
+        : `已在正文中生成 ${String(proposal.operations.length)} 处修改，等待审阅。`,
     blocks: [
       {
         type: 'text',
-        text: `已在正文中生成 ${String(proposal.operations.length)} 处修改，等待审阅。`,
+        text:
+          proposal.reviewMode === 'document'
+            ? '已在正文中生成一份整篇文章草稿，等待审阅。'
+            : `已在正文中生成 ${String(proposal.operations.length)} 处修改，等待审阅。`,
       },
     ],
     parts: [],

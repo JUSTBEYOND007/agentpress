@@ -1,0 +1,1 @@
+ALTER TABLE "edit_proposals" ADD CONSTRAINT "edit_proposals_review_mode_check" CHECK ("edit_proposals"."review_mode" in ('granular', 'document'));

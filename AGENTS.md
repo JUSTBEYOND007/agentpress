@@ -1,5 +1,12 @@
 # Agent Engineering Rules
 
+## Root-Cause Debugging Gate
+
+- 修复缺陷前必须先从 PostgreSQL 事实源还原完整事件链：用户请求、Run、transcript、tool call、proposal/batch、settlement 以及前端 projection。
+- 必须先定位问题所属层，并对照现有协议、领域边界和成熟实现；不能从单次现象直接推导修复。
+- 禁止用关键词名单、额外 prompt、前端状态绕过、单点条件分支或仅改显示文案来掩盖根因。优先修复状态、协议、事实源和构建链中的根因。
+- 行为修复必须覆盖上游契约对应的行为、AgentPress 领域边界、相反语义场景回归测试，以及真实 Pi runtime/目标模型验收；仅验证提示词、faux runtime 或 happy path 不足以证明修复成立。
+
 ## Reuse Before Reimplementation
 
 - 优先复用成熟、维护活跃且许可证兼容的开源库、组件和实现；能直接依赖就直接依赖，不能直接依赖时优先复制并做最小必要改造，不重复造轮子。

@@ -7,6 +7,7 @@ import {
   type EditOperation,
   previewProposal,
   StaleEditError,
+  type EditReviewMode,
 } from '@agentpress/editor-patch';
 import {
   articles,
@@ -39,6 +40,7 @@ export class ProposalService {
     readonly sourceToolCallId?: string;
     readonly baseRevisionId?: string;
     readonly operations: readonly unknown[];
+    readonly reviewMode?: EditReviewMode;
     readonly ttlMs?: number;
   }) {
     const ttlMs = input.ttlMs ?? 30 * 60_000;
@@ -89,6 +91,10 @@ export class ProposalService {
         .limit(1);
       const revision = await loadRevision(transaction, article.currentRevisionId);
       const operations = parseOperations(input.operations);
+      const reviewMode = input.reviewMode ?? 'granular';
+      if (reviewMode !== 'granular' && reviewMode !== 'document') {
+        throw new EditorApplicationError('invalid_batch', 'Unknown edit review mode');
+      }
       if (operations.length === 0 || operations.length > 100) {
         throw new EditorApplicationError(
           'invalid_batch',
@@ -108,6 +114,12 @@ export class ProposalService {
         throw new StaleEditError('proposal', 'Article changed while the working draft was open');
       }
       if (existingProposal) {
+        if (existingProposal.reviewMode !== reviewMode) {
+          throw new EditorApplicationError(
+            'invalid_batch',
+            'Working draft review mode cannot change',
+          );
+        }
         const activeBatches = await transaction
           .select()
           .from(editProposalBatches)
@@ -180,6 +192,7 @@ export class ProposalService {
           operations: allOperations,
           diffs: allDiffs,
           expiresAt,
+          reviewMode,
         };
         return this.snapshot(transaction, updated);
       }
@@ -199,6 +212,7 @@ export class ProposalService {
           ...(input.sourceToolCallId ? { sourceToolCallId: input.sourceToolCallId } : {}),
           baseRevisionId: revision.id,
           operations,
+          reviewMode,
           diffs,
           expiresAt,
           createdAt: now,
@@ -375,6 +389,21 @@ export class ProposalService {
       }
     }
     const persisted = await loadDecisions(transaction, proposal.id);
+    if (proposal.reviewMode === 'document' && input.decisions.size > 0) {
+      const requested = new Set(input.decisions.values());
+      if (requested.size !== 1) {
+        throw new EditorApplicationError(
+          'invalid_batch',
+          'Whole-article proposals require one decision for the entire document',
+        );
+      }
+      const decision = [...requested][0];
+      if (!decision) throw new EditorApplicationError('invalid_batch', 'Decision is required');
+      input = {
+        ...input,
+        decisions: new Map([...operationIds].map((operationId) => [operationId, decision])),
+      };
+    }
     for (const [operationId, decision] of input.decisions) {
       const existing = persisted.get(operationId);
       if (existing && existing !== decision) {
@@ -450,6 +479,7 @@ export class ProposalService {
       articleId: proposal.articleId,
       baseRevisionId: proposal.baseRevisionId,
       operations,
+      reviewMode: proposal.reviewMode as EditReviewMode,
       diffs,
       decisions: Object.fromEntries(decisions),
       batches,
@@ -524,6 +554,7 @@ export class ProposalService {
       articleId: proposal.articleId,
       baseRevisionId: proposal.baseRevisionId,
       operations,
+      reviewMode: proposal.reviewMode as EditReviewMode,
       diffs: proposal.diffs,
       decisions: Object.fromEntries(decisions),
       status,
