@@ -9,7 +9,7 @@ import {
   agentTranscriptEntries,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 
 const DEFAULT_DIALOGUE_LIMIT = 12;
 const DEFAULT_TOOL_SUMMARY_LIMIT = 8;
@@ -60,6 +60,34 @@ export class AgentTranscriptProjector {
       )
       .orderBy(asc(agentSessions.createdAt), asc(agentTranscriptEntries.sequence));
     return projectCommittedTranscript(rows);
+  }
+
+  public async restoreApprovedToolCall(
+    runId: string,
+    taskId: string,
+    providerToolCallId: string,
+  ): Promise<RuntimeAssistantMessage | undefined> {
+    const rows = await this.database
+      .select({ content: agentTranscriptEntries.content })
+      .from(agentTranscriptEntries)
+      .innerJoin(agentSessions, eq(agentSessions.id, agentTranscriptEntries.sessionId))
+      .where(
+        and(
+          eq(agentSessions.runId, runId),
+          eq(agentSessions.taskId, taskId),
+          eq(agentTranscriptEntries.role, 'assistant'),
+          eq(agentTranscriptEntries.messageType, 'message'),
+        ),
+      )
+      .orderBy(desc(agentTranscriptEntries.createdAt))
+      .limit(1);
+    const message = rows[0]?.content.message;
+    if (!isRuntimeAssistantMessage(message)) return undefined;
+    return message.blocks?.some(
+      (block) => block.type === 'tool_call' && block.id === providerToolCallId,
+    )
+      ? message
+      : undefined;
   }
 }
 
@@ -170,6 +198,19 @@ function isToolSummary(value: unknown): value is {
     typeof value.content === 'string' &&
     typeof value.isError === 'boolean' &&
     typeof value.timestamp === 'number'
+  );
+}
+
+function isRuntimeAssistantMessage(value: unknown): value is RuntimeAssistantMessage {
+  return (
+    isRecord(value) &&
+    value.role === 'assistant' &&
+    typeof value.content === 'string' &&
+    typeof value.provider === 'string' &&
+    typeof value.model === 'string' &&
+    typeof value.stopReason === 'string' &&
+    typeof value.timestamp === 'number' &&
+    isRecord(value.usage)
   );
 }
 

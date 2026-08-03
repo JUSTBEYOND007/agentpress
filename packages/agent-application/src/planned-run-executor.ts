@@ -12,10 +12,8 @@ import type {
 } from '@agentpress/agent-runtime';
 import {
   agentRuns,
-  agentSessions,
   agentTaskDependencies,
   agentTasks,
-  agentTranscriptEntries,
   appendCheckpoint,
   appendRunEvent,
   artifacts,
@@ -1260,29 +1258,12 @@ export class PlannedRunExecutor {
       .limit(1);
     const providerToolCallId = callRows[0]?.providerToolCallId;
     if (!providerToolCallId) return undefined;
-    const rows = await this.options.database
-      .select({ content: agentTranscriptEntries.content })
-      .from(agentTranscriptEntries)
-      .innerJoin(agentSessions, eq(agentSessions.id, agentTranscriptEntries.sessionId))
-      .where(
-        and(
-          eq(agentSessions.runId, runId),
-          eq(agentSessions.taskId, taskId),
-          eq(agentTranscriptEntries.role, 'assistant'),
-          eq(agentTranscriptEntries.messageType, 'message'),
-        ),
-      )
-      .orderBy(desc(agentTranscriptEntries.createdAt))
-      .limit(1);
-    const message = rows[0]?.content.message;
-    if (!isRuntimeAssistantMessage(message)) return undefined;
-    if (
-      !message.blocks?.some(
-        (block) => block.type === 'tool_call' && block.id === providerToolCallId,
-      )
-    ) {
-      return undefined;
-    }
+    const message = await this.transcripts.restoreApprovedToolCall(
+      runId,
+      taskId,
+      providerToolCallId,
+    );
+    if (!message) return undefined;
     const toolResult = await this.options.runtimeToolFactory?.resumeApprovedToolCall?.(
       runId,
       taskId,
@@ -1689,21 +1670,6 @@ function protocolFailure(messages: readonly RuntimeMessage[], message: string): 
 function findAssistant(result: RuntimeResult): RuntimeAssistantMessage | undefined {
   return result.messages.findLast(
     (message): message is RuntimeAssistantMessage => message.role === 'assistant',
-  );
-}
-
-function isRuntimeAssistantMessage(value: unknown): value is RuntimeAssistantMessage {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'role' in value &&
-    value.role === 'assistant' &&
-    'content' in value &&
-    typeof value.content === 'string' &&
-    'provider' in value &&
-    typeof value.provider === 'string' &&
-    'model' in value &&
-    typeof value.model === 'string'
   );
 }
 
