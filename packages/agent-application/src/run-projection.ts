@@ -19,7 +19,7 @@ export function projectRunParts(
     if (activeReasoningIndex !== undefined && closesReasoning(event.eventType)) {
       const reasoning = projected[activeReasoningIndex];
       const startedAt = reasoning ? dateProperty(reasoning.payload, 'startedAt') : undefined;
-      if (reasoning && reasoning.status === 'run.planning') {
+      if (reasoning?.status === 'run.planning') {
         projected[activeReasoningIndex] = {
           ...reasoning,
           status: 'reasoning.completed',
