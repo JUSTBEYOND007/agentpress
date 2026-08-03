@@ -11,7 +11,6 @@ import {
   FileCheck2,
   FileText,
   ListChecks,
-  RotateCcw,
   LoaderCircle,
   X,
 } from 'lucide-react';
@@ -34,6 +33,7 @@ import {
 } from '../lib/agentpress-assistant-runtime';
 import { AssistantMarkdownPart, UserTextPart } from './agent-message-content';
 import { ExecutionTimelineRenderer } from './agent-execution-timeline';
+import { NoticePart } from './agent-notice-part';
 import { ReasoningPart } from './agent-reasoning-part';
 
 export type RunActions = {
@@ -403,24 +403,6 @@ function ArticleChangePart({
         <span className="proposal-view-status">已在正文中显示</span>
       </div>
     </section>
-  );
-}
-
-function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const fallback =
-    part.type === 'recovery'
-      ? '连接中断，正在恢复当前工作。'
-      : '这一步没有完成，你可以调整要求后继续。';
-  return (
-    <div className={`run-part notice-part notice-${part.type}`}>
-      <RotateCcw size={13} />
-      <span>
-        {friendlyFailure(
-          stringValue(part.payload.message) || recordValue(part.payload.failure),
-          fallback,
-        )}
-      </span>
-    </div>
   );
 }
 

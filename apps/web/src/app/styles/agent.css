@@ -712,6 +712,19 @@
   color: #805b26;
 }
 
+.notice-part.notice-failed {
+  color: #a34c43;
+}
+.notice-part.notice-cancelled {
+  color: #777873;
+}
+.notice-part.notice-degraded {
+  color: #805b26;
+}
+.notice-part.notice-stale {
+  color: #8d6430;
+}
+
 .notice-warning {
   color: #9a463e;
 }

@@ -131,7 +131,9 @@ function toRunParts(
                     ? 'artifact'
                     : type.startsWith('run.recover')
                       ? 'recovery'
-                      : type === 'run.completed_with_degradation' || type === 'run.failed'
+                      : type === 'run.completed_with_degradation' ||
+                          type === 'run.failed' ||
+                          type === 'run.cancelled'
                         ? 'warning'
                         : type.startsWith('tool.') || type.startsWith('task.')
                           ? 'activity'
