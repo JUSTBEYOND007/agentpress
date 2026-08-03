@@ -63,6 +63,53 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 - [ ] Align typography, spacing, table overflow, code blocks, long links, focus states, and reduced motion with the Notion reference and InkOS density.
 - [ ] Verify desktop and mobile layouts with browser screenshots and overlap checks.
 
+## P0 Composer And Run Lifecycle
+
+- [ ] Derive composer actions from one pure Run lifecycle model instead of independent Web booleans.
+- [ ] Keep new-send, stop-generation, cancel-Run, in-flight steering, queued follow-up, and disabled-send as distinct commands with distinct labels and effects.
+- [ ] Preserve per-conversation composer drafts and pending directives while switching conversations; never submit one conversation's draft to another branch.
+- [ ] Make stopping and cancellation idempotent and project their acknowledged, cancelling, and terminal states from persisted Run facts.
+- [ ] Add opposite-semantics tests proving steering does not become a follow-up, follow-up does not interrupt the current Run, and stopping does not create a new message.
+
+## P0 Durable Sessions And Review Loop
+
+- [ ] Keep an active Run executing when the user switches articles or conversations and expose its durable status in the conversation picker.
+- [ ] Restore the same Run after refresh or SSE reconnect from PostgreSQL projections without duplicate messages, tool calls, edit batches, or optimistic content.
+- [ ] Resume event streaming from the last durable event ID and fall back to a full projection refresh when the stream cursor is stale.
+- [ ] Represent one complete article write as one reviewable document batch while retaining granular batches for targeted edits.
+- [ ] Link an article-change part to its working draft, first changed block, latest batch undo, partial accept, reject, and stale-reload actions.
+- [ ] Keep review settlement and Run settlement independent: a completed Run may leave a durable pending article review.
+
+## P1 Conversation And Background Work
+
+- [ ] Show running, waiting-for-user, waiting-for-approval, failed, and pending-review status for every conversation from persisted facts.
+- [ ] Preserve background progress and unread completion when the user leaves and returns to a conversation.
+- [ ] Offer recovery actions appropriate to provider failure, tool failure, protocol failure, stale article, cancellation, and degraded completion.
+- [ ] Show long-task phase, completed steps, outstanding interaction, and the latest safe recovery point without exposing hidden reasoning.
+
+## P1 Actionable Results And Execution Facts
+
+- [ ] Give tool results, evidence, artifacts, and article changes typed open, locate, download, retry, and provenance actions where applicable.
+- [ ] Locate the editor at the first affected block when an article-change part or review batch is opened, without moving the viewport during unrelated streaming.
+- [ ] Display the actual provider, model, context window, output limit, duration, tokens, and cost facts captured by the Run; never substitute current settings for historical facts.
+- [ ] Test artifact and context authorization, missing resources, stale versions, restored Runs, and hostile external URLs.
+
+## P2 Accessibility And Responsive Behavior
+
+- [ ] Support keyboard send, stop/close, branch navigation, and focus return with accessible names and visible focus states.
+- [ ] Respect reduced-motion preferences for streamed Markdown, spinners, drawers, menus, and scrolling.
+- [ ] Keep tables, code, Mermaid, CJK, and long links inside the Agent viewport at desktop and mobile widths.
+- [ ] Prevent the workspace header, global account actions, Agent header, composer, and mobile safe areas from overlapping by assigning layout ownership explicitly.
+- [ ] Verify these contracts with automated browser assertions and desktop/mobile screenshots, not screenshots alone.
+
+## Deliberate Non-Adoption
+
+- [x] Do not adopt InkOS file/JSONL sessions as a fact source; PostgreSQL RunEvents and checkpoints remain authoritative.
+- [x] Do not expose the full writing tool table to ordinary chat turns or allow free text to grant mutation capability.
+- [x] Do not use keyword intent routing, prompt-only authorization, or current composer state to reconstruct historical context.
+- [x] Do not expose hidden chain of thought or copy InkOS's older Pi runtime integration.
+- [x] Do not auto-settle a canonical article revision without AgentPress review and permission boundaries.
+
 ## Completion Gates
 
 - [ ] Upstream behavior references and immutable versions remain recorded in `docs/references/pi-ecosystem.md` and `THIRD_PARTY_NOTICES.md` when code is copied.
