@@ -34,7 +34,7 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, desc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -126,6 +126,87 @@ export class DirectRunService {
     return rows.flatMap((row) => {
       const message = decodeRuntimeMessage(row.content);
       return message ? [{ id: row.id, role: message.role, content: message.content }] : [];
+    });
+  }
+
+  public async forkBranch(
+    conversationId: string,
+    branchId: string,
+    messageId: string,
+    userId: string,
+  ) {
+    return this.options.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .select({
+          workspaceId: conversations.workspaceId,
+          sequence: conversationMessages.sequence,
+        })
+        .from(conversationMessages)
+        .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
+        .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+        .innerJoin(
+          workspaceMembers,
+          and(
+            eq(workspaceMembers.workspaceId, conversations.workspaceId),
+            eq(workspaceMembers.userId, userId),
+          ),
+        )
+        .where(
+          and(
+            eq(conversationMessages.id, messageId),
+            eq(conversationMessages.branchId, branchId),
+            eq(conversations.id, conversationId),
+            eq(conversationMessages.stable, true),
+          ),
+        )
+        .limit(1);
+      const forkPoint = rows[0];
+      if (!forkPoint)
+        throw new AgentApplicationError(
+          'branch_not_found',
+          'Fork message does not exist on an authorized conversation branch',
+        );
+      const messages = await transaction
+        .select()
+        .from(conversationMessages)
+        .where(
+          and(
+            eq(conversationMessages.branchId, branchId),
+            eq(conversationMessages.stable, true),
+            lte(conversationMessages.sequence, forkPoint.sequence),
+          ),
+        )
+        .orderBy(asc(conversationMessages.sequence));
+      const newBranchId = this.createId();
+      const copied = messages.map((message) => ({
+        sourceId: message.id,
+        id: this.createId(),
+        message,
+      }));
+      await transaction.insert(conversationBranches).values({
+        id: newBranchId,
+        conversationId,
+        parentBranchId: branchId,
+        forkedFromMessageId: messageId,
+      });
+      if (copied.length > 0)
+        await transaction.insert(conversationMessages).values(
+          copied.map(({ id, message }) => ({
+            id,
+            branchId: newBranchId,
+            role: message.role,
+            sequence: message.sequence,
+            content: message.content,
+            stable: true,
+            createdAt: message.createdAt,
+          })),
+        );
+      return {
+        branchId: newBranchId,
+        parentBranchId: branchId,
+        forkedFromMessageId: messageId,
+        forkedMessageId: copied.find(({ sourceId }) => sourceId === messageId)?.id,
+      };
     });
   }
 

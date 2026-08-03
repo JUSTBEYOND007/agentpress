@@ -584,6 +584,62 @@ describeWithDatabase('Direct Run application flow', () => {
     ).resolves.toHaveLength(1);
   });
 
+  it('forks at the exact stable message boundary and rejects unauthorized branch access', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const outsiderId = randomUUID();
+    await connection.db.insert(appUsers).values({
+      id: outsiderId,
+      logtoSubject: `logto|${outsiderId}`,
+      displayName: 'Outsider',
+    });
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Fork contract',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const source = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '分支根消息',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db.insert(conversationMessages).values({
+      id: randomUUID(),
+      branchId,
+      role: 'assistant',
+      sequence: 2,
+      content: [
+        {
+          type: 'agentpress.runtime-message',
+          version: 1,
+          message: { role: 'assistant', content: '不应被复制', timestamp: Date.now() },
+        },
+      ],
+      stable: true,
+    });
+
+    const fork = await service.forkBranch(conversationId, branchId, source.messageId, ids.user);
+    expect(fork).toMatchObject({
+      parentBranchId: branchId,
+      forkedFromMessageId: source.messageId,
+    });
+    const copied = await connection.db
+      .select({ id: conversationMessages.id, role: conversationMessages.role })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.branchId, fork.branchId));
+    expect(copied).toEqual([{ id: fork.forkedMessageId, role: 'user' }]);
+
+    await expect(
+      service.forkBranch(conversationId, branchId, source.messageId, outsiderId),
+    ).rejects.toMatchObject({ code: 'branch_not_found' });
+    await expect(
+      service.forkBranch(randomUUID(), branchId, source.messageId, ids.user),
+    ).rejects.toMatchObject({ code: 'branch_not_found' });
+  });
+
   it('versions declarative Skills and requires confirmation before recalling Agent memory', async () => {
     const markdown =
       '---\nid: fact-check\nversion: 2.0.0\ndescription: Verify facts\nallowedTools:\n  - web_research.search\n---\nRequire evidence for factual claims.';

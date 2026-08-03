@@ -8,12 +8,6 @@ import {
   type LiveRunEvent,
 } from '@agentpress/agent-application';
 import {
-  conversationBranches,
-  conversationMessages,
-  conversations,
-  type DatabaseConnection,
-} from '@agentpress/database';
-import {
   BadRequestException,
   Body,
   Controller,
@@ -28,15 +22,12 @@ import {
   Sse,
   type MessageEvent,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { and, asc, eq, lte } from 'drizzle-orm';
 import { Observable } from 'rxjs';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { AuthorizationService } from '../auth/authorization.service.js';
-import { DATABASE_CONNECTION } from './agent.providers.js';
 
 type CreateRunBody = {
   readonly branchId?: unknown;
@@ -76,7 +67,6 @@ export class AgentController {
     @Inject(RedisRunEventBus) private readonly eventBus: RedisRunEventBus,
     @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
     @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
-    @Inject(DATABASE_CONNECTION) private readonly connection?: DatabaseConnection,
     @Inject(ActionProposalService)
     @Optional()
     private readonly actionProposals?: ActionProposalService,
@@ -127,74 +117,13 @@ export class AgentController {
     @Body() body: { readonly messageId?: unknown },
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    if (!this.connection) throw new BadRequestException('Database connection is unavailable');
     if (typeof body.messageId !== 'string')
       throw new BadRequestException('messageId must be a string');
-    const messageId = body.messageId;
-    const rows = await this.connection.db
-      .select({
-        workspaceId: conversations.workspaceId,
-        sequence: conversationMessages.sequence,
-      })
-      .from(conversationMessages)
-      .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
-      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
-      .where(
-        and(
-          eq(conversationMessages.id, messageId),
-          eq(conversationMessages.branchId, branchId),
-          eq(conversations.id, conversationId),
-          eq(conversationMessages.stable, true),
-        ),
-      )
-      .limit(1);
-    const forkPoint = rows[0];
-    if (!forkPoint) throw new NotFoundException('Fork message does not exist on this branch');
-    await this.authorization?.assertWorkspaceMember(forkPoint.workspaceId, user.id);
-    const messages = await this.connection.db
-      .select()
-      .from(conversationMessages)
-      .where(
-        and(
-          eq(conversationMessages.branchId, branchId),
-          eq(conversationMessages.stable, true),
-          lte(conversationMessages.sequence, forkPoint.sequence),
-        ),
-      )
-      .orderBy(asc(conversationMessages.sequence));
-    const newBranchId = randomUUID();
-    const copied = messages.map((message) => ({
-      sourceId: message.id,
-      id: randomUUID(),
-      message,
-    }));
-    await this.connection.db.transaction(async (transaction) => {
-      await transaction.insert(conversationBranches).values({
-        id: newBranchId,
-        conversationId,
-        parentBranchId: branchId,
-        forkedFromMessageId: messageId,
-      });
-      if (copied.length > 0)
-        await transaction.insert(conversationMessages).values(
-          copied.map(({ id, message }) => ({
-            id,
-            branchId: newBranchId,
-            role: message.role,
-            sequence: message.sequence,
-            content: message.content,
-            stable: true,
-            createdAt: message.createdAt,
-          })),
-        );
-    });
-    const forkedMessageId = copied.find(({ sourceId }) => sourceId === messageId)?.id;
-    return {
-      branchId: newBranchId,
-      parentBranchId: branchId,
-      forkedFromMessageId: messageId,
-      forkedMessageId,
-    };
+    try {
+      return await this.runs.forkBranch(conversationId, branchId, body.messageId, user.id);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
   }
 
   @Post('conversations/:conversationId/runs')

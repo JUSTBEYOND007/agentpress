@@ -68,6 +68,22 @@ describe('AgentController SSE replay', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('delegates branch forks to the application boundary with authenticated identity', async () => {
+    const calls: unknown[] = [];
+    const runs = {
+      forkBranch(...arguments_: unknown[]) {
+        calls.push(arguments_);
+        return Promise.resolve({ branchId: 'branch-2', forkedMessageId: 'message-2' });
+      },
+    } as unknown as DirectRunService;
+    const controller = new AgentController(runs, {} as RedisRunEventBus);
+
+    await expect(
+      controller.forkBranch('conversation-1', 'branch-1', { messageId: 'message-1' }, user),
+    ).resolves.toMatchObject({ branchId: 'branch-2' });
+    expect(calls).toEqual([['conversation-1', 'branch-1', 'message-1', 'user-1']]);
+  });
+
   it('buffers live events until durable replay is emitted in sequence order', async () => {
     const replay = [durableEvent(1), durableEvent(2)];
     const live = durableEvent(3);
