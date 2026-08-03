@@ -338,10 +338,6 @@ export class ProposalService {
       if (row.edit_proposal_batches.status === 'reverted') {
         return this.snapshot(transaction, row.edit_proposals);
       }
-      await transaction
-        .update(editProposalBatches)
-        .set({ status: 'reverted', updatedAt: this.now() })
-        .where(eq(editProposalBatches.id, input.batchId));
       const active = await transaction
         .select()
         .from(editProposalBatches)
@@ -352,7 +348,18 @@ export class ProposalService {
           ),
         )
         .orderBy(asc(editProposalBatches.batchNumber));
-      const operations = active.flatMap((batch) => parseOperations(batch.operations));
+      if (active.at(-1)?.id !== input.batchId) {
+        throw new EditorApplicationError(
+          'invalid_batch',
+          'Only the latest edit batch can be reverted',
+        );
+      }
+      await transaction
+        .update(editProposalBatches)
+        .set({ status: 'reverted', updatedAt: this.now() })
+        .where(eq(editProposalBatches.id, input.batchId));
+      const remaining = active.filter(({ id }) => id !== input.batchId);
+      const operations = remaining.flatMap((batch) => parseOperations(batch.operations));
       const revision = await loadRevision(transaction, row.edit_proposals.baseRevisionId);
       const diffs = previewProposal(revision.document as ArticleDocument, revision.id, {
         proposalId: row.edit_proposals.id,
@@ -362,12 +369,18 @@ export class ProposalService {
       });
       await transaction
         .update(editProposals)
-        .set({ operations, diffs, updatedAt: this.now() })
+        .set({
+          operations,
+          diffs,
+          status: operations.length === 0 ? 'rejected' : 'pending',
+          updatedAt: this.now(),
+        })
         .where(eq(editProposals.id, row.edit_proposals.id));
       return this.snapshot(transaction, {
         ...row.edit_proposals,
         operations,
         diffs,
+        status: operations.length === 0 ? 'rejected' : 'pending',
       });
     });
   }

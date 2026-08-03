@@ -258,6 +258,13 @@ describeWithInfra('editor persistence and recovery', () => {
       ({ status }) => status === 'active',
     );
     expect(batchIds).toHaveLength(2);
+    await expect(
+      proposals.revertBatch({
+        proposalId: String(created.proposalId),
+        batchId: batchIds[0]?.id ?? '',
+        userId: ids.user,
+      }),
+    ).rejects.toThrow('latest');
     await proposals.revertBatch({
       proposalId: String(created.proposalId),
       batchId: batchIds[1]?.id ?? '',
@@ -271,6 +278,29 @@ describeWithInfra('editor persistence and recovery', () => {
         decision: 'rejected',
       }),
     ).resolves.toMatchObject({ status: 'rejected' });
+
+    const onlyBatchProposal = await proposals.create({
+      articleId: ids.article,
+      operations: [
+        {
+          operationId: 'undo-only-batch',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(first),
+          block: paragraph('block-a', 'Temporary'),
+        },
+      ],
+    });
+    const onlyBatch = onlyBatchProposal.batches[0];
+    expect(onlyBatch?.status).toBe('active');
+    await expect(
+      proposals.revertBatch({
+        proposalId: onlyBatchProposal.proposalId,
+        batchId: onlyBatch?.id ?? '',
+        userId: ids.user,
+      }),
+    ).resolves.toMatchObject({ status: 'rejected', operations: [] });
+    await expect(proposals.getPending(ids.article)).resolves.toBeUndefined();
   });
 
   it('applies accepted proposal operations into an immutable revision', async () => {
