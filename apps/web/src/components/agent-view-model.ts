@@ -77,6 +77,7 @@ export function parseRunPart(value: unknown): RunPart | undefined {
   const type = stringValue(candidate.type);
   const allowed: readonly RunPart['type'][] = [
     'text',
+    'reasoning',
     'plan',
     'action-proposal',
     'activity',

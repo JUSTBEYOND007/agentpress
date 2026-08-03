@@ -1,16 +1,6 @@
 'use client';
 
-import {
-  ActionBarPrimitive,
-  MessagePrimitive,
-  useMessagePartText,
-  useSmooth,
-} from '@assistant-ui/react';
-import { cjk } from '@streamdown/cjk';
-import { code } from '@streamdown/code';
-import { math } from '@streamdown/math';
-import { mermaid } from '@streamdown/mermaid';
-import { Streamdown } from 'streamdown';
+import { ActionBarPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import {
   Check,
   CircleAlert,
@@ -42,6 +32,8 @@ import {
   stringValue,
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
+import { AssistantMarkdownPart, UserTextPart } from './agent-message-content';
+import { ReasoningPart } from './agent-reasoning-part';
 
 export type RunActions = {
   readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
@@ -57,7 +49,7 @@ export const RunActionsContext = createContext<RunActions | undefined>(undefined
 export function UserMessage(): React.JSX.Element {
   return (
     <MessagePrimitive.Root className="aui-message aui-user-message">
-      <MessagePrimitive.Parts components={{ Text: MessageText }} />
+      <MessagePrimitive.Parts components={{ Text: UserTextPart }} />
     </MessagePrimitive.Root>
   );
 }
@@ -68,7 +60,7 @@ export function AssistantMessage(): React.JSX.Element {
       <div className="assistant-content">
         <MessagePrimitive.Parts
           components={{
-            Text: MessageText,
+            Text: AssistantMarkdownPart,
             data: { by_name: { 'agentpress-run-part': RunPartRenderer } },
           }}
         />
@@ -82,22 +74,10 @@ export function AssistantMessage(): React.JSX.Element {
   );
 }
 
-function MessageText(): React.JSX.Element {
-  const part = useSmooth(useMessagePartText(), true);
-  return (
-    <Streamdown
-      className="message-text message-markdown"
-      isAnimating={part.status.type === 'running'}
-      plugins={{ cjk, code, math, mermaid }}
-    >
-      {part.text}
-    </Streamdown>
-  );
-}
-
 function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Element | null {
   const part = parseRunPart(data);
   if (!part) return null;
+  if (part.type === 'reasoning') return <ReasoningPart part={part} />;
   if (part.type === 'plan') return <PlanPart part={part} />;
   if (part.type === 'action-proposal') return <ActionProposalPart part={part} />;
   if (part.type === 'tool-approval') return <ApprovalPart part={part} />;

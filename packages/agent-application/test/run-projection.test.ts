@@ -25,6 +25,27 @@ describe('run projection', () => {
     expect(parts.every(({ status }) => !status.includes('executing'))).toBe(true);
   });
 
+  it('projects a bounded reasoning summary from durable planning lifecycle events', () => {
+    const parts = projectRunParts([
+      event(1, 'run.planning', { recovered: false }),
+      event(2_501, 'tool.proposed', { toolCallId: 'tool-1' }),
+    ]);
+
+    expect(parts[0]).toMatchObject({
+      type: 'reasoning',
+      status: 'reasoning.completed',
+      payload: { durationMs: 2_500 },
+    });
+    expect(JSON.stringify(parts[0]?.payload)).not.toContain('thinking');
+  });
+
+  it('keeps reasoning active until a visible execution boundary exists', () => {
+    expect(projectRunParts([event(1, 'run.planning', {})])[0]).toMatchObject({
+      type: 'reasoning',
+      status: 'run.planning',
+    });
+  });
+
   it('annotates proposal output with its current persisted status', () => {
     const parts = projectRunParts(
       [

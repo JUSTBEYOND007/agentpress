@@ -517,6 +517,40 @@
   animation: activity-spin 900ms linear infinite;
 }
 
+.reasoning-part {
+  border-left: 1px solid #dfdfda;
+  padding-left: 10px;
+  color: #777873;
+}
+
+.reasoning-part summary {
+  justify-content: flex-start;
+  min-height: 26px;
+}
+
+.reasoning-part summary small {
+  margin-left: 2px;
+}
+
+.reasoning-part p {
+  margin: 2px 0 6px 20px;
+  color: #999a94;
+  font-size: 10px;
+}
+
+.reasoning-chevron {
+  margin-left: auto;
+  transition: transform 160ms ease;
+}
+
+.reasoning-part[open] .reasoning-chevron {
+  transform: rotate(180deg);
+}
+
+.reasoning-part.is-active {
+  color: #4f725c;
+}
+
 @keyframes activity-spin {
   to {
     transform: rotate(360deg);

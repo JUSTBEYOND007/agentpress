@@ -143,6 +143,7 @@ export type RunPart = {
   readonly sequence: number;
   readonly type:
     | 'text'
+    | 'reasoning'
     | 'plan'
     | 'action-proposal'
     | 'activity'

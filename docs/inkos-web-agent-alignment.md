@@ -10,10 +10,10 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 ## P0 Message Rendering
 
 - [x] Render assistant Markdown incrementally with pinned Streamdown and CJK/code/math/Mermaid plugins.
-- [ ] Split generic message rendering from AgentPress domain parts so neither becomes a god component.
-- [ ] Render user messages as literal text and assistant messages as Markdown.
-- [ ] Use animated rendering only for the active streamed part; use static rendering for completed and restored messages.
-- [ ] Add a collapsed reasoning-summary part with streaming, completed, and elapsed-time states. Never expose hidden chain of thought.
+- [x] Split generic message rendering from AgentPress domain parts so neither becomes a god component.
+- [x] Render user messages as literal text and assistant messages as Markdown.
+- [x] Use animated rendering only for the active streamed part; use static rendering for completed and restored messages.
+- [x] Add a collapsed reasoning-summary part with streaming, completed, and elapsed-time states. Never expose hidden chain of thought.
 - [ ] Test headings, emphasis, lists, tables, code, math, Mermaid, links, unsafe HTML, CJK, and incomplete streamed Markdown.
 
 ## P0 Run Timeline
