@@ -13,6 +13,16 @@ describe('effectiveActionCapabilities', () => {
     ]).toEqual(['article.read', 'web.research']);
   });
 
+  it('allows host-authorized article draft writes for an editable article session', () => {
+    expect(
+      effectiveActionCapabilities(
+        { version: 1, source: 'free_text', grantedCapabilities: [] },
+        ['article.read', 'article.propose'],
+        { allowArticleDraftWrite: true },
+      ),
+    ).toEqual(new Set(['article.read', 'article.propose']));
+  });
+
   it('intersects confirmed grants with host-available capabilities', () => {
     const envelope = {
       version: 1 as const,

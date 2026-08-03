@@ -240,6 +240,7 @@ export class DirectRunService {
           branchId: conversationBranches.id,
           conversationId: conversations.id,
           workspaceId: conversations.workspaceId,
+          articleId: conversations.articleId,
         })
         .from(conversationBranches)
         .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
@@ -334,7 +335,12 @@ export class DirectRunService {
         mentionTargetIds: input.mentionTargetIds ?? [],
         attachmentIds: input.attachmentIds ?? [],
         skills: input.skills ?? [],
-        contextBindings: input.contextBindings ?? [],
+        contextBindings: [
+          ...(actionEnvelope.source === 'free_text' && branch.articleId
+            ? ([{ type: 'mention', targetId: branch.articleId }] as const)
+            : []),
+          ...(input.contextBindings ?? []),
+        ],
       });
       const queued = await appendRunEvent(transaction, {
         id: this.createId(),

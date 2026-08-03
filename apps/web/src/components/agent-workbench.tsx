@@ -29,6 +29,7 @@ export function AgentWorkbench({
   activeArticleTitle,
   articleSelection,
   articles,
+  beforeSend,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
@@ -38,6 +39,7 @@ export function AgentWorkbench({
   readonly activeArticleId?: string;
   readonly activeArticleTitle?: string;
   readonly articleSelection?: ArticleSelectionView;
+  readonly beforeSend?: () => Promise<void>;
   readonly articles: readonly {
     readonly id: string;
     readonly revisionId: string;
@@ -127,6 +129,7 @@ export function AgentWorkbench({
           contextBindings,
           sendingDisabled: uploadingAttachments > 0,
           ...(onArticleReviewChanged ? { onArticleReviewChanged } : {}),
+          ...(beforeSend ? { beforeSend } : {}),
         }
       : {},
   );

@@ -33,10 +33,10 @@ describe('AgentTurnProfile', () => {
     });
   });
 
-  it('exposes the exact free-text article control table', () => {
+  it('exposes article editing through domain capabilities instead of an action proposal', () => {
     const profile = createAgentTurnProfile(
       freeTextTurn([{ id: 'article:article-id', kind: 'mention' }]),
-      ['article.read', 'web.research'],
+      ['article.read', 'article.propose', 'web.research'],
     );
     expect(
       selectMainControlTools(profile, [
@@ -45,7 +45,11 @@ describe('AgentTurnProfile', () => {
         { name: 'plan_submit' },
         { name: 'user_request_input' },
       ]).map(({ name }) => name),
-    ).toEqual(['action_propose', 'plan_submit', 'user_request_input']);
+    ).toEqual(['plan_submit', 'user_request_input']);
+    expect(profile).toMatchObject({
+      kind: 'article_agent',
+      allowedCapabilities: ['article.read', 'article.propose', 'web.research'],
+    });
   });
 
   it('turns a confirmed edit into a deterministic no-control profile', () => {

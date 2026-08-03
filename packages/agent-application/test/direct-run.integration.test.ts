@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
+import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
+import { hashBlock } from '@agentpress/editor-patch';
 import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import {
   agentSessions,
@@ -18,6 +20,7 @@ import {
   conversationMessages,
   conversations,
   executionPlans,
+  editProposals,
   planRevisions,
   rootRequests,
   runContextPacks,
@@ -205,9 +208,9 @@ describeWithDatabase('Direct Run application flow', () => {
       .select({ purpose: modelSelections.purpose, selectedModel: modelSelections.selectedModel })
       .from(modelSelections)
       .where(eq(modelSelections.runId, second.runId));
-    expect(selections).toEqual([
-      expect.objectContaining({ purpose: 'main', selectedModel: expect.any(String) }),
-    ]);
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.purpose).toBe('main');
+    expect(typeof selections[0]?.selectedModel).toBe('string');
     expect(selections[0]?.selectedModel).not.toBe('main');
     expect(published.some((event) => !event.durable)).toBe(true);
   });
@@ -380,6 +383,80 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(mentionBindings)
       .where(eq(mentionBindings.runId, run.runId));
     expect(bindings).toEqual([{ targetId: ids.article, revision: ids.articleRevision }]);
+  });
+
+  it('lets Main create a reviewable article draft without a plan or confirmation run', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Direct article editing',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const registry = new ToolRegistry();
+    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const toolCallsService = new ToolCallService({
+      database: connection.db,
+      publisher,
+      registry,
+    });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: toolCallsService,
+    });
+    const editRuntime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse(runtimeToolName('article.propose_edits', '1.0.0'), {
+          operations: [
+            {
+              operationId: 'main-replace',
+              kind: 'replace',
+              blockId: 'mention-block',
+              expectedHash: hashBlock({
+                type: 'paragraph',
+                attrs: { blockId: 'mention-block' },
+                content: [{ type: 'text', text: 'Mentioned immutable content' }],
+              }),
+              block: {
+                type: 'paragraph',
+                attrs: { blockId: 'mention-block' },
+                content: [{ type: 'text', text: 'Main edited content' }],
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const directEditService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => editRuntime },
+      runtimeToolFactory: bridge,
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await directEditService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '把正文改得更直接',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(directEditService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'completed',
+    });
+    const [proposals, plans, bindings] = await Promise.all([
+      connection.db.select().from(editProposals).where(eq(editProposals.runId, run.runId)),
+      connection.db.select().from(executionPlans).where(eq(executionPlans.runId, run.runId)),
+      connection.db.select().from(mentionBindings).where(eq(mentionBindings.runId, run.runId)),
+    ]);
+    expect(proposals).toHaveLength(1);
+    expect(plans).toHaveLength(0);
+    expect(bindings).toMatchObject([{ targetId: ids.article }]);
   });
 
   it('confirms a persisted action proposal idempotently into one authorized run', async () => {

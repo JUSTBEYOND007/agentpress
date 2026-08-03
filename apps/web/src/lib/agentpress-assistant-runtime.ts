@@ -110,6 +110,7 @@ export function useAgentPressAssistantRuntime(
     readonly skills?: readonly { readonly skillId: string; readonly version: string }[];
     readonly contextBindings?: readonly AgentContextBinding[];
     readonly sendingDisabled?: boolean;
+    readonly beforeSend?: () => Promise<void>;
     readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
   } = {},
 ) {
@@ -358,6 +359,7 @@ export function useAgentPressAssistantRuntime(
       ]);
       setPanelError(undefined);
       try {
+        await context.beforeSend?.();
         if (activeProjection && !activeProjection.terminal) {
           const endpoint = sendMode === 'steering' ? 'steering' : 'follow-ups';
           await request(`${apiUrl}/runs/${activeProjection.runId}/${endpoint}`, {
@@ -408,6 +410,7 @@ export function useAgentPressAssistantRuntime(
       branchId,
       conversationId,
       contextBindings,
+      context.beforeSend,
       mentionTargetIds,
       refreshProjection,
       selectedSkills,

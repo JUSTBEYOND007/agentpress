@@ -26,6 +26,7 @@ import {
   type DatabaseTransaction,
   executionPlans,
   evidenceRecords,
+  editProposals,
   planRevisionTasks,
   planRevisions,
   runDirectives,
@@ -361,6 +362,20 @@ export class PlannedRunExecutor {
       },
     ];
     const currentTurnTools = selectMainControlTools(profile, tools);
+    const articleCapabilities = profile.allowedCapabilities.filter(
+      (capability) => capability === 'article.read' || capability === 'article.propose',
+    );
+    const domainTools =
+      profile.kind === 'article_agent' && this.options.runtimeToolFactory
+        ? await this.options.runtimeToolFactory.createForRun(runId, articleCapabilities)
+        : [];
+    const mainTools = [
+      ...currentTurnTools,
+      ...domainTools.map((tool) => ({
+        ...tool,
+        ...(tool.label === 'article.propose_edits' ? { terminateOnSuccess: true } : {}),
+      })),
+    ];
     const result = await this.sessions.execute(
       runId,
       undefined,
@@ -370,9 +385,15 @@ export class PlannedRunExecutor {
       mainPlanningPrompt(availableCapabilities, turn.actionEnvelope.source),
       history,
       turn,
-      currentTurnTools,
+      mainTools,
       signal,
     );
+    const editRows = await this.options.database
+      .select({ id: editProposals.id, operations: editProposals.operations })
+      .from(editProposals)
+      .where(eq(editProposals.runId, runId))
+      .limit(1);
+    if (editRows[0]) return { kind: 'direct', result: articleEditResult(result, editRows[0]) };
     if (await this.actionProposals.getBySourceRun(runId)) return { kind: 'direct', result };
     if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
     if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
@@ -1585,7 +1606,7 @@ function confirmedArticleEditPlan(
 }
 
 function terminalProductionResult(task: SettledTask | undefined, now: Date): RuntimeResult {
-  if (!task || task.status !== 'succeeded') {
+  if (task?.status !== 'succeeded') {
     return protocolFailure([], 'Confirmed article edit did not produce a successful task result');
   }
   const proposal = task.artifacts.find(({ type }) => type === 'EditProposal');
@@ -1603,6 +1624,33 @@ function terminalProductionResult(task: SettledTask | undefined, now: Date): Run
       },
     ],
   };
+}
+
+function articleEditResult(
+  result: RuntimeResult,
+  proposal: { readonly id: string; readonly operations: readonly unknown[] },
+): RuntimeResult {
+  if (result.status !== 'completed') return result;
+  const source = [...result.messages]
+    .reverse()
+    .find((message): message is RuntimeAssistantMessage => message.role === 'assistant');
+  const assistant: RuntimeAssistantMessage = {
+    role: 'assistant',
+    content: `已在正文中生成 ${String(proposal.operations.length)} 处修改，等待审阅。`,
+    blocks: [
+      {
+        type: 'text',
+        text: `已在正文中生成 ${String(proposal.operations.length)} 处修改，等待审阅。`,
+      },
+    ],
+    parts: [],
+    provider: source?.provider ?? 'agentpress',
+    model: source?.model ?? 'host-terminal',
+    stopReason: 'stop',
+    usage: source?.usage ?? emptyUsage,
+    timestamp: Date.now(),
+  };
+  return { status: 'completed', messages: [...result.messages, assistant] };
 }
 
 function applicationTurn(parent: RuntimeCurrentTurn, request: string): RuntimeCurrentTurn {

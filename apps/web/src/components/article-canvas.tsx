@@ -53,6 +53,7 @@ export function ArticleCanvas({
   onReviewErrorDismiss,
   onReviewVisibleChange,
   onSelectionChange,
+  onAgentSendPreparation,
 }: {
   readonly articleId: string;
   readonly baseRevisionId: string;
@@ -64,6 +65,7 @@ export function ArticleCanvas({
   readonly onReviewErrorDismiss?: () => void;
   readonly onReviewVisibleChange?: (visible: boolean) => void;
   readonly onSelectionChange?: (selection?: ArticleSelectionView) => void;
+  readonly onAgentSendPreparation?: (prepare?: () => Promise<void>) => void;
 }): React.JSX.Element {
   const [saveState, setSaveState] = useState<'connecting' | 'saved' | 'saving' | 'offline'>(
     'connecting',
@@ -76,6 +78,7 @@ export function ArticleCanvas({
   const clientSequence = useRef(0);
   const revisionId = useRef(baseRevisionId);
   const commitTimer = useRef<number | undefined>(undefined);
+  const latestServerSequence = useRef(0);
   const isRecovering = useRef(false);
   const leaseGeneration = useRef(0);
   const reviewVisible = useRef(false);
@@ -155,6 +158,7 @@ export function ArticleCanvas({
             const acknowledgement = (await response.json()) as { readonly serverSequence: number };
             await acknowledgeAutosave(updateId);
             setSaveState('saved');
+            latestServerSequence.current = acknowledgement.serverSequence;
             scheduleDraftCommit(acknowledgement.serverSequence);
           })
           .catch(() => {
@@ -215,6 +219,21 @@ export function ArticleCanvas({
       editor.setEditable(false);
     };
   }, [articleId, editor]);
+  useEffect(() => {
+    if (!onAgentSendPreparation) return;
+    const prepare = async (): Promise<void> => {
+      if (commitTimer.current) window.clearTimeout(commitTimer.current);
+      await chain.current;
+      if (!leaseOwned.current) throw new Error('正文尚未连接，无法启动 Agent 编辑');
+      if (latestServerSequence.current > 0) {
+        await commitDraft(latestServerSequence.current);
+      }
+    };
+    onAgentSendPreparation(prepare);
+    return () => {
+      onAgentSendPreparation(undefined);
+    };
+  }, [onAgentSendPreparation]);
   useEffect(() => {
     if (!editor) return;
     reviewVisible.current = Boolean(review?.visible);
@@ -307,29 +326,29 @@ export function ArticleCanvas({
     if (commitTimer.current) window.clearTimeout(commitTimer.current);
     commitTimer.current = window.setTimeout(() => {
       chain.current = chain.current
-        .then(async () => {
-          if (!leaseOwned.current) return;
-          const response = await authenticatedFetch(
-            `${apiUrl}/articles/${articleId}/draft/commit`,
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                writerLeaseId: leaseId.current,
-                expectedServerSequence: serverSequence,
-              }),
-            },
-          );
-          if (!response.ok) throw new Error(await response.text());
-          const committed = (await response.json()) as { readonly revisionId: string };
-          revisionId.current = committed.revisionId;
-          if (editor) await publishSelection(editor, committed.revisionId);
-          setSaveState('saved');
-        })
+        .then(() => commitDraft(serverSequence))
         .catch(() => {
           setSaveState('offline');
         });
     }, 1_200);
+  }
+
+  async function commitDraft(serverSequence: number): Promise<void> {
+    if (!leaseOwned.current) return;
+    const response = await authenticatedFetch(`${apiUrl}/articles/${articleId}/draft/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        writerLeaseId: leaseId.current,
+        expectedServerSequence: serverSequence,
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const committed = (await response.json()) as { readonly revisionId: string };
+    latestServerSequence.current = 0;
+    revisionId.current = committed.revisionId;
+    if (editor) await publishSelection(editor, committed.revisionId);
+    setSaveState('saved');
   }
 
   async function publishSelection(

@@ -5,10 +5,11 @@ export const ARTICLE_PROPOSE_CAPABILITY = 'article.propose';
 export function effectiveActionCapabilities(
   envelope: ActionEnvelopeV1,
   availableCapabilities: Iterable<string>,
+  policy: { readonly allowArticleDraftWrite?: boolean } = {},
 ): ReadonlySet<string> {
   const available = new Set(availableCapabilities);
   if (envelope.source === 'free_text') {
-    available.delete(ARTICLE_PROPOSE_CAPABILITY);
+    if (policy.allowArticleDraftWrite !== true) available.delete(ARTICLE_PROPOSE_CAPABILITY);
     return available;
   }
 

@@ -32,5 +32,8 @@
     "@earendil-works/pi-ai": "catalog:",
     "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@agentpress/editor-application": "workspace:*"
   }
 }

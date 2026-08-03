@@ -216,6 +216,9 @@ export class PersistentToolBridge implements RuntimeToolFactory {
     const effectiveCapabilities = effectiveActionCapabilities(
       actionEnvelope,
       policyDefinitions.flatMap(({ capabilities }) => capabilities),
+      {
+        allowArticleDraftWrite: authorization.articleId !== null && authorization.role !== 'viewer',
+      },
     );
     const definitions = policyDefinitions.filter((definition) =>
       definition.capabilities.every((capability) => effectiveCapabilities.has(capability)),
