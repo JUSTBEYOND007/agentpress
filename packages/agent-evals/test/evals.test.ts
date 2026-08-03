@@ -43,21 +43,20 @@ describe('Agent eval suite', () => {
   it('scores only supplied persisted facts and fails missing observations', () => {
     const scenario = evalScenarios[0];
     if (!scenario) throw new Error('Eval fixture is empty');
-    const observed = [
-      {
-        scenarioId: scenario.id,
-        mode: 'direct' as const,
-        status: 'completed',
-        tasks: [],
-        artifactTypes: [],
-        evidenceCount: 0,
-        approvalRequests: 0,
-        schemaValid: true,
-        unauthorizedWrites: 0,
-        unknownOutcomeRetries: 0,
-        crossWorkspaceMemoryHits: 0,
-      },
-    ];
+    const observedRun = {
+      scenarioId: scenario.id,
+      mode: 'direct' as const,
+      status: 'completed',
+      tasks: [],
+      artifactTypes: [],
+      evidenceCount: 0,
+      approvalRequests: 0,
+      schemaValid: true,
+      unauthorizedWrites: 0,
+      unknownOutcomeRetries: 0,
+      crossWorkspaceMemoryHits: 0,
+    };
+    const observed = [observedRun];
     const score = scoreEvals(evaluatePersistedRuns([scenario], observed));
     expect(score).toMatchObject({
       routingAccuracy: 1,
@@ -67,7 +66,7 @@ describe('Agent eval suite', () => {
     });
     expect(scoreEvals(evaluatePersistedRuns([scenario], [])).securityPassed).toBe(false);
     expect(
-      evaluatePersistedRuns([scenario], [{ ...observed[0]!, status: 'failed' }])[0]?.routingCorrect,
+      evaluatePersistedRuns([scenario], [{ ...observedRun, status: 'failed' }])[0]?.routingCorrect,
     ).toBe(false);
   });
 
