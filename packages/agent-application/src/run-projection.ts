@@ -47,14 +47,32 @@ export function projectRunParts(
         projected.push(part);
       } else {
         const previous = projected[previousIndex];
+        const startedAt = previous
+          ? dateProperty(previous.payload, 'lifecycleStartedAt')
+          : undefined;
+        const eventAt = dateProperty(part.payload, 'eventAt');
         projected[previousIndex] = previous
-          ? { ...part, payload: { ...previous.payload, ...part.payload } }
+          ? {
+              ...part,
+              payload: {
+                ...previous.payload,
+                ...part.payload,
+                ...(startedAt ? { lifecycleStartedAt: startedAt.toISOString() } : {}),
+                ...(startedAt && eventAt && isSettledLifecycleStatus(part.status)
+                  ? { durationMs: Math.max(0, eventAt.getTime() - startedAt.getTime()) }
+                  : {}),
+              },
+            }
           : part;
       }
     }
   }
 
   return projected;
+}
+
+function isSettledLifecycleStatus(status: string): boolean {
+  return /\.(succeeded|failed|cancelled|denied|expired)$/u.test(status);
 }
 
 function closesReasoning(eventType: string): boolean {
@@ -134,6 +152,8 @@ function toRunParts(
       status: type,
       payload: {
         ...event.payload,
+        eventAt: event.createdAt.toISOString(),
+        ...(lifecycle ? { lifecycleStartedAt: event.createdAt.toISOString() } : {}),
         ...(partType === 'reasoning' ? { startedAt: event.createdAt.toISOString() } : {}),
         ...(proposalStatus ? { proposalStatus } : {}),
       },

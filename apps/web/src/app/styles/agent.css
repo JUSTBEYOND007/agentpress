@@ -513,6 +513,78 @@
   color: #4f725c;
 }
 
+.execution-timeline {
+  border: 1px solid #e5e5e1;
+  border-radius: 7px;
+  background: #fbfbfa;
+  padding: 4px 8px;
+}
+
+.execution-timeline summary strong {
+  color: #4b4c48;
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.execution-timeline summary small {
+  margin-left: 0;
+}
+
+.timeline-chevron {
+  margin-left: auto;
+  transition: transform 160ms ease;
+}
+
+.execution-timeline[open] .timeline-chevron {
+  transform: rotate(180deg);
+}
+
+.execution-timeline ol {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 5px;
+  padding: 0;
+  list-style: none;
+}
+
+.execution-step {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  border-left: 1px solid #e2e2de;
+  padding: 4px 0 4px 9px;
+  color: #80817b;
+}
+
+.execution-step div,
+.execution-step span,
+.execution-step small {
+  min-width: 0;
+}
+
+.execution-step span,
+.execution-step small {
+  display: block;
+}
+
+.execution-step small {
+  margin-top: 1px;
+  color: #a0a19b;
+  font-size: 10px;
+}
+
+.execution-step.is-active,
+.execution-step.is-waiting {
+  color: #4f725c;
+}
+
+.execution-step.is-failed,
+.execution-step.is-cancelled,
+.execution-step.is-stale {
+  color: #a34c43;
+}
+
 .activity-spinner {
   animation: activity-spin 900ms linear infinite;
 }

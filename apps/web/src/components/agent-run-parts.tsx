@@ -33,6 +33,7 @@ import {
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
 import { AssistantMarkdownPart, UserTextPart } from './agent-message-content';
+import { ExecutionTimelineRenderer } from './agent-execution-timeline';
 import { ReasoningPart } from './agent-reasoning-part';
 
 export type RunActions = {
@@ -61,7 +62,12 @@ export function AssistantMessage(): React.JSX.Element {
         <MessagePrimitive.Parts
           components={{
             Text: AssistantMarkdownPart,
-            data: { by_name: { 'agentpress-run-part': RunPartRenderer } },
+            data: {
+              by_name: {
+                'agentpress-run-part': RunPartRenderer,
+                'agentpress-execution-timeline': ExecutionTimelineRenderer,
+              },
+            },
           }}
         />
         <ActionBarPrimitive.Root className="message-actions" hideWhenRunning>

@@ -562,7 +562,22 @@ function projectionContent(
     | { readonly type: 'text'; readonly text: string }
     | { readonly type: 'data'; readonly name: string; readonly data: unknown }
   )[] = [];
+  let activitySteps: RunPart[] = [];
+  const flushActivitySteps = (): void => {
+    if (activitySteps.length === 0) return;
+    parts.push({
+      type: 'data',
+      name: 'agentpress-execution-timeline',
+      data: { steps: activitySteps },
+    });
+    activitySteps = [];
+  };
   for (const part of [...projection.parts].sort((left, right) => left.sequence - right.sequence)) {
+    if (part.type === 'activity') {
+      activitySteps.push(part);
+      continue;
+    }
+    flushActivitySteps();
     if (part.type === 'text') {
       const message = recordValue(part.payload.message);
       const text = stringValue(message.content) || stringValue(part.payload.content);
@@ -571,6 +586,7 @@ function projectionContent(
     }
     parts.push({ type: 'data', name: 'agentpress-run-part', data: part });
   }
+  flushActivitySteps();
   if (liveText && !projection.parts.some(({ type }) => type === 'text')) {
     parts.push({ type: 'text', text: liveText });
   }

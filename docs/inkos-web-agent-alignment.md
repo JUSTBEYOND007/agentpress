@@ -18,11 +18,11 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P0 Run Timeline
 
-- [ ] Group adjacent tool/task lifecycle parts into one `ToolExecutionSteps` timeline.
-- [ ] Define one visual state model for queued, active, waiting, succeeded, failed, cancelled, degraded, and stale.
-- [ ] Preserve approval, ask-user, article review, evidence, and artifact interactions as typed domain parts.
-- [ ] Show duration and concise result/error summaries without dumping raw tool payloads by default.
-- [ ] Derive every state from RunEvent projection; the Web must not infer lifecycle state from labels or timers.
+- [x] Group adjacent tool/task lifecycle parts into one `ToolExecutionSteps` timeline.
+- [x] Define one visual state model for queued, active, waiting, succeeded, failed, cancelled, degraded, and stale.
+- [x] Preserve approval, ask-user, article review, evidence, and artifact interactions as typed domain parts.
+- [x] Show duration and concise result/error summaries without dumping raw tool payloads by default.
+- [x] Derive every state from RunEvent projection; the Web must not infer lifecycle state from labels or timers.
 - [ ] Add projection and component tests for interleaved tools, retries, approvals, terminal events, and replay.
 
 ## P1 Recovery And Failure

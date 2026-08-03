@@ -23,6 +23,8 @@ describe('run projection', () => {
     expect(parts).toHaveLength(2);
     expect(parts.map(({ status }) => status)).toEqual(['task.succeeded', 'tool.succeeded']);
     expect(parts.every(({ status }) => !status.includes('executing'))).toBe(true);
+    expect(parts[0]?.payload).toMatchObject({ durationMs: 3 });
+    expect(parts[1]?.payload).toMatchObject({ durationMs: 1 });
   });
 
   it('projects a bounded reasoning summary from durable planning lifecycle events', () => {
