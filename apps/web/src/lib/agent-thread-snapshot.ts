@@ -1,4 +1,4 @@
-import type { RunProjection } from './agentpress-assistant-runtime';
+import type { RunProjection } from './agent-runtime-contracts';
 import { authenticatedFetch } from './authenticated-fetch';
 
 export type StableAgentMessage = {

@@ -1,4 +1,4 @@
-import type { RunPart, RunProjection } from './agentpress-assistant-runtime';
+import type { RunPart, RunProjection } from './agent-runtime-contracts';
 
 export type ArticleReviewChange = {
   readonly proposalId: string;

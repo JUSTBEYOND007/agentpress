@@ -5,100 +5,40 @@ import {
   useExternalStoreRuntime,
   type AppendMessage,
   type ExternalThreadQueueAdapter,
-  type ThreadMessageLike,
 } from '@assistant-ui/react';
-import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { clearLiveRunContent, updateLiveRunContent, type LiveRunContent } from './agent-streaming';
+import { clearLiveRunContent, type LiveRunContent } from './agent-streaming';
 import { loadAgentThreadSnapshot, type StableAgentMessage } from './agent-thread-snapshot';
 import { authenticatedFetch } from './authenticated-fetch';
+import { messageText, requestAgentApi, runDirectivePath, stringValue } from './agent-runtime-api';
+import type {
+  AgentContextBinding,
+  AgentMessage,
+  AgentRuntimeReadiness,
+  AgentSendMode,
+  PendingDirective,
+  RunProjection,
+} from './agent-runtime-contracts';
+import { buildRunTurns, convertAgentMessage, upsertProjection } from './agent-runtime-projection';
 import {
   articleReviewChangeFromPart,
-  articleReviewChangeFromPayload,
-  applyTerminalRunEvent,
-  isTerminalRunEvent,
   takeUnseenArticleReviewChange,
   type ArticleReviewChange,
 } from './run-event-effects';
+import { useAgentRunStream } from './use-agent-run-stream';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 
-export type AgentSendMode = 'steering' | 'follow-up';
-
-export type RunPart = {
-  readonly id: string;
-  readonly runId: string;
-  readonly sequence: number;
-  readonly type:
-    | 'text'
-    | 'reasoning'
-    | 'plan'
-    | 'action-proposal'
-    | 'activity'
-    | 'tool-approval'
-    | 'ask-user'
-    | 'evidence'
-    | 'article-change'
-    | 'artifact'
-    | 'context'
-    | 'warning'
-    | 'recovery'
-    | 'progress'
-    | 'usage';
-  readonly status: string;
-  readonly payload: Readonly<Record<string, unknown>>;
-};
-
-export type RunProjection = {
-  readonly runId: string;
-  readonly rootMessageId: string;
-  readonly status: string;
-  readonly terminal: boolean;
-  readonly mode: 'direct' | 'planned';
-  readonly activePlanRevision?: number;
-  readonly parts: readonly RunPart[];
-  readonly artifacts: readonly Readonly<Record<string, unknown>>[];
-  readonly context?: Readonly<Record<string, unknown>>;
-  readonly pendingInteraction?: Readonly<Record<string, unknown>>;
-  readonly pendingDirectives: readonly PendingDirective[];
-  readonly lastEventId: number;
-  readonly createdAt: string;
-  readonly completedAt?: string;
-};
-
-export type PendingDirective = {
-  readonly id: string;
-  readonly kind: 'steering' | 'follow_up';
-  readonly content: string;
-  readonly sequence: number;
-  readonly createdAt: string;
-};
-
-export type AgentContextBinding =
-  | { readonly type: 'mention'; readonly targetId: string }
-  | { readonly type: 'attachment'; readonly attachmentId: string }
-  | { readonly type: 'evidence'; readonly evidenceId: string }
-  | {
-      readonly type: 'article_selection';
-      readonly articleId: string;
-      readonly revisionId: string;
-      readonly blocks: readonly { readonly blockId: string; readonly contentHash: string }[];
-    }
-  | { readonly type: 'skill'; readonly skillId: string; readonly version: string };
-
-type AgentMessage = {
-  readonly id: string;
-  readonly role: 'user' | 'assistant';
-  readonly text?: string;
-  readonly projection?: RunProjection;
-  readonly status?: 'running' | 'complete' | 'error';
-};
-
-export type AgentRuntimeReadiness =
-  | { readonly status: 'checking'; readonly missing: readonly string[] }
-  | { readonly status: 'ready'; readonly missing: readonly string[] }
-  | { readonly status: 'unavailable'; readonly missing: readonly string[] };
+export type {
+  AgentContextBinding,
+  AgentRuntimeReadiness,
+  AgentSendMode,
+  PendingDirective,
+  RunPart,
+  RunProjection,
+} from './agent-runtime-contracts';
+export { numberValue, recordValue, runDirectivePath, stringValue } from './agent-runtime-api';
 
 export function useAgentPressAssistantRuntime(
   context: {
@@ -230,108 +170,19 @@ export function useAgentPressAssistantRuntime(
 
   const activeProjection = projections.find(({ runId }) => runId === activeRunId);
 
-  useEffect(() => {
-    if (!activeRunId) return;
-    const stream = new AbortController();
-    let refreshing = false;
-    let refreshAgain = false;
-    const sync = async (): Promise<void> => {
-      if (refreshing) {
-        refreshAgain = true;
-        return;
-      }
-      refreshing = true;
-      try {
-        const projection = await refreshProjection(activeRunId);
-        setPanelError(undefined);
-        if (projection.terminal) {
-          setActiveRunId(undefined);
-          await refreshThread();
-          stream.abort();
-        }
-      } catch (error) {
-        if (!stream.signal.aborted)
-          setPanelError(error instanceof Error ? error.message : '运行状态同步失败');
-      } finally {
-        refreshing = false;
-        if (refreshAgain && !stream.signal.aborted) {
-          refreshAgain = false;
-          void sync();
-        }
-      }
-    };
-    void fetchEventSource(`${apiUrl}/runs/${activeRunId}/events`, {
-      signal: stream.signal,
-      fetch: authenticatedFetch,
-      openWhenHidden: true,
-      headers: { 'Last-Event-ID': String(lastEventIds.current.get(activeRunId) ?? 0) },
-      onopen: async (response) => {
-        if (!response.ok) throw new Error(`事件流连接失败 (${String(response.status)})`);
-        setPanelError(undefined);
-        await sync();
-      },
-      onmessage: (event) => {
-        if (event.event === 'heartbeat') return;
-        const data = parseEventData(event.data);
-        if (
-          event.event === 'content.delta' ||
-          event.event === 'message.started' ||
-          event.event === 'turn.started'
-        ) {
-          setLiveContent((current) =>
-            updateLiveRunContent(current, {
-              runId: activeRunId,
-              mode: runModes.current.get(activeRunId) ?? 'direct',
-              eventType: event.event,
-              ...(stringValue(data.delta) ? { delta: stringValue(data.delta) } : {}),
-            }),
-          );
-        }
-        if (event.event === 'content.delta') {
-          return;
-        }
-        if (isTerminalRunEvent(event.event)) {
-          setPanelError(undefined);
-          setProjections((current) =>
-            current.map((projection) =>
-              projection.runId === activeRunId
-                ? applyTerminalRunEvent(projection, event.event)
-                : projection,
-            ),
-          );
-          setLiveContent((current) => clearLiveRunContent(current, activeRunId));
-          setActiveRunId(undefined);
-          stream.abort();
-          void refreshProjection(activeRunId).then(refreshThread, () => refreshThread());
-          return;
-        }
-        const sequence = numberValue(data.sequence);
-        const previous = lastEventIds.current.get(activeRunId) ?? 0;
-        if (sequence > 0 && sequence <= previous) return;
-        if (sequence > 0) lastEventIds.current.set(activeRunId, sequence);
-        if (event.event === 'article.proposal.created') {
-          const change = articleReviewChangeFromPayload(data);
-          if (change) notifyArticleReviewChanged(change);
-        }
-        void sync();
-      },
-      onerror: (error) => {
-        setPanelError('连接中断，正在恢复实时状态…');
-        throw error;
-      },
-      onclose: () => {
-        void sync();
-      },
-    }).catch((error: unknown) => {
-      if (!stream.signal.aborted) {
-        setPanelError(error instanceof Error ? error.message : 'Agent 事件流连接失败');
-        void sync();
-      }
-    });
-    return () => {
-      stream.abort();
-    };
-  }, [activeRunId, notifyArticleReviewChanged, refreshProjection, refreshThread]);
+  useAgentRunStream({
+    ...(activeRunId ? { activeRunId } : {}),
+    apiUrl,
+    lastEventIds,
+    notifyArticleReviewChanged,
+    refreshProjection,
+    refreshThread,
+    runModes,
+    setActiveRunId,
+    setLiveContent,
+    setPanelError,
+    setProjections,
+  });
 
   const messages = useMemo(
     () => [...buildRunTurns(stableMessages, projections, liveContent), ...optimisticMessages],
@@ -351,15 +202,18 @@ export function useAgentPressAssistantRuntime(
       try {
         await context.beforeSend?.();
         if (activeProjection && !activeProjection.terminal) {
-          await request(`${apiUrl}/${runDirectivePath(activeProjection.runId, requestedMode)}`, {
-            content: prompt,
-          });
+          await requestAgentApi(
+            `${apiUrl}/${runDirectivePath(activeProjection.runId, requestedMode)}`,
+            {
+              content: prompt,
+            },
+          );
           setOptimisticMessages((current) => current.filter(({ id }) => id !== optimisticId));
           setSubmissionSequence((value) => value + 1);
           await refreshProjection(activeProjection.runId);
           return;
         }
-        const created = await request(
+        const created = await requestAgentApi(
           `${apiUrl}/conversations/${conversationId}/runs`,
           {
             branchId,
@@ -409,7 +263,7 @@ export function useAgentPressAssistantRuntime(
   const isRunning = Boolean(activeProjection && !activeProjection.terminal);
   const onCancel = useCallback(async () => {
     if (!activeRunId || activeProjection?.status === 'cancelling') return;
-    await request(`${apiUrl}/runs/${activeRunId}/cancel`, {});
+    await requestAgentApi(`${apiUrl}/runs/${activeRunId}/cancel`, {});
     await refreshProjection(activeRunId);
   }, [activeProjection?.status, activeRunId, refreshProjection]);
 
@@ -421,14 +275,14 @@ export function useAgentPressAssistantRuntime(
       setPanelError(undefined);
       try {
         await context.beforeSend?.();
-        const fork = await request(
+        const fork = await requestAgentApi(
           `${apiUrl}/conversations/${conversationId}/branches/${branchId}/fork`,
           { messageId: parentId },
         );
         const nextBranchId = stringValue(fork.branchId);
         const forkedMessageId = stringValue(fork.forkedMessageId);
         if (!nextBranchId || !forkedMessageId) throw new Error('创建对话分支的响应不完整');
-        await request(
+        await requestAgentApi(
           `${apiUrl}/conversations/${conversationId}/runs`,
           {
             branchId: nextBranchId,
@@ -453,7 +307,7 @@ export function useAgentPressAssistantRuntime(
         directive.kind === 'steering'
           ? `steering/${directive.id}/cancel`
           : `follow-ups/${directive.id}/cancel`;
-      await request(`${apiUrl}/runs/${activeRunId}/${endpoint}`, {});
+      await requestAgentApi(`${apiUrl}/runs/${activeRunId}/${endpoint}`, {});
       await refreshProjection(activeRunId);
     },
     [activeRunId, refreshProjection],
@@ -485,7 +339,7 @@ export function useAgentPressAssistantRuntime(
 
   const decideTool = useCallback(
     async (toolCallId: string, decision: 'approved' | 'denied') => {
-      await request(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision });
+      await requestAgentApi(`${apiUrl}/tool-calls/${toolCallId}/approval`, { decision });
       if (activeRunId) await refreshProjection(activeRunId);
     },
     [activeRunId, refreshProjection],
@@ -493,7 +347,7 @@ export function useAgentPressAssistantRuntime(
 
   const answerQuestion = useCallback(
     async (runId: string, questionId: string, answer: string) => {
-      await request(`${apiUrl}/runs/${runId}/questions/${questionId}/answer`, { answer });
+      await requestAgentApi(`${apiUrl}/runs/${runId}/questions/${questionId}/answer`, { answer });
       setActiveRunId(runId);
       await refreshProjection(runId);
     },
@@ -502,7 +356,7 @@ export function useAgentPressAssistantRuntime(
 
   const decideActionProposal = useCallback(
     async (proposalId: string, decision: 'confirmed' | 'rejected') => {
-      const result = await request(
+      const result = await requestAgentApi(
         `${apiUrl}/action-proposals/${proposalId}/${decision === 'confirmed' ? 'confirm' : 'reject'}`,
         {},
       );
@@ -523,7 +377,7 @@ export function useAgentPressAssistantRuntime(
   );
   const runtime = useExternalStoreRuntime({
     messages,
-    convertMessage,
+    convertMessage: convertAgentMessage,
     onNew: submitMessage,
     onCancel,
     onReload,
@@ -551,205 +405,4 @@ export function useAgentPressAssistantRuntime(
     isRunning,
     submissionSequence,
   };
-}
-
-export function runDirectivePath(runId: string, requestedMode?: AgentSendMode): string {
-  return `runs/${runId}/${requestedMode === 'steering' ? 'steering' : 'follow-ups'}`;
-}
-
-function buildRunTurns(
-  messages: readonly StableAgentMessage[],
-  projections: readonly RunProjection[],
-  liveContent: readonly { readonly runId: string; readonly text: string }[],
-): readonly AgentMessage[] {
-  const byRoot = new Map(projections.map((projection) => [projection.rootMessageId, projection]));
-  const liveByRunId = new Map(liveContent.map((content) => [content.runId, content.text]));
-  const projectedRunIds = new Set(projections.map(({ runId }) => runId));
-  const result: AgentMessage[] = [];
-  let skipNextAssistant = false;
-  for (const message of messages) {
-    if (message.role === 'assistant' && skipNextAssistant) {
-      skipNextAssistant = false;
-      continue;
-    }
-    result.push({ id: message.id, role: message.role, text: message.content, status: 'complete' });
-    if (message.role !== 'user') continue;
-    const projection = byRoot.get(message.id);
-    if (!projection) continue;
-    const liveText = liveByRunId.get(projection.runId);
-    result.push({
-      id: `run:${projection.runId}`,
-      role: 'assistant',
-      projection,
-      ...(liveText ? { text: liveText } : {}),
-      status: projection.terminal ? 'complete' : 'running',
-    });
-    skipNextAssistant = projectedRunIds.has(projection.runId);
-  }
-  return result;
-}
-
-function convertMessage(message: AgentMessage): ThreadMessageLike {
-  const projection = message.projection;
-  const content = projection
-    ? projectionContent(projection, message.text)
-    : [{ type: 'text' as const, text: message.text ?? '' }];
-  return {
-    id: message.id,
-    role: message.role,
-    content,
-    ...(message.role === 'assistant'
-      ? {
-          status:
-            message.status === 'running'
-              ? ({ type: 'running' } as const)
-              : message.status === 'error'
-                ? ({ type: 'incomplete', reason: 'error' } as const)
-                : ({ type: 'complete', reason: 'stop' } as const),
-        }
-      : {}),
-  };
-}
-
-function projectionContent(
-  projection: RunProjection,
-  liveText?: string,
-): ThreadMessageLike['content'] {
-  const parts: (
-    | { readonly type: 'text'; readonly text: string }
-    | { readonly type: 'data'; readonly name: string; readonly data: unknown }
-  )[] = [];
-  let activitySteps: RunPart[] = [];
-  const flushActivitySteps = (): void => {
-    if (activitySteps.length === 0) return;
-    parts.push({
-      type: 'data',
-      name: 'agentpress-execution-timeline',
-      data: { steps: activitySteps },
-    });
-    activitySteps = [];
-  };
-  for (const part of [...projection.parts].sort((left, right) => left.sequence - right.sequence)) {
-    if (part.type === 'activity') {
-      activitySteps.push(part);
-      continue;
-    }
-    flushActivitySteps();
-    if (part.type === 'text') {
-      const message = recordValue(part.payload.message);
-      const text = stringValue(message.content) || stringValue(part.payload.content);
-      if (text) parts.push({ type: 'text', text });
-      continue;
-    }
-    parts.push({ type: 'data', name: 'agentpress-run-part', data: part });
-  }
-  flushActivitySteps();
-  if (liveText && !projection.parts.some(({ type }) => type === 'text')) {
-    parts.push({ type: 'text', text: liveText });
-  }
-  if (
-    projection.artifacts.length > 0 &&
-    !projection.parts.some(({ type }) => type === 'artifact')
-  ) {
-    parts.push({
-      type: 'data',
-      name: 'agentpress-run-part',
-      data: {
-        id: `${projection.runId}:artifacts`,
-        runId: projection.runId,
-        sequence: projection.lastEventId + 1,
-        type: 'artifact',
-        status: 'artifact.available',
-        payload: { artifacts: projection.artifacts },
-      } satisfies RunPart,
-    });
-  }
-  if (projection.context) {
-    parts.unshift({
-      type: 'data',
-      name: 'agentpress-run-part',
-      data: {
-        id: `${projection.runId}:context`,
-        runId: projection.runId,
-        sequence: -1,
-        type: 'context',
-        status: 'context.ready',
-        payload: projection.context,
-      } satisfies RunPart,
-    });
-  }
-  if (parts.length === 0 || !projection.terminal) {
-    parts.unshift({
-      type: 'data',
-      name: 'agentpress-run-part',
-      data: {
-        id: `${projection.runId}:status`,
-        runId: projection.runId,
-        sequence: 0,
-        type: 'activity',
-        status: `run.${projection.status}`,
-        payload: { mode: projection.mode, activePlanRevision: projection.activePlanRevision },
-      } satisfies RunPart,
-    });
-  }
-  return parts;
-}
-
-function upsertProjection(
-  current: readonly RunProjection[],
-  projection: RunProjection,
-): readonly RunProjection[] {
-  return [...current.filter(({ runId }) => runId !== projection.runId), projection].sort((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
-}
-
-function messageText(message: AppendMessage): string {
-  return message.content
-    .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-    .join('\n')
-    .trim();
-}
-
-async function request(
-  url: string,
-  body: unknown,
-  idempotent = false,
-): Promise<Record<string, unknown>> {
-  const response = await authenticatedFetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'content-type': 'application/json',
-      ...(idempotent ? { 'idempotency-key': crypto.randomUUID() } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `请求失败 (${String(response.status)})`);
-  }
-  return recordValue((await response.json()) as unknown);
-}
-
-function parseEventData(value: string): Record<string, unknown> {
-  try {
-    return recordValue(JSON.parse(value) as unknown);
-  } catch {
-    return {};
-  }
-}
-
-export function recordValue(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-export function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value : '';
-}
-
-export function numberValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
