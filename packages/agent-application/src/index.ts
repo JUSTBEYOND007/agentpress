@@ -9,4 +9,6 @@ export * from './direct-run-service.js';
 export * from './planned-run-executor.js';
 export * from './persistent-tool-bridge.js';
 export * from './run-context-service.js';
+export * from './execution-fact-cache.js';
+export * from './terminal-outcome-policy.js';
 export * from './tool-call-service.js';

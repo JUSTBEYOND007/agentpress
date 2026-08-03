@@ -48,6 +48,7 @@ import {
   type RunEventPublisher,
   type RuntimeToolFactory,
 } from './contracts.js';
+import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import { projectConversationHistory } from './agent-transcript-projector.js';
 import { RunContextService } from './run-context-service.js';
@@ -1173,6 +1174,7 @@ export class DirectRunService {
     result: RuntimeResult,
     completedWithDegradation = false,
   ): Promise<ExecuteDirectRunResult> {
+    const terminalOutcome = classifyTerminalOutcome(result);
     const durableEvents = await this.options.database.transaction(async (transaction) => {
       await transaction.execute(
         sql`select id from ${conversationBranches} where id = ${branchId} for update`,
@@ -1186,7 +1188,7 @@ export class DirectRunService {
       const now = this.now();
       const events: DurableRunEvent[] = [];
 
-      if (result.status === 'completed' && currentStatus !== 'cancelling') {
+      if (terminalOutcome === 'completed' && currentStatus !== 'cancelling') {
         const assistant = findLastAssistantMessage(result.messages);
         if (!assistant) {
           throw new Error(`Pi completed Agent Run ${runId} without a stable assistant message`);
@@ -1241,7 +1243,7 @@ export class DirectRunService {
         return events;
       }
 
-      if (result.status === 'cancelled' || currentStatus === 'cancelling') {
+      if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
         await transaction
           .update(agentRuns)
           .set({
