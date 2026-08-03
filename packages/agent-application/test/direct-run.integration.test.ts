@@ -218,6 +218,72 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(published.some((event) => !event.durable)).toBe(true);
   });
 
+  it('rejects unauthorized, missing, and stale context bindings before creating a Run', async () => {
+    const otherWorkspaceId = randomUUID();
+    const otherArticleId = randomUUID();
+    const otherRevisionId = randomUUID();
+    const otherDocument = { type: 'doc', content: [] };
+    await connection.db.insert(workspaces).values({
+      id: otherWorkspaceId,
+      name: 'Other Workspace',
+    });
+    await connection.db.insert(articles).values({
+      id: otherArticleId,
+      workspaceId: otherWorkspaceId,
+      title: 'Private article',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: otherRevisionId,
+      articleId: otherArticleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document: otherDocument,
+      documentHash: createHash('sha256').update(JSON.stringify(otherDocument)).digest('hex'),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: otherRevisionId })
+      .where(eq(articles.id, otherArticleId));
+
+    const base = {
+      conversationId: ids.conversation,
+      branchId: ids.branch,
+      userId: ids.user,
+      prompt: '读取上下文',
+    };
+    const runsBefore = await connection.db.select({ id: agentRuns.id }).from(agentRuns);
+    const unauthorizedBindings = [
+      [{ type: 'mention' as const, targetId: otherArticleId }],
+      [{ type: 'attachment' as const, attachmentId: randomUUID() }],
+      [{ type: 'evidence' as const, evidenceId: randomUUID() }],
+      [{ type: 'skill' as const, skillId: 'missing', version: '1.0.0' }],
+    ];
+    for (const contextBindings of unauthorizedBindings) {
+      await expect(
+        service.create({ ...base, idempotencyKey: randomUUID(), contextBindings }),
+      ).rejects.toMatchObject({ code: 'unauthorized_context' });
+    }
+    await expect(
+      service.create({
+        ...base,
+        idempotencyKey: randomUUID(),
+        contextBindings: [
+          {
+            type: 'article_selection',
+            articleId: ids.article,
+            revisionId: ids.articleRevision,
+            blocks: [{ blockId: 'mention-block', contentHash: 'stale-hash' }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_context' });
+
+    const runsAfter = await connection.db.select({ id: agentRuns.id }).from(agentRuns);
+    expect(runsAfter).toHaveLength(runsBefore.length);
+  });
+
   it('settles an unexpected runtime initialization error instead of leaving the Run active', async () => {
     const conversationId = randomUUID();
     const branchId = randomUUID();

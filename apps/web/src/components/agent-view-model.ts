@@ -172,7 +172,8 @@ export function safeExternalUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined;
+    const webProtocol = url.protocol === 'https:' || url.protocol === 'http:';
+    return webProtocol && !url.username && !url.password ? url.toString() : undefined;
   } catch {
     return undefined;
   }
