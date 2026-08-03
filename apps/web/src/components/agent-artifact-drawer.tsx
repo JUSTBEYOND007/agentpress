@@ -9,7 +9,12 @@ import { math } from '@streamdown/math';
 import { mermaid } from '@streamdown/mermaid';
 
 import { safeExternalUrl } from './agent-view-model';
-import { stringValue, type RunPart, recordValue } from '../lib/agentpress-assistant-runtime';
+import {
+  numberValue,
+  recordValue,
+  stringValue,
+  type RunPart,
+} from '../lib/agentpress-assistant-runtime';
 
 const plugins = { cjk, code, math, mermaid };
 
@@ -29,7 +34,9 @@ export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.El
           <button
             className="artifact-card"
             key={id}
-            onClick={() => setSelected(artifact)}
+            onClick={() => {
+              setSelected(artifact);
+            }}
             type="button"
           >
             <strong>
@@ -40,7 +47,12 @@ export function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.El
         );
       })}
       {selected ? (
-        <ArtifactDrawer artifact={selected} onClose={() => setSelected(undefined)} />
+        <ArtifactDrawer
+          artifact={selected}
+          onClose={() => {
+            setSelected(undefined);
+          }}
+        />
       ) : null}
     </section>
   );
@@ -60,13 +72,16 @@ function ArtifactDrawer({
       <aside
         className="artifact-drawer"
         aria-label="产物详情"
-        onMouseDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+        }}
       >
         <header>
           <div>
             <strong>{stringValue(artifact.title) || '未命名产物'}</strong>
             <span>
-              {stringValue(artifact.type) || 'artifact'} · v{String(artifact.version ?? 1)}
+              {stringValue(artifact.type) || 'artifact'} · v
+              {String(numberValue(artifact.version) || 1)}
             </span>
           </div>
           <button aria-label="关闭产物详情" onClick={onClose} type="button">
