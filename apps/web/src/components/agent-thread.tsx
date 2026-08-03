@@ -14,7 +14,13 @@ export function AgentThread({
   readonly onMemoryDecision: (id: string, decision: 'accepted' | 'rejected') => Promise<void>;
 }): React.JSX.Element {
   return (
-    <ThreadPrimitive.Viewport className="agent-thread">
+    <ThreadPrimitive.Viewport
+      autoScroll
+      scrollToBottomOnInitialize
+      scrollToBottomOnRunStart
+      scrollToBottomOnThreadSwitch
+      className="agent-thread"
+    >
       <ThreadPrimitive.Messages>
         {({ message }) => (message.role === 'user' ? <UserMessage /> : <AssistantMessage />)}
       </ThreadPrimitive.Messages>

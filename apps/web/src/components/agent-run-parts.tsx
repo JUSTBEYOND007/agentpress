@@ -9,7 +9,6 @@ import {
   Copy,
   ExternalLink,
   FileCheck2,
-  FileText,
   ListChecks,
   LoaderCircle,
   X,
@@ -35,6 +34,7 @@ import { AssistantMarkdownPart, UserTextPart } from './agent-message-content';
 import { ExecutionTimelineRenderer } from './agent-execution-timeline';
 import { NoticePart } from './agent-notice-part';
 import { ReasoningPart } from './agent-reasoning-part';
+import { ArtifactPart } from './agent-artifact-drawer';
 
 export type RunActions = {
   readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
@@ -332,37 +332,6 @@ function AskUserPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   );
 }
 
-function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const artifacts = Array.isArray(part.payload.artifacts)
-    ? part.payload.artifacts.map(recordValue)
-    : [part.payload];
-  return (
-    <section className="run-part artifact-part">
-      <h3>
-        <FileText size={14} />
-        产出
-      </h3>
-      {artifacts.map((artifact, index) => (
-        <div key={stringValue(artifact.id) || stringValue(artifact.artifactId) || String(index)}>
-          <strong>
-            {stringValue(artifact.title) || artifactLabel(stringValue(artifact.type))}
-          </strong>
-          <span>{stringValue(artifact.summary)}</span>
-          {safeExternalUrl(artifact.url) || safeExternalUrl(artifact.downloadUrl) ? (
-            <a
-              href={safeExternalUrl(artifact.url) ?? safeExternalUrl(artifact.downloadUrl)}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              打开 <ExternalLink aria-hidden="true" size={11} />
-            </a>
-          ) : null}
-        </div>
-      ))}
-    </section>
-  );
-}
-
 function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const href = safeExternalUrl(part.payload.url) ?? safeExternalUrl(part.payload.sourceUrl);
   return (
@@ -424,19 +393,6 @@ function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
       </div>
     </details>
   );
-}
-
-function artifactLabel(type: string): string {
-  const labels: Record<string, string> = {
-    ResearchBrief: '研究摘要',
-    Outline: '文章大纲',
-    ArticleDraft: '文章草稿',
-    EditProposal: '文章修改',
-    ClaimReview: '事实核查',
-    ImagePlan: '配图方案',
-    AssetProposal: '素材建议',
-  };
-  return labels[type] ?? '结构化产出';
 }
 
 function formatDuration(durationMs: number): string {

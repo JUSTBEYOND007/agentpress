@@ -34,7 +34,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P1 Scrolling
 
-- [ ] Reuse `ThreadPrimitive.Viewport` and `ScrollToBottom` with explicit bottom-pinned behavior.
+- [x] Reuse `ThreadPrimitive.Viewport` and `ScrollToBottom` with explicit bottom-pinned behavior.
 - [ ] Do not force-scroll while the user reads history.
 - [ ] Keep the bottom anchor stable when Markdown, code highlighting, Mermaid, or tool details change height.
 - [ ] Show the return-to-bottom control only when the viewport is not pinned.
@@ -42,7 +42,7 @@ file-backed sessions, unrestricted tool tables, TUI code, and keyword authorizat
 
 ## P1 Artifacts And Context
 
-- [ ] Replace inline artifact dumps with an `ArtifactDrawer` backed by persisted artifact projections.
+- [x] Replace inline artifact dumps with an `ArtifactDrawer` backed by persisted artifact projections.
 - [ ] Render Markdown artifacts with Streamdown static mode; render typed assets with domain viewers.
 - [ ] Show title, type, version, summary, evidence, download/open actions, and provenance.
 - [ ] Add a compact context-source view backed by Context Pack/Turn Profile facts: article revision, selection, attachments, evidence, skills, provider/model, and budget.

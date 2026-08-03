@@ -675,6 +675,76 @@
   padding: 5px 0;
 }
 
+.artifact-card {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  border: 0;
+  border-top: 1px solid #e7e7e3;
+  background: transparent;
+  padding: 9px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.artifact-card:hover strong {
+  color: #3c63c7;
+}
+
+.artifact-drawer-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(30 31 28 / 16%);
+}
+
+.artifact-drawer {
+  width: min(520px, 92vw);
+  height: 100%;
+  overflow-y: auto;
+  border-left: 1px solid #deded9;
+  background: #fff;
+  padding: 20px 22px;
+  box-shadow: -8px 0 24px rgb(30 31 28 / 10%);
+}
+
+.artifact-drawer header,
+.artifact-drawer footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.artifact-drawer header > div {
+  display: grid;
+  gap: 3px;
+}
+.artifact-drawer header span,
+.artifact-summary,
+.artifact-empty {
+  color: #777872;
+  font-size: 12px;
+}
+.artifact-drawer header button,
+.artifact-drawer footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: #5b5d58;
+  cursor: pointer;
+}
+.artifact-drawer footer {
+  justify-content: flex-start;
+  margin-top: 18px;
+  border-top: 1px solid #e7e7e3;
+  padding-top: 12px;
+}
+
 .artifact-part a,
 .evidence-part a {
   display: inline-flex;
