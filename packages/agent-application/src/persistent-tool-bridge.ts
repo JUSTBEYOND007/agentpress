@@ -133,7 +133,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
           eq(toolCalls.runId, runId),
           eq(toolCalls.taskId, taskId),
           eq(toolCalls.providerToolCallId, providerToolCallId),
-          inArray(toolCalls.status, ['approved', 'succeeded', 'denied', 'expired']),
+          inArray(toolCalls.status, ['proposed', 'approved', 'succeeded', 'denied', 'expired']),
         ),
       )
       .orderBy(desc(toolCalls.createdAt))

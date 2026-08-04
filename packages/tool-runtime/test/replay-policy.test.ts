@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideToolReplay } from '../src/index.js';
+import { decideToolReplay, resolveToolReplaySafety } from '../src/index.js';
 
 describe('tool replay policy', () => {
+  it('derives conservative safety from the registered tool contract', () => {
+    expect(resolveToolReplaySafety({ risk: 'read_only', idempotency: 'none' })).toBe('replay_safe');
+    expect(resolveToolReplaySafety({ risk: 'external_write', idempotency: 'provider_key' })).toBe(
+      'idempotent',
+    );
+    expect(resolveToolReplaySafety({ risk: 'draft_write', idempotency: 'none' })).toBe(
+      'side_effecting',
+    );
+    expect(
+      resolveToolReplaySafety({
+        risk: 'read_only',
+        idempotency: 'none',
+        replaySafety: 'outcome_unknown',
+      }),
+    ).toBe('outcome_unknown');
+  });
+
   it('does not replay settled calls', () => {
     expect(decideToolReplay({ status: 'succeeded', safety: 'side_effecting' })).toBe('skip');
     expect(decideToolReplay({ status: 'failed', safety: 'replay_safe' })).toBe('skip');

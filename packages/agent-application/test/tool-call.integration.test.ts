@@ -11,13 +11,14 @@ import {
   conversationMessages,
   conversations,
   rootRequests,
+  runEvents,
   runSkillBindings,
   skillRevisions,
   toolCalls,
   workspaceMembers,
   workspaces,
 } from '@agentpress/database';
-import { ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
+import { hashToolArguments, ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -313,6 +314,57 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(toolCalls)
       .where(eq(toolCalls.id, toolCallId));
     expect(rows[0]?.status).toBe('outcome_unknown');
+  });
+
+  it('requeues an interrupted read-only call for exactly-once recovery', async () => {
+    const runId = await createRunningRun();
+    const toolCallId = randomUUID();
+    await connection.db.insert(toolCalls).values({
+      id: toolCallId,
+      runId,
+      toolId: 'workspace.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'recoverable' },
+      argumentsHash: hashToolArguments({ query: 'recoverable' }),
+      risk: 'read_only',
+      sideEffect: 'No side effect',
+      status: 'executing',
+    });
+    const runs = new DirectRunService({
+      database: connection.db,
+      publisher: {
+        publish(event) {
+          published.push(event);
+          return Promise.resolve();
+        },
+      },
+      runtimeFactory: {
+        create() {
+          throw new Error('Recovery test must not invoke the runtime');
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+
+    await expect(runs.prepareRecovery(runId)).resolves.toBe(true);
+    const rows = await connection.db
+      .select({ status: toolCalls.status })
+      .from(toolCalls)
+      .where(eq(toolCalls.id, toolCallId));
+    expect(rows[0]?.status).toBe('approved');
+    expect(
+      published.some((event) => event.durable && event.event.eventType === 'tool.recovery_ready'),
+    ).toBe(true);
+    const saved = await connection.db
+      .select({ state: checkpoints.state })
+      .from(checkpoints)
+      .where(eq(checkpoints.runId, runId));
+    expect(saved.at(-1)?.state).toMatchObject({ replayReadyToolCalls: [toolCallId] });
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, runId));
+    expect(events.map(({ eventType }) => eventType)).toContain('tool.recovery_ready');
   });
 
   async function proposePublish(runId: string) {

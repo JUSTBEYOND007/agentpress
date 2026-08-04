@@ -36,6 +36,7 @@ import {
   workspaceMembers,
 } from '@agentpress/database';
 import { and, asc, desc, eq, gt, gte, inArray, lt, lte, max, sql } from 'drizzle-orm';
+import { decideToolReplay, resolveToolReplaySafety } from '@agentpress/tool-runtime';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -722,15 +723,47 @@ export class DirectRunService {
       }
       const now = this.now();
       const executing = await transaction
-        .select({ id: toolCalls.id, risk: toolCalls.risk })
+        .select({
+          id: toolCalls.id,
+          risk: toolCalls.risk,
+          idempotencyKey: toolCalls.idempotencyKey,
+        })
         .from(toolCalls)
         .where(and(eq(toolCalls.runId, runId), eq(toolCalls.status, 'executing')));
       const events: DurableRunEvent[] = [];
+      const replayReadyToolCalls: string[] = [];
       for (const call of executing) {
-        const status =
-          call.risk === 'external_write' || call.risk === 'destructive'
-            ? ('outcome_unknown' as const)
-            : ('failed' as const);
+        const safety = resolveToolReplaySafety({
+          risk: call.risk,
+          idempotency: call.idempotencyKey ? 'provider_key' : 'none',
+        });
+        const action = decideToolReplay({
+          status: 'executing',
+          safety,
+          ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}),
+        });
+        if (action === 'resume') {
+          await transaction
+            .update(toolCalls)
+            .set({
+              status: 'approved',
+              failure: null,
+              settledAt: null,
+              updatedAt: now,
+              version: sql`${toolCalls.version} + 1`,
+            })
+            .where(and(eq(toolCalls.id, call.id), eq(toolCalls.status, 'executing')));
+          const toolEvent = await appendRunEvent(transaction, {
+            id: this.createId(),
+            runId,
+            eventType: 'tool.recovery_ready',
+            payload: { toolCallId: call.id, reason: 'worker_lease_lost', action, safety },
+          });
+          events.push(toDurableEvent(toolEvent));
+          replayReadyToolCalls.push(call.id);
+          continue;
+        }
+        const status = 'outcome_unknown' as const;
         await transaction
           .update(toolCalls)
           .set({
@@ -745,7 +778,7 @@ export class DirectRunService {
           id: this.createId(),
           runId,
           eventType: `tool.${status}`,
-          payload: { toolCallId: call.id, reason: 'worker_lease_lost' },
+          payload: { toolCallId: call.id, reason: 'worker_lease_lost', action, safety },
         });
         events.push(toDurableEvent(toolEvent));
       }
@@ -766,7 +799,11 @@ export class DirectRunService {
         id: this.createId(),
         runId,
         reason: 'worker_recovery',
-        state: { previousStatus: run.status, interruptedToolCalls: executing.map(({ id }) => id) },
+        state: {
+          previousStatus: run.status,
+          interruptedToolCalls: executing.map(({ id }) => id),
+          replayReadyToolCalls,
+        },
       });
       const event = await appendRunEvent(transaction, {
         id: this.createId(),
@@ -1627,9 +1664,7 @@ export class DirectRunService {
 
     const terminal = durableEvents.at(-1)?.eventType;
     const compactionEvent =
-      terminal === 'run.cancelled'
-        ? undefined
-        : await this.compactAfterSettlement(branchId, runId);
+      terminal === 'run.cancelled' ? undefined : await this.compactAfterSettlement(branchId, runId);
     if (terminal !== 'run.cancelled') await this.activateNextFollowUp(branchId);
     for (const event of durableEvents) {
       await this.options.publisher.publish({ durable: true, event });
