@@ -2,6 +2,18 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { memoryCandidates } from './schema.js';
 
+export type MemoryCandidateKind =
+  | 'fact'
+  | 'preference'
+  | 'decision'
+  | 'commitment'
+  | 'goal'
+  | 'event'
+  | 'instruction'
+  | 'learning'
+  | 'error'
+  | 'artifact';
+
 export type ProposeMemoryInput = {
   readonly id: string;
   readonly workspaceId: string;
@@ -12,6 +24,11 @@ export type ProposeMemoryInput = {
   readonly value: string;
   readonly valueHash: string;
   readonly confidenceBps: number;
+  readonly kind?: MemoryCandidateKind;
+  readonly importanceBps?: number;
+  readonly validFrom?: Date;
+  readonly validUntil?: Date;
+  readonly sourceEvidenceIds?: readonly string[];
   readonly supersedesId?: string;
 };
 

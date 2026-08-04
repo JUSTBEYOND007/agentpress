@@ -104,6 +104,18 @@ export const memoryCandidateStatusEnum = pgEnum('memory_candidate_status', [
   'rejected',
   'superseded',
 ] as const);
+export const memoryCandidateKindEnum = pgEnum('memory_candidate_kind', [
+  'fact',
+  'preference',
+  'decision',
+  'commitment',
+  'goal',
+  'event',
+  'instruction',
+  'learning',
+  'error',
+  'artifact',
+] as const);
 export const editProposalStatusEnum = pgEnum('edit_proposal_status', [
   'pending',
   'partially_accepted',
@@ -184,6 +196,14 @@ export const memoryCandidates = pgTable(
     value: text('value').notNull(),
     valueHash: varchar('value_hash', { length: 80 }).notNull(),
     confidenceBps: integer('confidence_bps').notNull(),
+    kind: memoryCandidateKindEnum('kind').notNull().default('fact'),
+    importanceBps: integer('importance_bps').notNull().default(5000),
+    validFrom: timestamp('valid_from', { withTimezone: true, precision: 3 }),
+    validUntil: timestamp('valid_until', { withTimezone: true, precision: 3 }),
+    sourceEvidenceIds: jsonb('source_evidence_ids')
+      .$type<readonly string[]>()
+      .notNull()
+      .default([]),
     status: memoryCandidateStatusEnum('status').notNull().default('pending'),
     supersedesId: uuid('supersedes_id').references((): AnyPgColumn => memoryCandidates.id, {
       onDelete: 'set null',
@@ -207,6 +227,11 @@ export const memoryCandidates = pgTable(
     ),
     index('memory_candidates_source_run_idx').on(table.sourceRunId),
     check('memory_candidates_confidence_check', sql`${table.confidenceBps} between 0 and 10000`),
+    check('memory_candidates_importance_check', sql`${table.importanceBps} between 0 and 10000`),
+    check(
+      'memory_candidates_validity_check',
+      sql`${table.validUntil} is null or ${table.validFrom} is null or ${table.validUntil} > ${table.validFrom}`,
+    ),
   ],
 );
 

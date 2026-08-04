@@ -176,6 +176,13 @@
       "when": 1785813056639,
       "tag": "0024_little_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785820246300,
+      "tag": "0025_memory_candidate_metadata",
+      "breakpoints": true
     }
   ]
 }

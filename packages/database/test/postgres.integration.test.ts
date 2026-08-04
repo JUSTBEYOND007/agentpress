@@ -201,6 +201,10 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       value: 'concise',
       valueHash: 'sha256:concise',
       confidenceBps: 9000,
+      kind: 'preference',
+      importanceBps: 8000,
+      validFrom: new Date('2026-01-01T00:00:00.000Z'),
+      sourceEvidenceIds: ['evidence-1'],
     });
     expect(
       await listAcceptedMemory(connection.db, { workspaceId: ids.workspace, userId: ids.user }),
@@ -212,7 +216,12 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
         userId: ids.user,
         decision: 'accepted',
       }),
-    ).toMatchObject({ status: 'accepted' });
+    ).toMatchObject({
+      status: 'accepted',
+      kind: 'preference',
+      importanceBps: 8000,
+      sourceEvidenceIds: ['evidence-1'],
+    });
     const replacement = await proposeMemoryCandidate(connection.db, {
       id: randomUUID(),
       workspaceId: ids.workspace,
