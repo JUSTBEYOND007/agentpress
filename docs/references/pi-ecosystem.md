@@ -40,6 +40,14 @@ the original provider failure. Oh My Pi's remote compaction, JSONL SessionManage
 mnemopi, Bun/native and handoff reset paths were rejected because they either introduce a second
 runtime/fact source or cannot preserve AgentPress PostgreSQL and ToolCall settlement boundaries.
 
+Summary evaluation decision: `packages/agent-evals/src/compaction-scenarios.ts` owns the versioned
+`agentpress-compaction-v1` dataset and deterministic scorer for fact retention, user intent,
+unfinished actions, citations, branch isolation, and stale-state handling. The offline contract
+suite and `compaction-online-cli.ts` consume the same cases instead of maintaining separate
+fixtures. The scorer fails both missing protected facts and forbidden sibling-branch references;
+the online run additionally compares task answers before and after compaction. Target-model results
+remain an explicit external gate and are not inferred from the offline golden summaries.
+
 ## Reuse Matrix
 
 | Source and pin                                                                                                                                                      | License       | Decision                                                                                                                                     | Candidate upstream paths                                                                                                                                                                                                                                   | Planned AgentPress destination                                                                                                                                    | Required verification                                                                                                                                                                                                    |

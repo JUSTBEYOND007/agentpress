@@ -85,7 +85,10 @@ TODO：
       覆盖 preflight overflow、provider 显式 overflow、只重试一次、压缩无缩减/失败时保留原错误，
       以及 length 截断 ToolCall 不执行。首版明确不采用 remote compaction；transport-neutral compactor
       failure 用例验证其失败不能覆盖 transcript 或触发无界 retry。
-- [ ] 建立 AgentPress Summary 测试集，至少覆盖事实保留、用户意图、未完成动作、引用、分支隔离和陈旧状态。
+- [x] 建立 AgentPress Summary 测试集，至少覆盖事实保留、用户意图、未完成动作、引用、分支隔离和陈旧状态。
+      `agentpress-compaction-v1` 在 `packages/agent-evals/src/compaction-scenarios.ts` 固定六类要求与
+      四个场景；离线 scorer 和真实模型在线 CLI 共用同一数据集。契约测试同时拒绝遗漏受保护事实与
+      `BRANCH-B-SECRET-922` 兄弟分支泄漏，避免只验证正向 golden summary。
 - [ ] 使用真实 Pi runtime/目标模型验证多轮压缩前后任务完成率和事实保留率，而非只断言 Prompt 文本。
 
 首选本地落点：`packages/agent-context/`、`packages/agent-application/`、

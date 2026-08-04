@@ -8,3 +8,4 @@ export * from './judge-calibration.js';
 export * from './trace-metrics.js';
 export * from './experiment-store.js';
 export * from './experiment-report.js';
+export * from './compaction-scenarios.js';
