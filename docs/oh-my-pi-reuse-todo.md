@@ -222,6 +222,7 @@ TODO：
       `specialist-task-contract.ts`；caller 两种模式均预检，继承 schema 仅 strict fail closed，
       Planned Specialist 将 source/mode 固定进 `toolPolicy`。对应契约测试覆盖无 schema 场景。
 - [ ] 复制递归深度限制、自调用阻止、spawn policy 和 provider concurrency 测试。
+      已先接入 AgentPress host-side 基础策略：嵌套请求要求 parent owner、禁止同 owner 自调用、支持 allowed owner policy，DAG 波次取 Specialist 与 provider 上限最小值；动态 nested spawn 路由和固定上游完整测试集仍待实现。
 - [ ] 实现持久化 Agent Registry，状态来源为 PostgreSQL Task/RunEvent，不采用进程内 registry 作为事实源。
 - [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。
 - [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。

@@ -129,6 +129,8 @@ type PlannedRunExecutorOptions = {
   readonly now?: () => Date;
   readonly createId?: () => string;
   readonly maxSpecialistConcurrency?: number;
+  /** Global provider ceiling applied in addition to the Specialist wave limit. */
+  readonly maxProviderConcurrency?: number;
 };
 
 const specialistRoles = ['researcher', 'writer', 'editor', 'fact_checker', 'illustrator'] as const;
@@ -760,7 +762,13 @@ export class PlannedRunExecutor {
       }
       const ready = [...pending.values()]
         .filter((task) => task.dependencyIds.every((id) => settled.get(id)?.status === 'succeeded'))
-        .slice(0, specialistConcurrencyLimit(this.options.maxSpecialistConcurrency));
+        .slice(
+          0,
+          specialistConcurrencyLimit(
+            this.options.maxSpecialistConcurrency,
+            this.options.maxProviderConcurrency,
+          ),
+        );
       if (ready.length === 0) {
         if (pending.size === 0) break;
         throw new Error(`Planned Run ${runId} scheduler made no progress`);

@@ -19,6 +19,10 @@ export type SpecialistTaskRequest = {
   readonly timeoutMs: number;
   readonly maxAttempts: number;
   readonly detached: boolean;
+  /** Host-owned parent identity used to prevent same-role recursive spawning. */
+  readonly parentOwner?: 'main' | SpecialistRole;
+  /** Optional allowlist for the parent Skill/Agent spawn policy. */
+  readonly allowedOwners?: readonly SpecialistRole[];
 };
 
 export type SpecialistOutputSchemaMode = 'strict' | 'permissive';
@@ -83,12 +87,24 @@ export function createSpecialistTaskRequest(input: SpecialistTaskRequest): Speci
   return {
     ...input,
     capabilities: [...new Set(input.capabilities)].sort(),
+    ...(input.allowedOwners
+      ? { allowedOwners: [...new Set(input.allowedOwners)].sort() }
+      : {}),
   };
 }
 
 export function validateSpecialistTaskRequest(input: SpecialistTaskRequest): void {
   if (!input.taskId || !input.runId || !input.objective.trim()) {
     throw new TypeError('Specialist Task identity and objective are required');
+  }
+  if (!specialistRoles.includes(input.owner)) {
+    throw new TypeError(`Unknown Specialist owner ${input.owner}`);
+  }
+  if (input.parentOwner && input.parentOwner !== 'main' && !specialistRoles.includes(input.parentOwner)) {
+    throw new TypeError(`Unknown Specialist parent owner ${input.parentOwner}`);
+  }
+  if (input.allowedOwners !== undefined && !Array.isArray(input.allowedOwners)) {
+    throw new TypeError('Specialist Task allowedOwners must be an array');
   }
   if (
     !Number.isSafeInteger(input.depth) ||
@@ -104,6 +120,20 @@ export function validateSpecialistTaskRequest(input: SpecialistTaskRequest): voi
   }
   if (input.depth > 0 && (!input.parentTaskId || input.parentTaskId === input.taskId)) {
     throw new Error('Nested Specialist Task requires a distinct parent task');
+  }
+  if (input.depth > 0 && !input.parentOwner) {
+    throw new Error('Nested Specialist Task requires a parent owner');
+  }
+  if (input.parentOwner && input.parentOwner === input.owner) {
+    throw new Error('Specialist Task cannot recursively spawn the same owner');
+  }
+  if (
+    input.allowedOwners &&
+    (input.allowedOwners.length > 8 ||
+      input.allowedOwners.some((owner) => !isSpecialistRole(owner)) ||
+      !input.allowedOwners.includes(input.owner))
+  ) {
+    throw new Error('Specialist Task owner is blocked by the parent spawn policy');
   }
   if (
     input.capabilities.length > 16 ||
@@ -150,9 +180,24 @@ export function parseSpecialistTaskRequest(value: unknown): SpecialistTaskReques
   return request;
 }
 
-export function specialistConcurrencyLimit(requested = 3): number {
+export function specialistConcurrencyLimit(requested = 3, providerLimit = 8): number {
   if (!Number.isSafeInteger(requested) || requested < 1 || requested > 8) {
     throw new RangeError('Specialist concurrency must be between 1 and 8');
   }
-  return requested;
+  if (!Number.isSafeInteger(providerLimit) || providerLimit < 1 || providerLimit > 8) {
+    throw new RangeError('Provider concurrency must be between 1 and 8');
+  }
+  return Math.min(requested, providerLimit);
+}
+
+const specialistRoles: readonly SpecialistRole[] = [
+  'researcher',
+  'writer',
+  'editor',
+  'fact_checker',
+  'illustrator',
+];
+
+function isSpecialistRole(value: unknown): value is SpecialistRole {
+  return typeof value === 'string' && specialistRoles.includes(value as SpecialistRole);
 }

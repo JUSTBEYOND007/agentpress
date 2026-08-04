@@ -192,6 +192,7 @@ describe('agent application contracts', () => {
       detached: false,
     });
     expect(specialistConcurrencyLimit(3)).toBe(3);
+    expect(specialistConcurrencyLimit(8, 2)).toBe(2);
     expect(() => specialistConcurrencyLimit(9)).toThrow(/between 1 and 8/u);
     expect(() =>
       createSpecialistTaskRequest({
@@ -206,5 +207,24 @@ describe('agent application contracts', () => {
         timeoutMs: 0,
       }),
     ).toThrow(/timeout/u);
+    expect(() =>
+      createSpecialistTaskRequest({
+        ...request,
+        taskId: 'task-2',
+        depth: 1,
+        parentTaskId: 'task-1',
+        parentOwner: 'researcher',
+      }),
+    ).toThrow(/recursively spawn the same owner/u);
+    expect(() =>
+      createSpecialistTaskRequest({
+        ...request,
+        taskId: 'task-2',
+        depth: 1,
+        parentTaskId: 'task-1',
+        parentOwner: 'main',
+        allowedOwners: ['writer'],
+      }),
+    ).toThrow(/spawn policy/u);
   });
 });
