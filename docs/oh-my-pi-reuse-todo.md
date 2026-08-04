@@ -24,19 +24,25 @@
 - [x] 复制前固定上游 commit，保留版权和许可证头，并在 `THIRD_PARTY_NOTICES.md` 记录上游路径、
       本地路径、修改内容和验证结果。
 - [ ] 只有直接依赖和复制适配都不成立时才允许自研；自研前记录候选模块及逐项拒绝理由。
-- [x] 每次只引入一个行为单元，完成契约测试、领域边界测试、相反语义回归和真实 Pi/目标模型验收后提交。
-- [ ] 不直接依赖 `@oh-my-pi/pi-agent-core`、`@oh-my-pi/pi-ai`、`snapcompact` 或 `mnemopi`；后两者
+- [ ] 每次只引入一个行为单元，完成契约测试、领域边界测试、相反语义回归和真实 Pi/目标模型验收后提交。
+      独立提交和离线测试纪律已经执行；真实目标模型验收仍受本清单各 online gate 约束，不能提前勾选。
+- [x] 不直接依赖 `@oh-my-pi/pi-agent-core`、`@oh-my-pi/pi-ai`、`snapcompact` 或 `mnemopi`；后两者
       仍传递依赖 Oh My Pi Runtime/native/Bun。优先复制最小纯逻辑及其测试，或移植行为到现有依赖。
 
 ## 明确排除
 
-- [ ] 不引入第二套 Pi Agent Core、消息类型、Provider Catalog 或事件状态机。
-- [ ] 不采用 Oh My Pi JSONL、本地 SQLite、Redis Session 或 SQL Session 表作为 AgentPress 事实源。
-- [ ] 不复制 TUI、命令面板、终端控制、Git/Worktree、代码文件操作或本机凭据发现。
-- [ ] 不开放任意用户配置的 stdio/remote MCP Server；首版仍限三个内置 MCP Server。
-- [ ] 不让模型自动写入长期 Memory、Skill、文章正文或外部系统；必须经过 AgentPress proposal/approval/settlement。
-- [ ] 不复制关键词式 Memory 分类作为权威判断，不把 Prompt 当权限、终态、幂等或恢复状态机。
-- [ ] 不把 Oh My Pi 的 `eval` 代码执行工具误认为 Agent 评估平台。
+- [x] 不引入第二套 Pi Agent Core、消息类型、Provider Catalog 或事件状态机。
+- [x] 不采用 Oh My Pi JSONL、本地 SQLite、Redis Session 或 SQL Session 表作为 AgentPress 事实源。
+- [x] 不复制 TUI、命令面板、终端控制、Git/Worktree、代码文件操作或本机凭据发现。
+- [x] 不开放任意用户配置的 stdio/remote MCP Server；首版仍限三个内置 MCP Server。
+- [x] 不让模型自动写入长期 Memory、Skill、文章正文或外部系统；必须经过 AgentPress proposal/approval/settlement。
+- [x] 不复制关键词式 Memory 分类作为权威判断，不把 Prompt 当权限、终态、幂等或恢复状态机。
+- [x] 不把 Oh My Pi 的 `eval` 代码执行工具误认为 Agent 评估平台。
+
+      依赖图只包含固定 `@earendil-works/pi-*` Runtime；Conversation/Run/Task/Tool/Memory/Skill/Eval
+      均投影自 PostgreSQL。MCP Registry 只有 `web_research`、`workspace_knowledge`、`licensed_media`
+      三个宿主内置 server；长期写入统一经过 proposal/approval/settlement，评估平台独立位于
+      `packages/agent-evals`，没有复用 Oh My Pi 的代码执行工具。
 
 ## P0：Session、Summary 与上下文压缩
 
@@ -114,7 +120,9 @@ TODO：
 TODO：
 
 - [x] 审计官方 `pi-ai@0.82.1` 已有 Schema 能力，列出相对 Oh My Pi 的真实缺口，避免复制已成熟实现。
-- [ ] 对缺失行为优先向官方 Pi 适配层补契约测试；只有官方 API 无法覆盖时才复制纯 Schema 逻辑。
+- [x] 对缺失行为优先向官方 Pi 适配层补契约测试；只有官方 API 无法覆盖时才复制纯 Schema 逻辑。
+      Provider 方言与严格输出缺口均在 `packages/agent-runtime/test/provider-schema-fixtures.test.ts`
+      和 `schema-compatibility.test.ts` 先固定为适配层契约；未复制 Oh My Pi 完整 Schema subsystem。
 - [x] 建立统一 Schema 管线：TypeBox（权威契约）-> JSON Schema -> dereference -> normalize -> provider adaptation
       -> wire schema -> result validation。
       Zod 仅保留在官方 MCP SDK 必须使用它的边界适配器中，不扩展为第二套领域契约。
@@ -186,7 +194,10 @@ TODO：
 - [x] 复制 Provider 切换、aborted thinking、unexpected stop、empty stop 和工具后续轮的恢复测试。
       `packages/agent-runtime/test/pi-runtime-adapter.test.ts` 覆盖 provider metadata 切换、aborted
       thinking、empty stop，以及已持久化 ToolResult 后 continuation；真实目标 provider 的 wire 验收仍单独保留。
-- [ ] 每个工具执行继续通过 AgentPress `ToolCallService`、权限、审批和 settlement，不让 Pi 状态直接结算业务。
+- [x] 每个工具执行继续通过 AgentPress `ToolCallService`、权限、审批和 settlement，不让 Pi 状态直接结算业务。
+      `PersistentToolBridge` 只向 Pi 暴露经 capability 过滤的 Tool，执行路径固定为
+      `propose -> waitUntilExecutable -> execute`；业务 Tool 注册于 `ToolRegistry`，Pi ToolResult 不能直接
+      写业务终态。`tool-call.integration.test.ts` 覆盖只读结算、审批、恢复和重复副作用隔离。
 - [ ] 真实模型验证工具选择、参数正确率、循环次数、重复副作用为零和终态一致性。
 
 首选本地落点：`packages/agent-runtime/`、`packages/agent-application/`、`packages/tool-runtime/`。
@@ -251,7 +262,7 @@ TODO：
       副作用幂等证明仍待完成。
 - [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
       已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities；完整 root request 仍只保存在 PostgreSQL Context Pack 供 detached 恢复，最小 Context Pack 的全链路 PostgreSQL/真实模型验收仍待完成。
-- [ ] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、
+- [x] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、
       EditProposal、Artifact 和 PostgreSQL Checkpoint。
 - [x] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
       Specialist policy 测试覆盖 provider ceiling、spawn allowlist 和 capability 隔离；PostgreSQL attempt
@@ -542,20 +553,22 @@ TODO：
       确定性回填。相同 `promptId + version` 的内容、composition hash 或结构任一漂移都会 fail closed。
       Snapshot 不进入 capability、approval、状态机或评分逻辑，也不作为模型行为通过的证据；真实模型
       行为仍由本清单各 online eval 门禁验收。
-- [ ] 不复制 Oh My Pi 的 Bun/Bazel/Rust/native/TUI 工程框架；继续沿用 AgentPress pnpm/Turbo/NestJS/Next.js。
-- [ ] 评估其模块边界而非目录照搬：compaction、schema、task、memory、MCP 和 eval 各自保持独立 owner。
+- [x] 不复制 Oh My Pi 的 Bun/Bazel/Rust/native/TUI 工程框架；继续沿用 AgentPress pnpm/Turbo/NestJS/Next.js。
+- [x] 评估其模块边界而非目录照搬：compaction、schema、task、memory、MCP 和 eval 各自保持独立 owner。
+      owner 分别固定为 `agent-context`/`agent-runtime`/`agent-application`/`mcp-runtime`/`agent-evals`，
+      共享契约通过 AgentPress package exports 暴露，不复制上游目录树。
 
 首选本地落点：`packages/agent-runtime/`、`packages/agent-application/`、`packages/database/`。
 
 ## 推荐实施顺序
 
-- [ ] 里程碑 1：Compaction contract、PostgreSQL facts、projection 和确定性测试。
-- [ ] 里程碑 2：Schema normalization 差距补齐与 Specialist 严格输出。
-- [ ] 里程碑 3：Tool loop/replay safety 和恢复协议。
+- [x] 里程碑 1：Compaction contract、PostgreSQL facts、projection 和确定性测试。
+- [x] 里程碑 2：Schema normalization 差距补齐与 Specialist 严格输出。
+- [x] 里程碑 3：Tool loop/replay safety 和恢复协议。
 - [ ] 里程碑 4：Typed Specialist Task、并行、yield、cancel/recover。
-- [ ] 里程碑 5：MCP Streamable HTTP 差距补齐。
-- [ ] 里程碑 6：Accepted Memory 混合召回与 consolidation。
-- [ ] 里程碑 7：Skill conformance、安全资源加载和版本绑定。
+- [x] 里程碑 5：MCP Streamable HTTP 差距补齐。
+- [x] 里程碑 6：Accepted Memory 混合召回与 consolidation。
+- [x] 里程碑 7：Skill conformance、安全资源加载和版本绑定。
 - [ ] 里程碑 8：Sandbox eval、过程/结果双层指标和 LLM Judge。
 - [ ] 里程碑 9：RAG/FAQ 检索评测和跨 workspace 安全门禁。
 
@@ -567,8 +580,8 @@ TODO：
 - [ ] 所有采用项都有固定上游路径、commit、license、本地路径和修改说明。
 - [ ] 能直接依赖的模块已直接依赖；不能直接依赖的模块已有书面原因。
 - [ ] 所有复制适配项都先复制行为测试，并补 AgentPress 领域边界与相反语义测试。
-- [ ] PostgreSQL 仍是 Conversation、Run、Task、ToolCall、Event、Checkpoint、Memory、Skill 和 Eval 事实源。
-- [ ] 未引入第二套 Pi Runtime、文件事实源、任意 MCP、Prompt 权限或自动长期写入。
+- [x] PostgreSQL 仍是 Conversation、Run、Task、ToolCall、Event、Checkpoint、Memory、Skill 和 Eval 事实源。
+- [x] 未引入第二套 Pi Runtime、文件事实源、任意 MCP、Prompt 权限或自动长期写入。
 - [ ] 真实 Pi runtime/目标模型验收结果包含模型、Prompt、Skill、工具和配置版本。
 - [ ] `THIRD_PARTY_NOTICES.md` 与 `docs/references/pi-ecosystem.md` 已随实际采用范围更新。
 - [ ] lint、typecheck、unit、integration、build、相关浏览器测试和在线 eval 全部通过。
