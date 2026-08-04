@@ -1113,7 +1113,19 @@ export class PlannedRunExecutor {
           task.owner,
           specialistPrompt(task.owner),
           [],
-          applicationTurn(rootPrompt, JSON.stringify({ rootRequest: rootPrompt, task, upstream })),
+          specialistApplicationTurn(
+            rootPrompt,
+            JSON.stringify({
+              task: {
+                id: task.id,
+                owner: task.owner,
+                objective: task.objective,
+                acceptanceCriteria: task.acceptanceCriteria,
+                capabilities: task.capabilities,
+              },
+              upstream,
+            }),
+          ),
           [...domainTools, taskComplete],
           signal,
         );
@@ -1951,6 +1963,25 @@ function applicationTurn(parent: RuntimeCurrentTurn, request: string): RuntimeCu
     ...parent,
     source: 'application',
     request,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * Specialist turns intentionally do not inherit the Main action envelope or
+ * any parent capability grants. The full root request remains in the durable
+ * Context Pack solely for detached recovery, never as model-visible input.
+ */
+export function specialistApplicationTurn(
+  parent: RuntimeCurrentTurn,
+  request: string,
+): RuntimeCurrentTurn {
+  return {
+    type: parent.type,
+    version: parent.version,
+    source: 'application',
+    request,
+    actionEnvelope: { version: 1, source: 'free_text', grantedCapabilities: [] },
     timestamp: Date.now(),
   };
 }

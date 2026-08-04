@@ -11,6 +11,7 @@ import {
   assertSpecialistOutputSchema,
   resolveSpecialistOutputSchema,
   specialistConcurrencyLimit,
+  specialistApplicationTurn,
   validateSubmittedPlan,
 } from '../src/index.js';
 
@@ -226,5 +227,29 @@ describe('agent application contracts', () => {
         allowedOwners: ['writer'],
       }),
     ).toThrow(/spawn policy/u);
+  });
+
+  it('strips Main action capabilities from the Specialist model-visible turn', () => {
+    const turn = specialistApplicationTurn(
+      {
+        type: 'agentpress_current_turn',
+        version: 1,
+        source: 'user',
+        request: 'private parent request',
+        actionEnvelope: {
+          version: 1,
+          source: 'button',
+          grantedCapabilities: ['article.propose'],
+        },
+        timestamp: 1,
+      },
+      '{"task":"minimal"}',
+    );
+    expect(turn.request).toBe('{"task":"minimal"}');
+    expect(turn.actionEnvelope).toEqual({
+      version: 1,
+      source: 'free_text',
+      grantedCapabilities: [],
+    });
   });
 });

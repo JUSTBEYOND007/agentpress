@@ -232,6 +232,7 @@ TODO：
       cancel 和外部写幂等端到端测试后才可勾选。
 - [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
 - [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
+      已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities；完整 root request 仍只保存在 PostgreSQL Context Pack 供 detached 恢复，最小 Context Pack 的全链路 PostgreSQL/真实模型验收仍待完成。
 - [ ] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、
       EditProposal、Artifact 和 PostgreSQL Checkpoint。
 - [ ] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
