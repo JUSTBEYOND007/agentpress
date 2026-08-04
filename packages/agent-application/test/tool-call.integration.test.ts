@@ -48,6 +48,7 @@ describeWithDatabase('Tool Call application flow', () => {
     version: '1.0.0',
     owner: 'workspace',
     description: 'Search workspace',
+    guidance: [{ id: 'bounded-query', text: 'Use one focused query.' }],
     capabilities: ['workspace.read'],
     inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
     outputSchema: Type.Object({ result: Type.String() }, { additionalProperties: false }),
@@ -146,6 +147,9 @@ describeWithDatabase('Tool Call application flow', () => {
     });
     const tools = await bridge.createForRun(runId, ['workspace.read']);
     const search = tools.find((tool) => tool.label === 'workspace.search');
+    expect(search?.description).toContain(
+      'workspace.search@1.0.0 (bounded-query): Use one focused query.',
+    );
     await expect(
       search?.execute({ query: 'durable tool' }, { runId, providerToolCallId: randomUUID() }),
     ).resolves.toEqual({ result: 'durable tool' });

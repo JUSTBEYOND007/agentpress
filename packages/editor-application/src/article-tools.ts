@@ -93,8 +93,17 @@ export function registerArticleTools(
     toolId: 'article.propose_edits',
     version: '1.0.0',
     owner: 'agentpress.editor',
-    description:
-      'Create a reviewable article edit proposal using stable block IDs and expected SHA-256 hashes; set reviewMode=document when writing or replacing a complete article so the UI treats all internal block operations as one whole-article change; use granular for local edits; never writes the article directly',
+    description: 'Create a reviewable article edit proposal; never writes the article directly',
+    guidance: [
+      {
+        id: 'stable-anchors',
+        text: 'Use stable block IDs and expected SHA-256 hashes from article.read_current.',
+      },
+      {
+        id: 'review-mode',
+        text: 'Use reviewMode=document for a complete rewrite and granular for local edits.',
+      },
+    ],
     capabilities: ['article.propose'],
     inputSchema: Type.Object({ operations, reviewMode }, { additionalProperties: false }),
     outputSchema: Type.Any(),

@@ -96,6 +96,7 @@ export class CapabilityCatalog {
         toolId: tool.toolId,
         version: tool.version,
         description: tool.description,
+        guidance: tool.guidance ?? [],
         capabilities: tool.capabilities,
         risk: tool.risk,
       }));
@@ -103,7 +104,10 @@ export class CapabilityCatalog {
 }
 
 function validateDefinition(
-  definition: Pick<ToolDefinition, 'toolId' | 'version' | 'capabilities' | 'timeoutMs'>,
+  definition: Pick<
+    ToolDefinition,
+    'toolId' | 'version' | 'capabilities' | 'timeoutMs' | 'guidance'
+  >,
 ): void {
   if (!definition.toolId || !definition.version || definition.capabilities.length === 0) {
     throw new TypeError('Tool identity, version, and capabilities are required');
@@ -111,6 +115,25 @@ function validateDefinition(
   if (!Number.isSafeInteger(definition.timeoutMs) || definition.timeoutMs < 1) {
     throw new TypeError('Tool timeout must be a positive integer');
   }
+  const guidance = definition.guidance ?? [];
+  const ids = new Set<string>();
+  for (const item of guidance) {
+    if (!item.id.trim() || ids.has(item.id) || !item.text.trim()) {
+      throw new TypeError('Tool guidance requires unique IDs and non-empty text');
+    }
+    ids.add(item.id);
+  }
+  if (guidance.length > 16) throw new TypeError('Tool guidance is limited to 16 entries');
+}
+
+/** Renders deterministic, descriptive guidance for the model context. */
+export function composeToolGuidance(tools: readonly SelectedTool[]): string {
+  const lines = tools.flatMap((tool) =>
+    tool.guidance.map(
+      (item) => `- ${tool.toolId}@${tool.version} (${item.id}): ${item.text.trim()}`,
+    ),
+  );
+  return lines.length === 0 ? '' : ['Tool-specific guidance:', ...lines].join('\n');
 }
 
 function validateSchema(

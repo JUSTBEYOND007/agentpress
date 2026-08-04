@@ -12,11 +12,21 @@ export type ToolExecutionContext = {
   readonly signal: AbortSignal;
 };
 
+/**
+ * Model-facing operational advice owned by a tool contract.
+ * Guidance is descriptive only: it never grants capabilities or changes approval state.
+ */
+export type ToolGuidance = {
+  readonly id: string;
+  readonly text: string;
+};
+
 export type ToolDefinition<TInput extends TSchema = TSchema, TOutput extends TSchema = TSchema> = {
   readonly toolId: string;
   readonly version: string;
   readonly owner: string;
   readonly description: string;
+  readonly guidance?: readonly ToolGuidance[];
   readonly capabilities: readonly string[];
   readonly inputSchema: TInput;
   readonly outputSchema: TOutput;
@@ -49,6 +59,7 @@ export type SelectedTool = {
   readonly toolId: string;
   readonly version: string;
   readonly description: string;
+  readonly guidance: readonly ToolGuidance[];
   readonly capabilities: readonly string[];
   readonly risk: ToolRisk;
 };

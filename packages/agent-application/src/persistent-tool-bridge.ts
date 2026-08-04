@@ -14,7 +14,7 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { ToolRegistry } from '@agentpress/tool-runtime';
+import { composeToolGuidance, ToolRegistry } from '@agentpress/tool-runtime';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import type { RuntimeToolFactory } from './contracts.js';
@@ -53,7 +53,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       .map((definition) => ({
         name: runtimeToolName(definition.toolId, definition.version),
         label: definition.toolId,
-        description: definition.description,
+        description: appendToolGuidance(definition),
         parameters: definition.inputSchema,
         constrainedSampling: { type: 'json_schema' as const, strict: 'require' as const },
         executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
@@ -229,6 +229,20 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       allowedCapabilities: effectiveCapabilities,
     };
   }
+}
+
+function appendToolGuidance(definition: ReturnType<ToolRegistry['list']>[number]): string {
+  const guidance = composeToolGuidance([
+    {
+      toolId: definition.toolId,
+      version: definition.version,
+      description: definition.description,
+      guidance: definition.guidance ?? [],
+      capabilities: definition.capabilities,
+      risk: definition.risk,
+    },
+  ]);
+  return guidance ? `${definition.description}\n\n${guidance}` : definition.description;
 }
 
 function serializeToolResult(value: unknown): string {

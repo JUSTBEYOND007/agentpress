@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CapabilityCatalog,
+  composeToolGuidance,
   hashToolArguments,
   ToolRegistry,
   ToolRuntimeError,
@@ -95,6 +96,42 @@ describe('ToolRegistry', () => {
         task: onlyRead,
       }),
     ).toEqual([]);
+  });
+
+  it('exposes descriptive guidance without changing the capability intersection', () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      ...tool('workspace.search', 'workspace.read'),
+      guidance: [{ id: 'bounded-query', text: 'Keep queries focused and bounded.' }],
+    });
+    const onlyRead = new Set(['workspace.read']);
+    const selected = new CapabilityCatalog(registry).select('search', {
+      platform: onlyRead,
+      workspace: onlyRead,
+      agent: onlyRead,
+      skill: onlyRead,
+      task: onlyRead,
+    });
+    expect(selected[0]).toMatchObject({
+      capabilities: ['workspace.read'],
+      guidance: [{ id: 'bounded-query', text: 'Keep queries focused and bounded.' }],
+    });
+    expect(composeToolGuidance(selected)).toBe(
+      'Tool-specific guidance:\n- workspace.search@1.0.0 (bounded-query): Keep queries focused and bounded.',
+    );
+  });
+
+  it('rejects duplicate or empty guidance entries', () => {
+    const registry = new ToolRegistry();
+    expect(() => {
+      registry.register({
+        ...tool('workspace.search', 'workspace.read'),
+        guidance: [
+          { id: 'same', text: 'one' },
+          { id: 'same', text: 'two' },
+        ],
+      });
+    }).toThrow('guidance');
   });
 
   it('hashes equivalent JSON arguments identically', () => {
