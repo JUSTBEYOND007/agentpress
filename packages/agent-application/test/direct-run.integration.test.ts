@@ -18,6 +18,7 @@ import {
   artifactVersions,
   articleRevisions,
   articles,
+  claimAgentTask,
   connectDatabase,
   contextPacks,
   conversationBranches,
@@ -40,6 +41,7 @@ import {
   modelSelections,
   mentionBindings,
   queuedFollowups,
+  requeueExpiredAgentTasks,
   taskResults,
   ToolChoiceQueueStore,
   toolCalls,
@@ -2015,7 +2017,7 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(rows[0]?.status).toBe('completed_with_degradation');
   });
 
-  it('delivers the complete failed TaskResult from a detached worker', async () => {
+  it('recovers an expired detached worker and delivers its complete failed TaskResult', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
       id: branchId,
@@ -2074,6 +2076,26 @@ describeWithDatabase('Direct Run application flow', () => {
       if (!detachedTaskId) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
     expect(detachedTaskId).toBeDefined();
+    const lostClaim = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId: detachedTaskId ?? '',
+        workerId: 'lost-detached-worker',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 1_000,
+        now: new Date('2026-08-04T00:00:00.000Z'),
+      }),
+    );
+    expect(lostClaim?.attempt).toBe(1);
+    await expect(
+      connection.db.transaction((transaction) =>
+        requeueExpiredAgentTasks(transaction, {
+          topic: 'agent.task.commands',
+          createId: randomUUID,
+          now: new Date('2026-08-04T00:00:02.000Z'),
+        }),
+      ),
+    ).resolves.toContainEqual({ taskId: detachedTaskId, runId: run.runId });
     await expect(
       detachedService.executeDetachedTask(run.runId, detachedTaskId ?? ''),
     ).resolves.toBe('failed');
@@ -2082,6 +2104,7 @@ describeWithDatabase('Direct Run application flow', () => {
     const results = await connection.db
       .select({
         status: taskResults.status,
+        attempt: taskResults.attempt,
         summary: taskResults.summary,
         warnings: taskResults.warnings,
         failure: taskResults.failure,
@@ -2091,6 +2114,7 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(results).toEqual([
       {
         status: 'failed',
+        attempt: 2,
         summary: 'Detached image provider unavailable',
         warnings: ['The article can be delivered without an image'],
         failure: {

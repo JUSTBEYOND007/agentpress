@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
+import { enqueueOutboxMessage } from './outbox.js';
 import { agentTaskLeases, agentTasks, taskResults } from './schema.js';
 
 export type TaskLease = {
@@ -225,7 +226,46 @@ export async function reclaimExpiredAgentTasks(
   db: AgentPressDatabase,
   now = new Date(),
 ): Promise<readonly string[]> {
-  const rows = await db
+  const rows = await reclaimExpiredAgentTaskRows(db, now);
+  return rows.map(({ taskId }) => taskId);
+}
+
+/** Atomically makes expired Tasks claimable and emits a fresh durable execution command. */
+export async function requeueExpiredAgentTasks(
+  transaction: DatabaseTransaction,
+  input: {
+    readonly topic: string;
+    readonly createId: () => string;
+    readonly now?: Date;
+  },
+): Promise<readonly { readonly taskId: string; readonly runId: string }[]> {
+  const now = input.now ?? new Date();
+  const rows = await reclaimExpiredAgentTaskRows(transaction, now);
+  for (const row of rows) {
+    const messageId = input.createId();
+    await enqueueOutboxMessage(transaction, {
+      id: messageId,
+      aggregateType: 'AgentTask',
+      aggregateId: row.taskId,
+      topic: input.topic,
+      messageKey: `${row.runId}:${row.taskId}`,
+      payload: {
+        command: 'task.execute',
+        messageId,
+        runId: row.runId,
+        taskId: row.taskId,
+      },
+      occurredAt: now,
+    });
+  }
+  return rows;
+}
+
+function reclaimExpiredAgentTaskRows(
+  db: AgentPressDatabase | DatabaseTransaction,
+  now: Date,
+): Promise<readonly { readonly taskId: string; readonly runId: string }[]> {
+  return db
     .update(agentTasks)
     .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
     .where(
@@ -244,6 +284,5 @@ export async function reclaimExpiredAgentTasks(
         )`,
       ),
     )
-    .returning({ id: agentTasks.id });
-  return rows.map(({ id }) => id);
+    .returning({ taskId: agentTasks.id, runId: agentTasks.runId });
 }

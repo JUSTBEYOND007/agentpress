@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ModelPolicyCatalog } from '@agentpress/agent-context';
 
 import {
@@ -18,6 +18,7 @@ import {
   connectDatabase,
   markOutboxMessagePublished,
   processInboxMessage,
+  requeueExpiredAgentTasks,
   releaseOutboxMessage,
   type DatabaseConnection,
 } from '@agentpress/database';
@@ -45,6 +46,7 @@ const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
 const CONSUMER_GROUP = 'agentpress-agent-worker-v1';
 const INDEX_CONSUMER_GROUP = 'agentpress-knowledge-worker-v1';
 const OUTBOX_INTERVAL_MS = 250;
+const TASK_RECOVERY_INTERVAL_MS = 5_000;
 
 @Injectable()
 export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
@@ -137,6 +139,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
   private outboxTimer: NodeJS.Timeout | undefined;
   private dispatching = false;
   private stopping = false;
+  private nextTaskRecoveryAt = 0;
 
   public async onModuleInit(): Promise<void> {
     await this.ensureTopics();
@@ -218,7 +221,9 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       );
     }
     this.outboxTimer = setInterval(() => {
-      void this.dispatchOutbox();
+      void this.dispatchOutbox().catch((error: unknown) => {
+        this.logger.error({ err: error }, 'Agent worker outbox/recovery cycle failed');
+      });
     }, OUTBOX_INTERVAL_MS);
     await this.dispatchOutbox();
     this.logger.info(
@@ -414,6 +419,11 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     this.dispatching = true;
     const workerId = `agent-worker:${String(process.pid)}`;
     try {
+      const now = Date.now();
+      if (now >= this.nextTaskRecoveryAt) {
+        await this.recoverExpiredTasks(new Date(now));
+        this.nextTaskRecoveryAt = now + TASK_RECOVERY_INTERVAL_MS;
+      }
       const messages = await claimOutboxMessages(this.database.db, workerId, 50);
       for (const message of messages) {
         try {
@@ -441,6 +451,22 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       }
     } finally {
       this.dispatching = false;
+    }
+  }
+
+  private async recoverExpiredTasks(now: Date): Promise<void> {
+    const recovered = await this.database.db.transaction((transaction) =>
+      requeueExpiredAgentTasks(transaction, {
+        topic: AGENT_TASK_COMMAND_TOPIC,
+        createId: randomUUID,
+        now,
+      }),
+    );
+    if (recovered.length > 0) {
+      this.logger.warn(
+        { tasks: recovered },
+        'Requeued Agent Tasks after their worker leases expired',
+      );
     }
   }
 }

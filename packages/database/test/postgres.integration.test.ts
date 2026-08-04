@@ -26,6 +26,7 @@ import {
   exportMemoryCandidates,
   listAcceptedMemory,
   memoryCandidates,
+  outboxMessages,
   proposeMemoryCandidate,
   processInboxMessage,
   rootRequests,
@@ -39,6 +40,7 @@ import {
   executionPlans,
   planRevisions,
   reclaimExpiredAgentTasks,
+  requeueExpiredAgentTasks,
   releaseAgentTaskLease,
   renewAgentTaskLease,
   settleAgentTaskAttempt,
@@ -395,6 +397,74 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     expect(taskRows).toEqual([{ status: 'cancelled' }]);
     expect(leaseRows[0]?.releasedAt).toEqual(new Date('2026-08-04T00:00:00.000Z'));
     expect(resultRows).toEqual([]);
+  });
+
+  it('requeues an expired Task lease exactly once and allows a new attempt', async () => {
+    const taskId = randomUUID();
+    await connection.db.insert(agentTasks).values({
+      id: taskId,
+      runId: ids.run,
+      planRevisionId: ids.revision,
+      objective: 'recover expired detached task',
+      criticality: 'required',
+      owner: 'researcher',
+      acceptanceCriteria: ['returns on the next attempt'],
+      outputSchema: { type: 'object' },
+      toolPolicy: { capabilities: [] },
+      budget: {},
+      status: 'pending',
+      maxAttempts: 3,
+    });
+    const first = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId,
+        workerId: 'lost-task-worker',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 1_000,
+        now: new Date('2026-08-04T00:00:00.000Z'),
+      }),
+    );
+    expect(first?.attempt).toBe(1);
+    const recoveredAt = new Date('2026-08-04T00:00:02.000Z');
+    const requeued = await connection.db.transaction((transaction) =>
+      requeueExpiredAgentTasks(transaction, {
+        topic: 'agent.task.commands',
+        createId: randomUUID,
+        now: recoveredAt,
+      }),
+    );
+    expect(requeued).toEqual([{ taskId, runId: ids.run }]);
+    await expect(
+      connection.db.transaction((transaction) =>
+        requeueExpiredAgentTasks(transaction, {
+          topic: 'agent.task.commands',
+          createId: randomUUID,
+          now: recoveredAt,
+        }),
+      ),
+    ).resolves.toEqual([]);
+    const commands = await connection.db
+      .select({ payload: outboxMessages.payload })
+      .from(outboxMessages)
+      .where(eq(outboxMessages.aggregateId, taskId));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.payload).toMatchObject({
+      command: 'task.execute',
+      runId: ids.run,
+      taskId,
+    });
+    const second = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId,
+        workerId: 'recovered-task-worker',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 1_000,
+        now: recoveredAt,
+      }),
+    );
+    expect(second?.attempt).toBe(2);
   });
 
   it('persists and recovers forced tool choices without crossing directive semantics', async () => {

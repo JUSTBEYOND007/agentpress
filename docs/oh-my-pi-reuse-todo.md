@@ -229,16 +229,18 @@ TODO：
       `AgentRegistryService` 从 `agent_runs`、`agent_tasks` 与有序 `run_events` 重建 Main/Specialist
       条目，投影稳定 ID、owner、status、attempt 和最近事件；`DirectRunService.getProjection` 将其作为
       只读 `agents` 返回给 Web。无 Run 事实时服务返回空列表，没有进程内 fallback。
-- [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。
+- [x] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。
       `task_complete` 已作为结构化 yield 持久化 TaskResult；`AgentTaskWaitService` 只读 PostgreSQL
       Task/TaskResult，按请求顺序等待任一 exact-attempt 结果并返回 `settled`、`stillRunning`、
-      `timedOut`，支持有界 timeout 与 AbortSignal 取消传播。完整 cancel/recover 相反语义仍待完成。
+      `timedOut`，支持有界 timeout 与 AbortSignal 取消传播；DAG 波次、required/optional failure、
+      degraded 综合和原子 cancel 均有确定性测试与 PostgreSQL 集成覆盖。
 - [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
       已落地 `agent.task.commands`、transactional outbox、PostgreSQL 原子 Task claim、按 attempt
       持久化 lease、immutable Context Pack 恢复、TaskResult/Checkpoint/RunEvent 同事务结算，以及
       `run.execute` outbox 唤醒。`task_results.summary` 现在与 status/artifacts/usage/warnings/failure
       一起持久化；detached wait 会读取最新已决 attempt 的完整成功或失败结果并投递给 Main 综合，
-      已通过隔离 PostgreSQL worker/Main 集成用例。仍需在真实 PostgreSQL/Kafka 环境跑 worker 丢失、
+      worker 周期扫描会在同一事务内回收过期 lease 并写入新的 `task.execute` outbox。隔离 PostgreSQL
+      已覆盖只重投一次、第二 attempt claim 和 Main 结果投递；仍需在真实 Kafka 环境跑进程丢失、
       重复 command、cancel 和外部写幂等端到端测试后才可勾选。
 - [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
       已将 Oh My Pi `agent-lifecycle.ts` 的 stale-ref finalizer 保护适配为 PostgreSQL attempt fence：
@@ -251,7 +253,9 @@ TODO：
       已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities；完整 root request 仍只保存在 PostgreSQL Context Pack 供 detached 恢复，最小 Context Pack 的全链路 PostgreSQL/真实模型验收仍待完成。
 - [ ] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、
       EditProposal、Artifact 和 PostgreSQL Checkpoint。
-- [ ] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
+- [x] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
+      Specialist policy 测试覆盖 provider ceiling、spawn allowlist 和 capability 隔离；PostgreSQL attempt
+      fence、原子 Task cancel 与过期 lease 单次重投测试覆盖 late success 和重复 TaskResult/Artifact 为零。
 - [ ] 使用真实 Pi runtime/目标模型验证路由、委派、并行合并和 Specialist Schema 有效率。
 
 首选本地落点：`packages/agent-application/`、`packages/domain/`、`packages/database/`。
