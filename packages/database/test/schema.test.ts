@@ -12,6 +12,7 @@ import {
   inboxMessages,
   outboxMessages,
   runEvents,
+  runToolChoices,
   toolCalls,
 } from '../src/schema.js';
 
@@ -21,6 +22,7 @@ describe('database schema', () => {
     expect(getTableConfig(runEvents).name).toBe('run_events');
     expect(getTableConfig(toolCalls).name).toBe('tool_calls');
     expect(getTableConfig(conversationCompactions).name).toBe('conversation_compactions');
+    expect(getTableConfig(runToolChoices).name).toBe('run_tool_choices');
   });
 
   it('defines transactional messaging tables', () => {

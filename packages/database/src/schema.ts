@@ -1176,6 +1176,40 @@ export const runDirectives = pgTable(
   ],
 );
 
+export type PersistedToolChoice =
+  | 'auto'
+  | 'none'
+  | 'required'
+  | { readonly type: 'tool'; readonly name: string };
+
+export const runToolChoices = pgTable(
+  'run_tool_choices',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    choice: jsonb('choice').$type<PersistedToolChoice>().notNull(),
+    label: varchar('label', { length: 160 }).notNull(),
+    status: varchar('status', { length: 24 }).notNull().default('pending'),
+    rejectionReason: varchar('rejection_reason', { length: 32 }),
+    claimToken: uuid('claim_token'),
+    recoveryCount: integer('recovery_count').notNull().default(0),
+    createdAt,
+    claimedAt: timestamp('claimed_at', { withTimezone: true, precision: 3 }),
+    settledAt: timestamp('settled_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    unique('run_tool_choices_run_sequence_unique').on(table.runId, table.sequence),
+    index('run_tool_choices_run_status_idx').on(table.runId, table.status, table.sequence),
+    check(
+      'run_tool_choices_status_check',
+      sql`${table.status} in ('pending', 'in_flight', 'resolved', 'rejected', 'cancelled')`,
+    ),
+  ],
+);
+
 export const contentFolders = pgTable(
   'content_folders',
   {

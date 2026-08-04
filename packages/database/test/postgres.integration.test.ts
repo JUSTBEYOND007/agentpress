@@ -28,8 +28,11 @@ import {
   proposeMemoryCandidate,
   processInboxMessage,
   rootRequests,
+  runDirectives,
   runEvents,
+  runToolChoices,
   taskResults,
+  ToolChoiceQueueStore,
   workspaces,
   workspaceMembers,
   executionPlans,
@@ -310,6 +313,76 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
         .from(agentTaskLeases)
         .where(eq(agentTaskLeases.taskId, ids.task)),
     ).toHaveLength(2);
+  });
+
+  it('persists and recovers forced tool choices without crossing directive semantics', async () => {
+    const now = new Date('2026-08-04T00:00:00.000Z');
+    const store = new ToolChoiceQueueStore(connection.db, randomUUID, () => now);
+    const [first, second] = await Promise.all([
+      store.enqueue({
+        runId: ids.run,
+        choice: { type: 'tool', name: 'run_complete' },
+        label: 'first',
+      }),
+      store.enqueue({ runId: ids.run, choice: 'required', label: 'second' }),
+    ]);
+    expect([first.sequence, second.sequence].sort((left, right) => left - right)).toEqual([1, 2]);
+
+    const steeringId = randomUUID();
+    await connection.db.insert(runDirectives).values({
+      id: steeringId,
+      runId: ids.run,
+      sequence: 1,
+      kind: 'steering',
+      content: 'change direction',
+    });
+    await expect(
+      store.claimNext({ runId: ids.run, claimToken: randomUUID() }),
+    ).resolves.toBeUndefined();
+    await connection.db
+      .update(runDirectives)
+      .set({ status: 'consumed' })
+      .where(eq(runDirectives.id, steeringId));
+    await connection.db.insert(runDirectives).values({
+      id: randomUUID(),
+      runId: ids.run,
+      sequence: 2,
+      kind: 'follow_up',
+      content: 'continue later',
+    });
+
+    const firstToken = randomUUID();
+    const claimed = await store.claimNext({ runId: ids.run, claimToken: firstToken });
+    expect(claimed?.label).toBe(first.sequence === 1 ? 'first' : 'second');
+    await expect(
+      store.claimNext({ runId: ids.run, claimToken: randomUUID() }),
+    ).resolves.toBeUndefined();
+    await expect(
+      store.settle({
+        id: claimed?.id ?? '',
+        claimToken: randomUUID(),
+        status: 'resolved',
+      }),
+    ).resolves.toBe(false);
+
+    expect(await store.requeueInFlight(ids.run)).toBe(1);
+    await expect(
+      store.settle({ id: claimed?.id ?? '', claimToken: firstToken, status: 'resolved' }),
+    ).resolves.toBe(false);
+    const recoveredToken = randomUUID();
+    const recovered = await store.claimNext({ runId: ids.run, claimToken: recoveredToken });
+    expect(recovered?.id).toBe(claimed?.id);
+    await expect(
+      store.settle({ id: recovered?.id ?? '', claimToken: recoveredToken, status: 'resolved' }),
+    ).resolves.toBe(true);
+
+    expect(await store.cancelRun(ids.run)).toBe(1);
+    const rows = await connection.db
+      .select({ status: runToolChoices.status, recoveryCount: runToolChoices.recoveryCount })
+      .from(runToolChoices)
+      .where(eq(runToolChoices.runId, ids.run));
+    expect(rows.map(({ status }) => status).sort()).toEqual(['cancelled', 'resolved']);
+    expect(rows.find(({ status }) => status === 'resolved')?.recoveryCount).toBe(1);
   });
 
   it('persists confirmed memory and isolates retrieval by workspace and user', async () => {

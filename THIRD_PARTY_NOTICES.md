@@ -55,6 +55,17 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
 - Changes: replaced code-file line anchors and short xxHash tags with canonical Tiptap block JSON, stable block IDs, and SHA-256; retained snapshot preflight, stale-input rejection, atomic apply, and preview-first behavior.
 - Verification: revision drift, block drift, atomic preflight, partial acceptance, structural inserts, ProseMirror step replay, and red-delete/green-insert diff output.
 
+### Oh My Pi Tool Choice Queue Behavior
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` (`v17.1.8`)
+- Source: `packages/coding-agent/src/session/tool-choice-queue.ts`
+- Tests: `packages/coding-agent/test/tool-choice-queue.test.ts`
+- Local: `packages/agent-runtime/src/tool-choice-queue.ts`, `packages/agent-runtime/test/tool-choice-queue.test.ts`, `packages/database/src/tool-choice-queue-store.ts`, `packages/database/test/postgres.integration.test.ts`, `packages/agent-application/src/agent-session-runner.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: retained one-yield forced-choice ordering and steering/follow-up precedence; replaced process-local callback ownership with PostgreSQL FIFO facts, claim tokens, Main-session isolation, explicit recovery, terminal settlement, and the official Pi Runtime adapter.
+- Verification: pure queue reject/requeue tests, provider first-request injection, actual ToolCall settlement, concurrent PostgreSQL enqueue/claim, opposite directive semantics, Specialist isolation, recovery token invalidation, and cancellation.
+
 ### Oh My Pi Conversation Compaction Behavior
 
 - Upstream: `https://github.com/can1357/oh-my-pi`

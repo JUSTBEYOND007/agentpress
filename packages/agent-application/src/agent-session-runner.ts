@@ -4,6 +4,7 @@ import type {
   RuntimeMessage,
   RuntimeResult,
   RuntimeTool,
+  RuntimeToolChoice,
   RuntimeTranscriptMessage,
 } from '@agentpress/agent-runtime';
 import {
@@ -11,6 +12,7 @@ import {
   agentTranscriptEntries,
   type AgentPressDatabase,
   modelSelections,
+  ToolChoiceQueueStore,
 } from '@agentpress/database';
 import { eq, max, sql } from 'drizzle-orm';
 
@@ -30,14 +32,25 @@ export class AgentSessionRunner {
     string,
     ReturnType<AgentRuntimeFactory['create']>
   >();
+  private readonly toolChoices: ToolChoiceQueueStore;
 
-  public constructor(private readonly options: AgentSessionRunnerOptions) {}
+  public constructor(private readonly options: AgentSessionRunnerOptions) {
+    this.toolChoices = new ToolChoiceQueueStore(options.database, options.createId, options.now);
+  }
 
   public steerActiveMain(runId: string, content: string): boolean {
     const runtime = this.activeMainRuntimes.get(runId);
     return (
       runtime?.steer?.({ role: 'user', content, timestamp: this.options.now().getTime() }) ?? false
     );
+  }
+
+  public enqueueToolChoice(
+    runId: string,
+    choice: RuntimeToolChoice,
+    label: string,
+  ): Promise<{ readonly id: string; readonly sequence: number }> {
+    return this.toolChoices.enqueue({ runId, choice, label });
   }
 
   public async execute(
@@ -112,6 +125,10 @@ export class AgentSessionRunner {
     }
     await record('application', 'current_turn', { currentTurn });
     if (kind === 'main') this.activeMainRuntimes.set(runId, runtime);
+    const toolChoiceClaimToken = kind === 'main' ? this.options.createId() : undefined;
+    const claimedToolChoice = toolChoiceClaimToken
+      ? await this.toolChoices.claimNext({ runId, claimToken: toolChoiceClaimToken })
+      : undefined;
     let result: RuntimeResult;
     try {
       result = await runtime.execute(
@@ -122,6 +139,7 @@ export class AgentSessionRunner {
           currentTurn,
           tools,
           continuation,
+          ...(claimedToolChoice ? { toolChoice: claimedToolChoice.choice } : {}),
           ...(kind === 'specialist' ? { maxToolCalls: 12, maxFailedCompletionCalls: 2 } : {}),
         },
         async (event) => {
@@ -149,6 +167,32 @@ export class AgentSessionRunner {
     }
     if (kind === 'main' && this.activeMainRuntimes.get(runId) === runtime) {
       this.activeMainRuntimes.delete(runId);
+    }
+    if (claimedToolChoice && toolChoiceClaimToken) {
+      const satisfied = isToolChoiceSatisfied(claimedToolChoice.choice, result.messages);
+      const settled = await this.toolChoices.settle({
+        id: claimedToolChoice.id,
+        claimToken: toolChoiceClaimToken,
+        status:
+          result.status === 'cancelled'
+            ? 'cancelled'
+            : result.status === 'completed' && satisfied
+              ? 'resolved'
+              : 'rejected',
+        ...(result.status === 'cancelled'
+          ? { reason: 'aborted' }
+          : result.status === 'failed'
+            ? { reason: 'error' }
+            : satisfied
+              ? {}
+              : { reason: 'not_invoked' }),
+      });
+      if (!settled) {
+        result = protocolFailure(
+          result.messages,
+          'Tool choice claim was superseded by Run recovery',
+        );
+      }
     }
     await this.options.database
       .update(agentSessions)
@@ -198,6 +242,21 @@ export class AgentSessionRunner {
         .where(eq(agentSessions.id, sessionId));
     });
   }
+}
+
+export function isToolChoiceSatisfied(
+  choice: RuntimeToolChoice,
+  messages: readonly RuntimeMessage[],
+): boolean {
+  const calls = messages.flatMap((message) =>
+    message.role === 'assistant'
+      ? (message.blocks ?? []).filter((block) => block.type === 'tool_call')
+      : [],
+  );
+  if (choice === 'required') return calls.length > 0;
+  if (choice === 'none') return calls.length === 0;
+  if (choice === 'auto') return true;
+  return calls.some(({ name }) => name === choice.name);
 }
 
 function protocolFailure(messages: readonly RuntimeMessage[], message: string): RuntimeResult {

@@ -218,6 +218,13 @@
       "when": 1785832000000,
       "tag": "0030_tool_output_artifact",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785833000000,
+      "tag": "0031_run_tool_choices",
+      "breakpoints": true
     }
   ]
 }

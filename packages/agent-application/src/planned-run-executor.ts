@@ -655,6 +655,11 @@ export class PlannedRunExecutor {
         })),
       })),
     );
+    await this.sessions.enqueueToolChoice(
+      runId,
+      { type: 'tool', name: 'run_complete' },
+      'Complete planned run',
+    );
     let result = await this.sessions.execute(
       runId,
       undefined,
@@ -671,6 +676,11 @@ export class PlannedRunExecutor {
       signal,
     );
     for (let repair = 1; !finalText && result.status === 'completed' && repair <= 2; repair += 1) {
+      await this.sessions.enqueueToolChoice(
+        runId,
+        { type: 'tool', name: 'run_complete' },
+        `Repair planned run completion ${String(repair)}`,
+      );
       result = await this.sessions.execute(
         runId,
         undefined,

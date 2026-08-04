@@ -30,6 +30,7 @@ import {
   runContextPacks,
   runDirectives,
   runEvents,
+  runToolChoices,
   runSkillBindings,
   skillRevisionResources,
   skillRevisions,
@@ -38,6 +39,7 @@ import {
   mentionBindings,
   queuedFollowups,
   taskResults,
+  ToolChoiceQueueStore,
   toolCalls,
   workspaceMembers,
   workspaces,
@@ -1149,6 +1151,20 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(runEvents)
       .where(eq(runEvents.runId, run.runId));
     expect(events.filter(({ eventType }) => eventType === 'plan.revised')).toHaveLength(1);
+    const choices = await connection.db
+      .select({
+        choice: runToolChoices.choice,
+        status: runToolChoices.status,
+        claimToken: runToolChoices.claimToken,
+      })
+      .from(runToolChoices)
+      .where(eq(runToolChoices.runId, run.runId));
+    expect(choices).toHaveLength(1);
+    expect(choices[0]).toMatchObject({
+      choice: { type: 'tool', name: 'run_complete' },
+      status: 'resolved',
+    });
+    expect(typeof choices[0]?.claimToken).toBe('string');
   });
 
   it('repairs a failed Specialist protocol twice before accepting task_complete', async () => {
@@ -1351,6 +1367,18 @@ describeWithDatabase('Direct Run application flow', () => {
       .update(agentRuns)
       .set({ status: 'running', activePlanRevisionId: revisionId })
       .where(eq(agentRuns.id, run.runId));
+    const choiceId = randomUUID();
+    const staleClaimToken = randomUUID();
+    await connection.db.insert(runToolChoices).values({
+      id: choiceId,
+      runId: run.runId,
+      sequence: 1,
+      choice: { type: 'tool', name: 'run_complete' },
+      label: 'recover completion',
+      status: 'in_flight',
+      claimToken: staleClaimToken,
+      claimedAt: new Date(),
+    });
 
     await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
     const recoveredRuns = await connection.db
@@ -1363,6 +1391,20 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(planRevisions)
       .where(eq(planRevisions.planId, planId));
     expect(revisions.map(({ reason }) => reason)).toEqual(['initial_plan']);
+    await expect(
+      connection.db
+        .select({
+          status: runToolChoices.status,
+          claimToken: runToolChoices.claimToken,
+          recoveryCount: runToolChoices.recoveryCount,
+        })
+        .from(runToolChoices)
+        .where(eq(runToolChoices.id, choiceId)),
+    ).resolves.toEqual([{ status: 'pending', claimToken: null, recoveryCount: 1 }]);
+    const choices = new ToolChoiceQueueStore(connection.db, randomUUID);
+    await expect(
+      choices.settle({ id: choiceId, claimToken: staleClaimToken, status: 'resolved' }),
+    ).resolves.toBe(false);
   });
 
   it('reuses a persisted logical Main Session and appends transcript sequences', async () => {

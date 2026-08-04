@@ -155,9 +155,13 @@ TODO：
       行为验证 partial JSON 不执行并生成错误 ToolResult，同时对持久化 history 的 missing/mismatched/
       duplicate ToolResult fail closed；并行调用仍由 Pi runtime fixture 验证。
 - [x] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
-- [ ] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
-      当前已完成 `packages/agent-runtime/src/tool-choice-queue.ts` 的一次性选择与 reject/requeue
-      纯逻辑，并由 Pi adapter 只向首个 provider request 注入选择；PostgreSQL 快照、消费和结算仍待完成。
+- [x] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
+      `run_tool_choices` 以 Run 内 FIFO sequence、单一 in-flight、claim token、恢复次数和终态记录
+      队列事实；与 `run_directives` 共用 Run 行锁，使 pending steering 原子抑制下一次强制选择，
+      follow-up 不抑制当前 Run。只有 Main Agent 可 claim，Pi adapter 只在首个 provider request 注入；
+      结算按实际 ToolCall 校验 named/required/none，Run recovery 原子重排并使旧 token 失效，所有
+      Run 终态取消残留项。真实 PostgreSQL 覆盖并发 enqueue、FIFO、单 claim、相反 directive
+      语义、恢复重领、旧 worker 拒绝和取消；五 Specialist DAG 验证 Specialist 不消费 Main 选择。
 - [x] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。
 - [x] Tool 输出超过预算时外置为 Artifact，只把受限摘要和引用放回模型上下文。
       内置 MCP 工具超过 256KB 时将脱敏完整值写入 PostgreSQL `ToolOutput` Artifact/ArtifactVersion，

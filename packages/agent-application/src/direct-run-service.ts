@@ -34,6 +34,7 @@ import {
   runQuestions,
   runDirectives,
   runEvents,
+  runToolChoices,
   skillRevisions,
   toolCalls,
   workspaceMembers,
@@ -760,6 +761,17 @@ export class DirectRunService {
         return { recovered: false, events: [] as DurableRunEvent[] };
       }
       const now = this.now();
+      const recoveredToolChoices = await transaction
+        .update(runToolChoices)
+        .set({
+          status: 'pending',
+          claimToken: null,
+          claimedAt: null,
+          rejectionReason: null,
+          recoveryCount: sql`${runToolChoices.recoveryCount} + 1`,
+        })
+        .where(and(eq(runToolChoices.runId, runId), eq(runToolChoices.status, 'in_flight')))
+        .returning({ id: runToolChoices.id });
       const executing = await transaction
         .select({
           id: toolCalls.id,
@@ -841,6 +853,7 @@ export class DirectRunService {
           previousStatus: run.status,
           interruptedToolCalls: executing.map(({ id }) => id),
           replayReadyToolCalls,
+          recoveredToolChoices: recoveredToolChoices.map(({ id }) => id),
         },
       });
       const event = await appendRunEvent(transaction, {
@@ -1566,6 +1579,7 @@ export class DirectRunService {
       await transaction.execute(
         sql`select id from ${conversationBranches} where id = ${branchId} for update`,
       );
+      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
       const statusRows = await transaction
         .select({ status: agentRuns.status })
         .from(agentRuns)
@@ -1575,7 +1589,11 @@ export class DirectRunService {
       const now = this.now();
       const events: DurableRunEvent[] = [];
 
-      if (terminalOutcome === 'completed' && currentStatus !== 'cancelling') {
+      if (currentStatus === 'recovering' || currentStatus === 'interrupted') {
+        throw new Error(`Agent Run ${runId} rejected stale worker settlement during recovery`);
+      }
+
+      if (terminalOutcome === 'completed' && currentStatus === 'running') {
         const assistant = findLastAssistantMessage(result.messages);
         if (!assistant) {
           throw new Error(`Pi completed Agent Run ${runId} without a stable assistant message`);
@@ -1594,6 +1612,19 @@ export class DirectRunService {
           stable: true,
           createdAt: now,
         });
+        await transaction
+          .update(runToolChoices)
+          .set({
+            status: 'cancelled',
+            rejectionReason: 'run_settled',
+            settledAt: now,
+          })
+          .where(
+            and(
+              eq(runToolChoices.runId, runId),
+              inArray(runToolChoices.status, ['pending', 'in_flight']),
+            ),
+          );
         await transaction
           .update(agentRuns)
           .set({
@@ -1631,6 +1662,19 @@ export class DirectRunService {
       }
 
       if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
+        await transaction
+          .update(runToolChoices)
+          .set({
+            status: 'cancelled',
+            rejectionReason: 'cancelled',
+            settledAt: now,
+          })
+          .where(
+            and(
+              eq(runToolChoices.runId, runId),
+              inArray(runToolChoices.status, ['pending', 'in_flight']),
+            ),
+          );
         await transaction
           .update(runDirectives)
           .set({ status: 'cancelled' })
@@ -1671,6 +1715,19 @@ export class DirectRunService {
       }
 
       await transaction
+        .update(runToolChoices)
+        .set({
+          status: 'cancelled',
+          rejectionReason: 'run_failed',
+          settledAt: now,
+        })
+        .where(
+          and(
+            eq(runToolChoices.runId, runId),
+            inArray(runToolChoices.status, ['pending', 'in_flight']),
+          ),
+        );
+      await transaction
         .update(agentRuns)
         .set({
           status: 'failed',
@@ -1688,8 +1745,6 @@ export class DirectRunService {
               'running',
               'waiting_for_approval',
               'waiting_for_user',
-              'interrupted',
-              'recovering',
             ]),
           ),
         );
