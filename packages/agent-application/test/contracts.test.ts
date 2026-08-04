@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { Type } from '@sinclair/typebox';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
   AgentApplicationError,
+  createSpecialistTaskRequest,
+  parseSpecialistTaskRequest,
+  specialistConcurrencyLimit,
   validateSubmittedPlan,
 } from '../src/index.js';
 
@@ -76,5 +80,43 @@ describe('agent application contracts', () => {
         () => 'task-3',
       ),
     ).toThrow(/forbidden for researcher/u);
+  });
+
+  it('keeps Specialist Task identity, depth, budget, and detached policy host-owned', () => {
+    const request = createSpecialistTaskRequest({
+      taskId: 'task-1',
+      runId: 'run-1',
+      depth: 0,
+      owner: 'researcher',
+      objective: 'Collect evidence',
+      contextPackId: 'pack-1',
+      capabilities: ['web.research', 'web.research'],
+      outputSchema: Type.Object({ result: Type.String() }),
+      timeoutMs: 120_000,
+      maxAttempts: 3,
+      detached: false,
+    });
+    expect(request.capabilities).toEqual(['web.research']);
+    expect(parseSpecialistTaskRequest(request)).toMatchObject({
+      taskId: 'task-1',
+      runId: 'run-1',
+      depth: 0,
+      detached: false,
+    });
+    expect(specialistConcurrencyLimit(3)).toBe(3);
+    expect(() => specialistConcurrencyLimit(9)).toThrow(/between 1 and 8/u);
+    expect(() =>
+      createSpecialistTaskRequest({
+        ...request,
+        depth: 1,
+        parentTaskId: 'task-1',
+      }),
+    ).toThrow(/distinct parent/u);
+    expect(() =>
+      createSpecialistTaskRequest({
+        ...request,
+        timeoutMs: 0,
+      }),
+    ).toThrow(/timeout/u);
   });
 });

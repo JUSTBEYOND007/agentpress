@@ -83,6 +83,7 @@ type DirectRunServiceOptions = {
   readonly runtimeToolFactory?: RuntimeToolFactory;
   readonly now?: () => Date;
   readonly createId?: () => string;
+  readonly maxSpecialistConcurrency?: number;
   /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
   readonly dispatchCommands?: boolean;
 };

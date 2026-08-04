@@ -993,6 +993,20 @@ describeWithDatabase('Direct Run application flow', () => {
       new Set(['researcher', 'writer', 'editor', 'fact_checker', 'illustrator']),
     );
     expect(persistedTasks.every(({ status }) => status === 'succeeded')).toBe(true);
+    expect(
+      persistedTasks.every(({ toolPolicy, budget }) => {
+        const request = toolPolicy.request as Record<string, unknown>;
+        return (
+          request.taskId !== undefined &&
+          request.runId === run.runId &&
+          request.depth === 0 &&
+          request.detached === false &&
+          request.timeoutMs === 120_000 &&
+          request.maxAttempts === 3 &&
+          (budget as Record<string, unknown>).timeoutMs === 120_000
+        );
+      }),
+    ).toBe(true);
     const revisions = await connection.db
       .select({ revisionNumber: planRevisions.revisionNumber })
       .from(planRevisions)
@@ -1017,7 +1031,9 @@ describeWithDatabase('Direct Run application flow', () => {
           format === 'json' &&
           schemaVersion === 1 &&
           typeof manifest.taskId === 'string' &&
-          Array.isArray(manifest.capabilities),
+          Array.isArray(manifest.capabilities) &&
+          manifest.depth === 0 &&
+          manifest.detached === false,
       ),
     ).toBe(true);
     const results = await connection.db.select().from(taskResults);

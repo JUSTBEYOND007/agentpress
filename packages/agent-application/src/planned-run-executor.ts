@@ -51,8 +51,13 @@ import {
   selectMainControlTools,
   type AgentTurnProfile,
 } from './agent-turn-profile.js';
+import {
+  createSpecialistTaskRequest,
+  parseSpecialistTaskRequest,
+  specialistConcurrencyLimit,
+  type SpecialistRole,
+} from './specialist-task-contract.js';
 
-type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type TaskCriticality = 'required' | 'optional';
 type ArtifactType =
   | 'ResearchBrief'
@@ -114,6 +119,7 @@ type PlannedRunExecutorOptions = {
   readonly runtimeToolFactory?: RuntimeToolFactory;
   readonly now?: () => Date;
   readonly createId?: () => string;
+  readonly maxSpecialistConcurrency?: number;
 };
 
 const specialistRoles = ['researcher', 'writer', 'editor', 'fact_checker', 'illustrator'] as const;
@@ -659,7 +665,7 @@ export class PlannedRunExecutor {
       }
       const ready = [...pending.values()]
         .filter((task) => task.dependencyIds.every((id) => settled.get(id)?.status === 'succeeded'))
-        .slice(0, 3);
+        .slice(0, specialistConcurrencyLimit(this.options.maxSpecialistConcurrency));
       if (ready.length === 0) {
         if (pending.size === 0) break;
         throw new Error(`Planned Run ${runId} scheduler made no progress`);
@@ -1123,9 +1129,28 @@ export class PlannedRunExecutor {
     prompt: RuntimeCurrentTurn,
     positionOffset = 0,
   ): Promise<void> {
+    const requests = tasks.map((task) => {
+      const contextPackId = this.createId();
+      return {
+        task,
+        request: createSpecialistTaskRequest({
+          taskId: task.id,
+          runId,
+          depth: 0,
+          owner: task.owner,
+          objective: task.objective,
+          contextPackId,
+          capabilities: task.capabilities,
+          outputSchema: taskCompleteSchema,
+          timeoutMs: 120_000,
+          maxAttempts: 3,
+          detached: false,
+        }),
+      };
+    });
     await transaction.insert(agentTasks).values(
-      tasks.map((task) => ({
-        id: task.id,
+      requests.map(({ task, request }) => ({
+        id: request.taskId,
         runId,
         planRevisionId: revisionId,
         objective: task.objective,
@@ -1133,10 +1158,14 @@ export class PlannedRunExecutor {
         owner: task.owner,
         acceptanceCriteria: task.acceptanceCriteria,
         outputSchema: taskCompleteSchema,
-        toolPolicy: { capabilities: task.capabilities },
-        budget: { maxAttempts: 3, protocolRepairTurns: 2 },
+        toolPolicy: { capabilities: task.capabilities, request },
+        budget: {
+          maxAttempts: request.maxAttempts,
+          protocolRepairTurns: 2,
+          timeoutMs: request.timeoutMs,
+        },
         status: 'pending' as const,
-        maxAttempts: 3,
+        maxAttempts: request.maxAttempts,
       })),
     );
     await transaction.insert(planRevisionTasks).values(
@@ -1151,8 +1180,8 @@ export class PlannedRunExecutor {
     );
     if (dependencies.length > 0)
       await transaction.insert(agentTaskDependencies).values(dependencies);
-    for (const task of tasks) {
-      const content = JSON.stringify({ rootRequest: prompt, task });
+    for (const { task, request } of requests) {
+      const content = JSON.stringify({ rootRequest: prompt, task, specialistTaskRequest: request });
       const contentHash = createHash('sha256').update(content).digest('hex');
       await transaction.insert(taskBriefs).values({
         id: this.createId(),
@@ -1163,9 +1192,17 @@ export class PlannedRunExecutor {
         contentHash,
       });
       await transaction.insert(contextPacks).values({
-        id: this.createId(),
+        id: request.contextPackId ?? this.createId(),
         taskId: task.id,
-        manifest: { runId, revisionId, taskId: task.id, capabilities: task.capabilities },
+        manifest: {
+          runId,
+          revisionId,
+          taskId: task.id,
+          parentTaskId: request.parentTaskId ?? null,
+          depth: request.depth,
+          detached: request.detached,
+          capabilities: task.capabilities,
+        },
         content,
         format: 'json',
         schemaVersion: 1,
@@ -1195,20 +1232,31 @@ export class PlannedRunExecutor {
       .from(agentTaskDependencies)
       .innerJoin(agentTasks, eq(agentTasks.id, agentTaskDependencies.taskId))
       .where(eq(agentTasks.planRevisionId, revisionId));
-    return rows.map((row) => ({
-      id: row.id,
-      clientKey: row.id,
-      owner: row.owner as SpecialistRole,
-      objective: row.objective,
-      criticality: row.criticality,
-      acceptanceCriteria: row.acceptanceCriteria,
-      dependencyIds: dependencies
-        .filter(({ agent_task_dependencies: dependency }) => dependency.taskId === row.id)
-        .map(({ agent_task_dependencies: dependency }) => dependency.dependencyTaskId),
-      capabilities: Array.isArray(row.toolPolicy.capabilities)
-        ? row.toolPolicy.capabilities.filter((value): value is string => typeof value === 'string')
-        : [],
-    }));
+    return rows.map((row) => {
+      const request = parseSpecialistTaskRequest(row.toolPolicy.request);
+      if (request && (request.taskId !== row.id || request.runId !== runId)) {
+        throw new Error(`Persisted Specialist Task ${row.id} has an identity mismatch`);
+      }
+      const capabilities =
+        request?.capabilities ??
+        (Array.isArray(row.toolPolicy.capabilities)
+          ? row.toolPolicy.capabilities.filter(
+              (value): value is string => typeof value === 'string',
+            )
+          : []);
+      return {
+        id: row.id,
+        clientKey: row.id,
+        owner: row.owner as SpecialistRole,
+        objective: row.objective,
+        criticality: row.criticality,
+        acceptanceCriteria: row.acceptanceCriteria,
+        dependencyIds: dependencies
+          .filter(({ agent_task_dependencies: dependency }) => dependency.taskId === row.id)
+          .map(({ agent_task_dependencies: dependency }) => dependency.dependencyTaskId),
+        capabilities,
+      };
+    });
   }
 
   private async loadPersistedTaskResults(

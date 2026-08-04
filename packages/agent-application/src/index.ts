@@ -16,3 +16,4 @@ export * from './run-context-service.js';
 export * from './execution-fact-cache.js';
 export * from './terminal-outcome-policy.js';
 export * from './tool-call-service.js';
+export * from './specialist-task-contract.js';
