@@ -167,6 +167,38 @@ describe('PiRuntimeAdapter', () => {
     expect(typeof calls[0]?.context.providerToolCallId).toBe('string');
   });
 
+  it('serves a persisted forced tool choice once, then releases it for the follow-up turn', async () => {
+    const streamOptions: Readonly<Record<string, unknown>>[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('lookup', { key: 'a' })], { stopReason: 'toolUse' }),
+        fauxAssistantMessage([fauxText('done')]),
+      ],
+      onStreamOptions: (options) => streamOptions.push(options),
+    });
+    await runtime.execute(
+      {
+        runId: 'forced-choice',
+        systemPrompt: 'Use the selected tool.',
+        history: [],
+        currentTurn: currentTurn('查询'),
+        toolChoice: { type: 'tool', name: 'lookup' },
+        tools: [
+          {
+            name: 'lookup',
+            label: 'Lookup',
+            description: 'Lookup one key',
+            parameters: Type.Object({ key: Type.String() }),
+            execute: () => Promise.resolve({ ok: true }),
+          },
+        ],
+      },
+      () => undefined,
+    );
+    expect(streamOptions[0]?.toolChoice).toEqual({ type: 'tool', name: 'lookup' });
+    expect(streamOptions[1]?.toolChoice).toBeUndefined();
+  });
+
   it('executes parallel provider ToolCalls exactly once and preserves both results', async () => {
     const executions: string[] = [];
     const runtime = PiRuntimeAdapter.forTests({

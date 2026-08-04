@@ -70,6 +70,7 @@ class ExecutionState {
 export type FauxRuntimeConfig = {
   readonly responses: readonly (string | AssistantMessage)[];
   readonly tokensPerSecond?: number;
+  readonly onStreamOptions?: (options: Readonly<Record<string, unknown>>) => void;
 };
 
 export class PiRuntimeAdapter implements AgentRuntime {
@@ -82,7 +83,10 @@ export class PiRuntimeAdapter implements AgentRuntime {
     readonly maxOutputTokens: number;
   };
 
-  private constructor(private readonly backend: PiBackend) {
+  private constructor(
+    private readonly backend: PiBackend,
+    private readonly onStreamOptions?: (options: Readonly<Record<string, unknown>>) => void,
+  ) {
     this.identity = {
       provider: backend.model.provider,
       model: backend.model.id,
@@ -111,7 +115,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
     const models = createModels();
     models.setProvider(faux.provider);
 
-    return new PiRuntimeAdapter({ models, model: faux.getModel() });
+    return new PiRuntimeAdapter({ models, model: faux.getModel() }, config.onStreamOptions);
   }
 
   public async execute(
@@ -150,6 +154,21 @@ export class PiRuntimeAdapter implements AgentRuntime {
     let blockedToolCalls = 0;
     let failedCompletionCalls = 0;
     const state = new ExecutionState(signal?.aborted ?? false);
+    let toolChoiceServed = false;
+    const streamFn = (
+      model: Model<Api>,
+      context: Parameters<Models['streamSimple']>[1],
+      options?: Parameters<Models['streamSimple']>[2],
+    ) => {
+      const toolChoice = !toolChoiceServed ? request.toolChoice : undefined;
+      toolChoiceServed = true;
+      const streamOptions = {
+        ...options,
+        ...(toolChoice === undefined ? {} : { toolChoice }),
+      };
+      this.onStreamOptions?.(streamOptions);
+      return this.backend.models.streamSimple(model, context, streamOptions);
+    };
     const agent = new Agent({
       initialState: {
         systemPrompt: request.systemPrompt,
@@ -161,7 +180,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
           ) ?? [],
         thinkingLevel: 'off',
       },
-      streamFn: this.backend.models.streamSimple.bind(this.backend.models),
+      streamFn,
       convertToLlm: convertAgentPressMessages,
       sessionId: request.runId,
       maxRetryDelayMs: 10_000,

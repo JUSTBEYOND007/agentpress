@@ -5,3 +5,4 @@ export * from './openai-compatible-provider.js';
 export * from './pi-runtime-adapter.js';
 export * from './schema-compatibility.js';
 export * from './tool-loop-guard.js';
+export * from './tool-choice-queue.js';

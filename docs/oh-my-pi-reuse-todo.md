@@ -156,6 +156,8 @@ TODO：
       duplicate ToolResult fail closed；并行调用仍由 Pi runtime fixture 验证。
 - [x] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
 - [ ] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
+      当前已完成 `packages/agent-runtime/src/tool-choice-queue.ts` 的一次性选择与 reject/requeue
+      纯逻辑，并由 Pi adapter 只向首个 provider request 注入选择；PostgreSQL 快照、消费和结算仍待完成。
 - [x] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。
 - [x] Tool 输出超过预算时外置为 Artifact，只把受限摘要和引用放回模型上下文。
       内置 MCP 工具超过 256KB 时将脱敏完整值写入 PostgreSQL `ToolOutput` Artifact/ArtifactVersion，

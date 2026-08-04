@@ -24,6 +24,12 @@ export type RuntimeToolCall = {
   readonly arguments: Readonly<Record<string, unknown>>;
 };
 
+export type RuntimeToolChoice =
+  | 'auto'
+  | 'none'
+  | 'required'
+  | { readonly type: 'tool'; readonly name: string };
+
 export type RuntimeAssistantContentBlock =
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'thinking'; readonly thinking: string }
@@ -96,6 +102,8 @@ export type RuntimeRequest = {
   readonly currentTurn: RuntimeCurrentTurn;
   readonly tools?: readonly RuntimeTool[];
   readonly continuation?: boolean;
+  /** One host-owned forced choice for the next provider request. */
+  readonly toolChoice?: RuntimeToolChoice;
   readonly maxToolCalls?: number;
   readonly maxFailedCompletionCalls?: number;
   readonly toolLoopGuard?: {

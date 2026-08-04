@@ -57,6 +57,14 @@ AgentPress keeps that runtime behavior and adds `validateRuntimeHistory` in
 `packages/agent-runtime/src/pi-runtime-adapter.ts` for PostgreSQL transcript recovery, where
 missing, duplicate, mismatched, or non-object ToolCall arguments fail closed before provider I/O.
 
+Oh My Pi's ToolChoiceQueue was verified at commit `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`
+in `packages/coding-agent/src/session/tool-choice-queue.ts` with contracts in
+`packages/coding-agent/test/tool-choice-queue.test.ts`. AgentPress adopted the pure one-yield
+queue and reject/requeue semantics in `packages/agent-runtime/src/tool-choice-queue.ts`, and
+passes one host-owned choice through the official Pi provider stream adapter. The queue's durable
+snapshot and RunDirective settlement are intentionally still pending; the pure queue is not used
+as a PostgreSQL fact source.
+
 ## Primary Pi Business Reference
 
 **Primary reference: [`Narcooo/inkos`](https://github.com/Narcooo/inkos) at release `v1.7.2`, commit `c7851b94ada27f2810b903e96d8fec6f33e5d9bc`.** This is the default upstream to inspect before changing AgentPress conversation-to-writing behavior, long-form writing orchestration, review, recovery, or session restoration. Other repositories in this document remain secondary references for narrower infrastructure concerns.
