@@ -240,9 +240,9 @@ TODO：
       `packages/mcp-runtime/src/in-memory-built-ins.ts`、`client-gateway.ts` 及对应测试。
 - [ ] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
 - [x] 保持 MCP Tool 稳定排序，避免 Prompt cache 因异步连接顺序失效。
-- [ ] 复用现有 output guard，补 Schema normalization、secret redaction、hostile/oversized output 和 Artifact 外置。
-      Schema、secret redaction、oversized Artifact 外置已完成；仍需 hostile instruction 的上下文归因与
-      真实 Streamable HTTP fixture 后再勾选。
+- [x] 复用现有 output guard，补 Schema normalization、secret redaction、hostile/oversized output 和 Artifact 外置。
+      MCP wire schema 走统一 provider adapter，输出先做 TypeBox 校验与 secret redaction；所有结果固定为
+      `source=mcp, trust=untrusted`，hostile 指令不产生 capability；超预算完整值外置为 ToolOutput Artifact。
 - [ ] 首版不复制 OAuth/Smithery/stdio/任意 remote config；若内置 Server 未来需要 OAuth，另行安全评审。
 - [ ] 所有 MCP 调用必须先持久化 AgentPress ToolCall，并经过 capability/approval/settlement。
 - [ ] 使用真实 Streamable HTTP fixture 验证重连、取消、server restart 和不重复 ToolCall。

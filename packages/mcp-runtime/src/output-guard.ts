@@ -18,7 +18,13 @@ export function guardMcpOutput(
   if (contract?.outputSchema && !Value.Check(contract.outputSchema, redacted)) {
     throw new Error('MCP output does not satisfy the declared schema');
   }
-  return { value: redacted, bytes, redactions: countRedactions(value) };
+  return {
+    source: 'mcp',
+    trust: 'untrusted',
+    value: redacted,
+    bytes,
+    redactions: countRedactions(value),
+  };
 }
 
 export async function guardMcpOutputWithArtifact(
@@ -43,12 +49,16 @@ export async function guardMcpOutputWithArtifact(
     throw new Error('MCP output does not satisfy the declared schema');
   }
   const redactions = countRedactions(value);
-  if (bytes <= maxBytes) return { value: redacted, bytes, redactions };
+  if (bytes <= maxBytes) {
+    return { source: 'mcp', trust: 'untrusted', value: redacted, bytes, redactions };
+  }
   if (!options.writeArtifact) {
     throw new Error(`MCP output exceeds ${String(maxBytes)} bytes`);
   }
   const artifact = await options.writeArtifact({ value: redacted, bytes });
   return {
+    source: 'mcp',
+    trust: 'untrusted',
     value: {
       artifactId: artifact.artifactId,
       versionId: artifact.versionId,

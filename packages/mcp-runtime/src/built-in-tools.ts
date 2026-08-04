@@ -30,6 +30,8 @@ const searchInput = Type.Object(
   { additionalProperties: false },
 );
 const guardedOutput = Type.Object({
+  source: Type.Literal('mcp'),
+  trust: Type.Literal('untrusted'),
   value: Type.Unknown(),
   bytes: Type.Integer({ minimum: 0 }),
   redactions: Type.Integer({ minimum: 0 }),

@@ -18,6 +18,8 @@ export type McpServerDefinition = {
 };
 
 export type GuardedMcpOutput = {
+  readonly source: 'mcp';
+  readonly trust: 'untrusted';
   readonly value: unknown;
   readonly bytes: number;
   readonly redactions: number;
