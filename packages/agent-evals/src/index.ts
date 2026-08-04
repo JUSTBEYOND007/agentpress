@@ -8,6 +8,7 @@ export * from './judge-calibration.js';
 export * from './trace-metrics.js';
 export * from './persisted-trace.js';
 export * from './sandbox-policy.js';
+export * from './rag-provider-eval.js';
 export * from './experiment-store.js';
 export * from './experiment-report.js';
 export * from './compaction-scenarios.js';

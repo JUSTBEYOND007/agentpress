@@ -390,8 +390,15 @@ TODO：
       固定数据集版本 `2026-08-04.v1` 位于
       `packages/knowledge-retrieval/test/fixtures/retrieval-eval-fixture.ts`，由 Recall@K、MRR、NDCG
       与 no-answer accuracy 统一评分；真实 embedding/rerank provider 验收仍由下一项单独跟踪。
-      已提供 `evaluateRetrieval` 与 `scoreCitationResolution` 确定性指标和基础 fixture；完整业务离线集仍待补齐。
+      `packages/agent-evals/src/rag-provider-eval.ts` 进一步固定可供真实 provider 重跑的六类文档、query、
+      active revision、workspace 和相关性金标；离线集与在线集共用 `evaluateRetrieval` 和 `scoreCitationResolution`。
 - [ ] 使用真实 embedding/rerank provider 验证 Recall@K、MRR/NDCG、引用解析率和无答案精度。
+      已新增 `pnpm eval:rag`，直接复用 `ArkEmbeddingProvider`、`ArkRerankProvider`、`evaluateRetrieval`
+      和 `scoreCitationResolution`，对固定六类数据同时报告 Recall@K、MRR、NDCG、引用解析率、无答案精度、
+      provider errors 与跨 workspace 命中数。候选文档在 rerank 调用前按 workspace 和 active revision
+      fail closed 过滤；离线契约测试覆盖全指标通过与 provider 失败。2026-08-05 标准入口因本地未配置
+      `ARK_RERANK_MODEL` 明确拒绝运行；配置真实 rerank endpoint 后仍需取得 `recallAtK >= 0.9`、
+      `mrr >= 0.8`、`ndcg >= 0.85`、引用与无答案精度均为 1、errors/crossWorkspaceHits 均为 0 的报告。
 
 首选本地落点：`packages/knowledge-retrieval/`、`packages/agent-context/`、`packages/agent-evals/`。
 
