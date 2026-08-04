@@ -169,6 +169,7 @@ function summarySystemPrompt(incremental: boolean): string {
       ? 'Merge new facts into the previous summary. Preserve still-current intent and explicitly replace stale state.'
       : 'Create the initial summary from the supplied messages.',
     'Preserve user intent, decisions, constraints, evidence/citation references, unresolved actions, and explicit unknowns.',
+    'Every identifier supplied under protectedFactReferences is a host-owned fact reference and must be preserved verbatim in the summary.',
     'Do not invent facts, infer permissions, expose private reasoning, or claim that an unresolved action completed.',
     'Call conversation_compaction_complete exactly once. Plain-text completion is invalid.',
   ].join('\n');

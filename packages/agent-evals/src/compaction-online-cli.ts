@@ -164,7 +164,10 @@ function compactionCases(): readonly CompactionEvalCase[] {
         ),
         message(6, 'assistant', 'The rejection is recorded and no mutation will run.'),
       ],
-      preserveData: { evidenceIds: ['EVID-BETA-811'] },
+      preserveData: {
+        evidenceIds: ['EVID-BETA-811'],
+        stateReferences: ['STATE-DRAFT-PENDING-810', 'STATE-DRAFT-REJECTED-812'],
+      },
       requiredReferences: ['STATE-DRAFT-PENDING-810', 'EVID-BETA-811', 'STATE-DRAFT-REJECTED-812'],
       requiredSemantics: [
         { label: 'rejected current state', patterns: ['draft.{0,30}reject'] },
