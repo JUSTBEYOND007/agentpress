@@ -553,6 +553,7 @@ describeWithDatabase('evaluation experiment persistence', () => {
     expect(retryId).toBeDefined();
     const retrySandbox = await store.getTrialSandboxDescriptor(retryId ?? '');
     expect(retrySandbox?.trialId).toBe(retryId);
+    expect(retrySandbox?.databaseSchema).not.toBe(firstSandbox?.databaseSchema);
     expect(retrySandbox?.objectPrefix).not.toBe(firstSandbox?.objectPrefix);
     expect(retrySandbox?.kafkaConsumerGroup).not.toBe(firstSandbox?.kafkaConsumerGroup);
 

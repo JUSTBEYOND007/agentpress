@@ -45,10 +45,24 @@ describe('evaluation experiment store policy', () => {
       allowedHosts: ['api.example.com', 'api.example.com'],
     });
     expect(/^eval_[a-f0-9]{24}$/u.test(descriptor.databaseSchema)).toBe(true);
-    expect(/^eval\/[a-f0-9]{24}\/[a-f0-9]{24}\/[a-f0-9]{24}\/$/u.test(descriptor.objectPrefix)).toBe(true);
+    expect(
+      /^eval\/[a-f0-9]{24}\/[a-f0-9]{24}\/[a-f0-9]{24}\/$/u.test(descriptor.objectPrefix),
+    ).toBe(true);
     expect(/^eval\.[a-f0-9]{24}\.trials$/u.test(descriptor.kafkaTopic)).toBe(true);
-    expect(/^eval\.[a-f0-9]{24}\.[a-f0-9]{24}\.[a-f0-9]{24}$/u.test(descriptor.kafkaConsumerGroup)).toBe(true);
-    expect(descriptor.network).toEqual({ mode: 'deny-by-default', allowedHosts: ['api.example.com'] });
+    expect(
+      /^eval\.[a-f0-9]{24}\.[a-f0-9]{24}\.[a-f0-9]{24}$/u.test(descriptor.kafkaConsumerGroup),
+    ).toBe(true);
+    expect(descriptor.network).toEqual({
+      mode: 'deny-by-default',
+      allowedHosts: ['api.example.com'],
+    });
+    expect(
+      createEvalSandboxDescriptor({
+        experimentId: 'experiment-1',
+        armId: 'arm-a',
+        trialId: 'trial-2',
+      }).databaseSchema,
+    ).not.toBe(descriptor.databaseSchema);
     expect(() => {
       assertEvalSandboxDescriptor(descriptor, {
         experimentId: 'experiment-1',

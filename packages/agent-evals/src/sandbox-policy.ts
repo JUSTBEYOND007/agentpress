@@ -27,21 +27,22 @@ export type EvalSandboxPolicyInput = {
  * Derives every external resource identity from immutable trial facts.
  * Callers cannot inject a shared schema/prefix/topic or silently widen egress.
  */
-export function createEvalSandboxDescriptor(
-  input: EvalSandboxPolicyInput,
-): EvalSandboxDescriptor {
+export function createEvalSandboxDescriptor(input: EvalSandboxPolicyInput): EvalSandboxDescriptor {
   validateIdentity(input.experimentId, 'experimentId');
   validateIdentity(input.armId, 'armId');
   validateIdentity(input.trialId, 'trialId');
   const experiment = resourceToken(input.experimentId);
   const arm = resourceToken(input.armId);
   const trial = resourceToken(input.trialId);
+  const databaseScope = resourceToken(
+    `${input.experimentId}\u0000${input.armId}\u0000${input.trialId}`,
+  );
   const allowedHosts = normalizeHosts(input.allowedHosts ?? []);
   return {
     experimentId: input.experimentId,
     armId: input.armId,
     trialId: input.trialId,
-    databaseSchema: `eval_${experiment}`,
+    databaseSchema: `eval_${databaseScope}`,
     objectPrefix: `eval/${experiment}/${arm}/${trial}/`,
     kafkaTopic: `eval.${experiment}.trials`,
     kafkaConsumerGroup: `eval.${experiment}.${arm}.${trial}`,
@@ -61,11 +62,7 @@ export function assertEvalSandboxDescriptor(
 }
 
 function validateIdentity(value: string, label: string): void {
-  if (
-    !value.trim() ||
-    value.length > 160 ||
-    hasControlCharacter(value)
-  ) {
+  if (!value.trim() || value.length > 160 || hasControlCharacter(value)) {
     throw new TypeError(`Evaluation ${label} is invalid`);
   }
 }

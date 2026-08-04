@@ -472,8 +472,9 @@ TODO：
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
       `ExperimentStore` 已支持固定 seed/attempts、pass@k、cancel、失败重跑和 pending resume；新增
       Eval Trial claim token/worker lease、`FOR UPDATE SKIP LOCKED` 并发领取与过期 worker fence。
-      过期 Trial 先标记 `worker_lease_expired`，retry 创建新 trialId，因此得到新的 sandbox object
-      prefix/Kafka group。真实容器、Kafka 和网络 namespace 仍待基础设施环境验收。
+      过期 Trial 先标记 `worker_lease_expired`，retry 创建新 trialId，因此得到新的 database schema、
+      sandbox object prefix 和 Kafka group；Schema hash 绑定完整 experiment/arm/trial 身份，重试不再共享
+      已污染 Schema。真实容器、Kafka 和网络 namespace 仍待基础设施环境验收。
 - [x] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
       `loadPersistedRunTrace` 直接从 PostgreSQL 投影 RunEvent、AgentTask/TaskResult、ToolCall/Approval、
       Evidence、Action/Edit Proposal、Batch 与 operation decision；正文、Tool 参数/输出和编辑操作不复制，
