@@ -59,7 +59,9 @@ import {
 } from './agent-turn-profile.js';
 import {
   createSpecialistTaskRequest,
+  assertSpecialistOutputSchema,
   parseSpecialistTaskRequest,
+  resolveSpecialistOutputSchema,
   specialistConcurrencyLimit,
   type SpecialistRole,
 } from './specialist-task-contract.js';
@@ -1266,8 +1268,14 @@ export class PlannedRunExecutor {
   ): Promise<void> {
     const requests = tasks.map((task) => {
       const contextPackId = this.createId();
+      const schema = resolveSpecialistOutputSchema({
+        callerOutputSchema: taskCompleteSchema,
+        schemaMode: 'strict',
+      });
+      assertSpecialistOutputSchema(schema);
       return {
         task,
+        schema,
         request: createSpecialistTaskRequest({
           taskId: task.id,
           runId,
@@ -1276,7 +1284,7 @@ export class PlannedRunExecutor {
           objective: task.objective,
           contextPackId,
           capabilities: task.capabilities,
-          outputSchema: taskCompleteSchema,
+          outputSchema: schema.schema,
           timeoutMs: 120_000,
           maxAttempts: 3,
           detached: task.detached,
@@ -1284,7 +1292,7 @@ export class PlannedRunExecutor {
       };
     });
     await transaction.insert(agentTasks).values(
-      requests.map(({ task, request }) => ({
+      requests.map(({ task, request, schema }) => ({
         id: request.taskId,
         runId,
         planRevisionId: revisionId,
@@ -1292,8 +1300,13 @@ export class PlannedRunExecutor {
         criticality: task.criticality,
         owner: task.owner,
         acceptanceCriteria: task.acceptanceCriteria,
-        outputSchema: taskCompleteSchema,
-        toolPolicy: { capabilities: task.capabilities, request },
+        outputSchema: request.outputSchema,
+        toolPolicy: {
+          capabilities: task.capabilities,
+          request,
+          outputSchemaSource: schema.source,
+          outputSchemaMode: schema.mode,
+        },
         budget: {
           maxAttempts: request.maxAttempts,
           protocolRepairTurns: 2,

@@ -184,7 +184,10 @@ TODO：
 
 - [x] 定义 AgentPress `SpecialistTaskRequest`：identity、assignment、Context Pack、allowed tools、
       output schema、parent task、depth、timeout、budget、detached 和 owner。
-- [ ] 复制 caller/agent/session 三层 output schema 优先级与 strict/permissive 验证行为。
+- [x] 复制 caller/agent/session 三层 output schema 优先级与 strict/permissive 验证行为。
+      固定上游 `f446b8a` 的 caller-presence > agent > session 与 mode 继承行为已适配到
+      `specialist-task-contract.ts`；caller 两种模式均预检，继承 schema 仅 strict fail closed，
+      Planned Specialist 将 source/mode 固定进 `toolPolicy`。对应契约测试覆盖无 schema 场景。
 - [ ] 复制递归深度限制、自调用阻止、spawn policy 和 provider concurrency 测试。
 - [ ] 实现持久化 Agent Registry，状态来源为 PostgreSQL Task/RunEvent，不采用进程内 registry 作为事实源。
 - [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。

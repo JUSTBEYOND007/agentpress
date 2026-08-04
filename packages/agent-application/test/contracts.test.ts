@@ -8,6 +8,8 @@ import {
   AgentApplicationError,
   createSpecialistTaskRequest,
   parseSpecialistTaskRequest,
+  assertSpecialistOutputSchema,
+  resolveSpecialistOutputSchema,
   specialistConcurrencyLimit,
   validateSubmittedPlan,
 } from '../src/index.js';
@@ -38,6 +40,56 @@ describe('agent application contracts', () => {
         taskId: 't',
       }),
     ).toBeUndefined();
+  });
+
+  it('resolves caller, agent, then session Specialist schemas in precedence order', () => {
+    const caller = Type.Object({ caller: Type.String() });
+    const agent = Type.Object({ agent: Type.Boolean() });
+    const session = Type.Object({ session: Type.Number() });
+    expect(
+      resolveSpecialistOutputSchema({
+        callerOutputSchema: caller,
+        agentOutputSchema: agent,
+        sessionOutputSchema: session,
+        schemaMode: 'strict',
+      }),
+    ).toEqual({
+      schema: caller,
+      source: 'caller',
+      mode: 'strict',
+      callerOverridesAgent: true,
+    });
+    expect(
+      resolveSpecialistOutputSchema({ agentOutputSchema: agent, sessionOutputSchema: session }),
+    ).toMatchObject({ schema: agent, source: 'agent', mode: 'permissive' });
+    expect(
+      resolveSpecialistOutputSchema({
+        sessionOutputSchema: session,
+        sessionSchemaMode: 'strict',
+      }),
+    ).toMatchObject({ schema: session, source: 'session', mode: 'strict' });
+  });
+
+  it('preflights caller schemas in both modes and inherited schemas only in strict mode', () => {
+    for (const mode of ['strict', 'permissive'] as const) {
+      const caller = resolveSpecialistOutputSchema({ callerOutputSchema: false, schemaMode: mode });
+      expect(() => {
+        assertSpecialistOutputSchema(caller);
+      }).toThrow(/caller/u);
+    }
+    const permissive = resolveSpecialistOutputSchema({ agentOutputSchema: false });
+    expect(() => {
+      assertSpecialistOutputSchema(permissive);
+    }).not.toThrow();
+    const strict = resolveSpecialistOutputSchema({
+      sessionOutputSchema: false,
+      sessionSchemaMode: 'strict',
+    });
+    expect(() => {
+      assertSpecialistOutputSchema(strict);
+    }).toThrow(/strict effective/u);
+    const absent = resolveSpecialistOutputSchema({});
+    expect(absent).toMatchObject({ source: 'none', mode: 'permissive' });
   });
 
   it('exposes typed application errors', () => {
