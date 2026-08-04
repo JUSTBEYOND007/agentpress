@@ -91,12 +91,17 @@ export class McpServerManager {
     return start;
   }
 
-  public async markDegraded(serverId: BuiltInMcpServerId): Promise<void> {
+  public async markDegraded(
+    serverId: BuiltInMcpServerId,
+    expectedClient?: Client,
+  ): Promise<boolean> {
     const client = this.clients.get(serverId);
+    if (expectedClient && client !== expectedClient) return false;
     this.clients.delete(serverId);
     this.states.set(serverId, 'degraded');
     this.recordFailure(serverId);
-    if (client) await client.close();
+    if (client) await client.close().catch(() => undefined);
+    return true;
   }
 
   public async stop(serverId: BuiltInMcpServerId): Promise<void> {

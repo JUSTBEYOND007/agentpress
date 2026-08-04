@@ -262,21 +262,33 @@ TODO：
 
 TODO：
 
-- [ ] 先对照现有 `packages/mcp-runtime` 和已适配的 `pi-mcp-adapter`，形成缺口清单；已有行为不得重写。
+- [x] 先对照现有 `packages/mcp-runtime` 和已适配的 `pi-mcp-adapter`，形成缺口清单；已有行为不得重写。
+      官方 MCP SDK 已覆盖 Streamable HTTP wire/session、JSON/SSE 和通知协议；现有 pi-mcp-adapter 适配已覆盖
+      三个内置 Server、lazy/coalesced startup、稳定排序、output guard 与 degraded lifecycle。真实缺口仅为
+      旧 client 条件淘汰、连接错误单次工具重试、首次 reconnect reset 的有界 probe，以及 restart fixture。
 - [x] 评估直接使用官方 MCP TypeScript SDK 的 Streamable HTTP transport；只有产品契约缺口才复制 Oh My Pi 行为。
 - [x] 补齐 POST JSON-RPC、JSON/SSE response、GET SSE listener 和 `Mcp-Session-Id` 契约测试。
 - [x] 补齐 prompts、resources、resource templates、notifications 和 subscriptions 的受限内置服务器行为。
       三个内置 Server 只暴露固定 search guidance、policy 与 search capability 资源；未知资源/订阅 fail closed。
       Client Gateway 直接复用官方 SDK，并注册 resource/prompt/tool list notification schemas。证据：
       `packages/mcp-runtime/src/in-memory-built-ins.ts`、`client-gateway.ts` 及对应测试。
-- [ ] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
+- [x] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
+      30 秒超时继续由 Tool Registry 合并 AbortSignal；Gateway 仅对明确连接/陈旧 session 错误重试一次，
+      取消和非连接错误不重试。Manager 用 expected-client compare-and-evict 避免旧失败淘汰新连接，并以
+      coalesced start、failure threshold 和 cooldown 限制 reconnect storm。
 - [x] 保持 MCP Tool 稳定排序，避免 Prompt cache 因异步连接顺序失效。
 - [x] 复用现有 output guard，补 Schema normalization、secret redaction、hostile/oversized output 和 Artifact 外置。
       MCP wire schema 走统一 provider adapter，输出先做 TypeBox 校验与 secret redaction；所有结果固定为
       `source=mcp, trust=untrusted`，hostile 指令不产生 capability；超预算完整值外置为 ToolOutput Artifact。
-- [ ] 首版不复制 OAuth/Smithery/stdio/任意 remote config；若内置 Server 未来需要 OAuth，另行安全评审。
-- [ ] 所有 MCP 调用必须先持久化 AgentPress ToolCall，并经过 capability/approval/settlement。
-- [ ] 使用真实 Streamable HTTP fixture 验证重连、取消、server restart 和不重复 ToolCall。
+- [x] 首版不复制 OAuth/Smithery/stdio/任意 remote config；若内置 Server 未来需要 OAuth，另行安全评审。
+      Production assembly 只注册 `BuiltInMcpServerId` 联合中的三个 Server，外部 HTTP 仅允许 HTTPS，
+      localhost HTTP 仅供测试 fixture，URL 禁止携带凭据。
+- [x] 所有 MCP 工具调用必须先持久化 AgentPress ToolCall，并经过 capability/approval/settlement。
+      `createBuiltInToolRuntime` 只通过 `PersistentToolBridge -> ToolCallService -> ToolRegistry -> McpClientGateway`
+      暴露模型工具；provider tool-call id 绑定幂等键，执行结果由 ToolCall settlement 和 RunEvent 持久化。
+- [x] 使用真实 Streamable HTTP fixture 验证重连、取消、server restart 和不重复 ToolCall。
+      `streamable-http.integration.test.ts` 使用官方 SDK 的真实 HTTP Server/Client transport，覆盖 JSON/SSE、
+      session reuse、GET listener、在途取消、同端口 restart、单次恢复及服务端成功调用计数为一。
 
 首选本地落点：`packages/mcp-runtime/`、`packages/tool-runtime/`。
 

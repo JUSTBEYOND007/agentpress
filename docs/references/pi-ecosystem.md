@@ -28,6 +28,13 @@ for its TypeBox contracts; the full Oh My Pi schema subsystem was not vendored b
 Pi runtime already owns generic schema conversion and AgentPress also needs PostgreSQL-backed
 facts and degradation audit events.
 
+MCP reconnect behavior uses the official MCP SDK transport and adapts only the conservative
+connection-error/single-retry and reconnect-storm contracts from Oh My Pi commit
+`f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`. The local Gateway retries no model-visible tool step:
+it remains inside one PostgreSQL-backed AgentPress ToolCall, retries only the three read-only
+built-ins, preserves cancellation, and records a single settlement. OAuth, Smithery, stdio and
+user-configured remote servers remain excluded.
+
 8. Security-sensitive code such as URL validation, MCP lifecycle management, and edit application requires local review even when copied unchanged.
 
 Compaction boundary decision: `packages/agent-context` directly imports the pure `shouldCompact`

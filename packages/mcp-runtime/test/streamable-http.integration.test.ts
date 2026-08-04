@@ -131,6 +131,32 @@ describe('MCP Streamable HTTP real fixture', () => {
       await restarted.close();
     }
   });
+
+  it('reconnects once and completes a tool call after a server restart', async () => {
+    const first = await startFixture(false);
+    const port = Number(new URL(first.url).port);
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: first.url }),
+    });
+    const gateway = new McpClientGateway(manager);
+    await expect(gateway.call(toolCallInput('before-restart', 'before'))).resolves.toBe('before');
+    expect(first.echoCallCount()).toBe(1);
+
+    await first.close();
+    const restarted = await startFixture(false, port);
+    try {
+      await expect(gateway.call(toolCallInput('after-restart', 'after'))).resolves.toBe('after');
+      expect(restarted.echoCallCount()).toBe(1);
+      expect(manager.state('web_research')).toBe('ready');
+      await manager.stop('web_research');
+    } finally {
+      await restarted.close();
+    }
+  });
 });
 
 async function startFixture(
@@ -141,11 +167,13 @@ async function startFixture(
   readonly transport: StreamableHTTPServerTransport;
   readonly requests: { readonly method: string; readonly session?: string }[];
   readonly slowAbortCount: () => number;
+  readonly echoCallCount: () => number;
   readonly waitForSlowStart: () => Promise<void>;
   readonly close: () => Promise<void>;
 }> {
   const requests: { method: string; session?: string }[] = [];
   let slowAbortCount = 0;
+  let echoCallCount = 0;
   let markSlowStarted: (() => void) | undefined;
   const slowStarted = new Promise<void>((resolve) => {
     markSlowStarted = resolve;
@@ -161,11 +189,13 @@ async function startFixture(
       inputSchema: { value: z.string() },
       outputSchema: { value: z.string() },
     },
-    ({ value }) =>
-      Promise.resolve({
+    ({ value }) => {
+      echoCallCount += 1;
+      return Promise.resolve({
         content: [{ type: 'text', text: value }],
         structuredContent: { value },
-      }),
+      });
+    },
   );
   mcp.registerTool(
     'slow',
@@ -199,6 +229,7 @@ async function startFixture(
     transport,
     requests,
     slowAbortCount: () => slowAbortCount,
+    echoCallCount: () => echoCallCount,
     waitForSlowStart: () => slowStarted,
     close: async () => {
       await transport.close();
@@ -209,6 +240,19 @@ async function startFixture(
           else resolve();
         });
       });
+    },
+  };
+}
+
+function toolCallInput(toolCallId: string, value: string) {
+  return {
+    serverId: 'web_research' as const,
+    toolName: 'echo',
+    arguments: { value },
+    context: {
+      runId: 'run-real-streamable-http',
+      toolCallId,
+      signal: new AbortController().signal,
     },
   };
 }

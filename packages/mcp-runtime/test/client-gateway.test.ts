@@ -4,16 +4,27 @@ import { describe, expect, it, vi } from 'vitest';
 import { McpClientGateway, McpServerManager } from '../src/index.js';
 
 describe('MCP client gateway', () => {
-  it('does not duplicate a failed tool call and degrades transport failures', async () => {
+  it('reconnects and retries a read-only tool call exactly once after a transport failure', async () => {
     const error = Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
-    const callTool = vi.fn(() => Promise.reject(error));
-    const close = vi.fn(() => Promise.resolve());
+    const firstCall = vi.fn(() => Promise.reject(error));
+    const secondCall = vi.fn(() =>
+      Promise.resolve({ structuredContent: { value: { results: ['recovered'] } } }),
+    );
+    const firstClose = vi.fn(() => Promise.resolve());
+    let connection = 0;
     const manager = new McpServerManager();
     manager.register({
       serverId: 'web_research',
       version: '1',
       displayName: 'Web',
-      createClient: () => Promise.resolve({ callTool, close } as unknown as Client),
+      createClient: () => {
+        connection += 1;
+        return Promise.resolve(
+          connection === 1
+            ? ({ callTool: firstCall, close: firstClose } as unknown as Client)
+            : ({ callTool: secondCall, close: () => Promise.resolve() } as unknown as Client),
+        );
+      },
     });
     const gateway = new McpClientGateway(manager);
     await expect(
@@ -27,10 +38,111 @@ describe('MCP client gateway', () => {
           signal: new AbortController().signal,
         },
       }),
-    ).rejects.toBe(error);
-    expect(callTool).toHaveBeenCalledTimes(1);
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(manager.state('web_research')).toBe('degraded');
+    ).resolves.toEqual({ results: ['recovered'] });
+    expect(firstCall).toHaveBeenCalledTimes(1);
+    expect(secondCall).toHaveBeenCalledTimes(1);
+    expect(firstClose).toHaveBeenCalledTimes(1);
+    expect(connection).toBe(2);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
+  it('does not retry non-connection errors or retry a second connection failure', async () => {
+    const internal = new Error('MCP error -32603: Internal error');
+    const internalCall = vi.fn(() => Promise.reject(internal));
+    const internalManager = managerWithClients([
+      { callTool: internalCall, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+    const input = toolCallInput();
+    await expect(new McpClientGateway(internalManager).call(input)).rejects.toBe(internal);
+    expect(internalCall).toHaveBeenCalledTimes(1);
+
+    const firstError = new Error('Transport closed');
+    const secondError = new Error('HTTP 503: Service Unavailable');
+    const firstCall = vi.fn(() => Promise.reject(firstError));
+    const secondCall = vi.fn(() => Promise.reject(secondError));
+    const retryManager = managerWithClients([
+      { callTool: firstCall, close: () => Promise.resolve() } as unknown as Client,
+      { callTool: secondCall, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+    await expect(new McpClientGateway(retryManager).call(input)).rejects.toBe(secondError);
+    expect(firstCall).toHaveBeenCalledTimes(1);
+    expect(secondCall).toHaveBeenCalledTimes(1);
+    expect(retryManager.state('web_research')).toBe('degraded');
+  });
+
+  it('coalesces concurrent reconnects and does not let stale failures evict the new client', async () => {
+    const transportFailure = new Error('fetch failed');
+    const oldCall = vi.fn(() => Promise.reject(transportFailure));
+    const newCall = vi.fn(() => Promise.resolve({ structuredContent: { value: 'ok' } }));
+    const manager = managerWithClients([
+      { callTool: oldCall, close: () => Promise.resolve() } as unknown as Client,
+      { callTool: newCall, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+    const gateway = new McpClientGateway(manager);
+
+    await expect(
+      Promise.all([gateway.call(toolCallInput('call-a')), gateway.call(toolCallInput('call-b'))]),
+    ).resolves.toEqual(['ok', 'ok']);
+    expect(oldCall).toHaveBeenCalledTimes(2);
+    expect(newCall).toHaveBeenCalledTimes(2);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
+  it('allows one bounded reconnect probe when the first fresh connection also resets', async () => {
+    const oldCall = vi.fn(() => Promise.reject(new Error('Transport closed')));
+    const recoveredCall = vi.fn(() =>
+      Promise.resolve({ structuredContent: { value: 'recovered' } }),
+    );
+    const oldClient = {
+      callTool: oldCall,
+      close: () => Promise.resolve(),
+    } as unknown as Client;
+    const recoveredClient = {
+      callTool: recoveredCall,
+      close: () => Promise.resolve(),
+    } as unknown as Client;
+    let connection = 0;
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => {
+        connection += 1;
+        if (connection === 1) return Promise.resolve(oldClient);
+        if (connection === 2) return Promise.reject(new Error('fetch failed'));
+        return Promise.resolve(recoveredClient);
+      },
+    });
+
+    await expect(new McpClientGateway(manager).call(toolCallInput())).resolves.toBe('recovered');
+    expect(connection).toBe(3);
+    expect(oldCall).toHaveBeenCalledTimes(1);
+    expect(recoveredCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconnect when cancellation wins after a connection failure', async () => {
+    const controller = new AbortController();
+    const aborted = new Error('cancelled by user');
+    const callTool = vi.fn(() => {
+      controller.abort(aborted);
+      return Promise.reject(new Error('Transport closed'));
+    });
+    const create = vi.fn(() =>
+      Promise.resolve({ callTool, close: () => Promise.resolve() } as unknown as Client),
+    );
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: create,
+    });
+
+    await expect(
+      new McpClientGateway(manager).call(toolCallInput('cancelled', controller.signal)),
+    ).rejects.toBe(aborted);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('sorts discovered tools independently of server response order', async () => {
@@ -119,3 +231,28 @@ describe('MCP client gateway', () => {
     ).toHaveLength(4);
   });
 });
+
+function toolCallInput(toolCallId = 'call', signal = new AbortController().signal) {
+  return {
+    serverId: 'web_research' as const,
+    toolName: 'search',
+    arguments: { query: 'Kafka' },
+    context: { runId: 'run', toolCallId, signal },
+  };
+}
+
+function managerWithClients(clients: readonly Client[]): McpServerManager {
+  let index = 0;
+  const manager = new McpServerManager();
+  manager.register({
+    serverId: 'web_research',
+    version: '1',
+    displayName: 'Web',
+    createClient: () => {
+      const client = clients[index];
+      index += 1;
+      return client ? Promise.resolve(client) : Promise.reject(new Error('No fake MCP client'));
+    },
+  });
+  return manager;
+}

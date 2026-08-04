@@ -45,6 +45,16 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
 - Changes: reduced lifecycle to three in-process built-in servers; removed stdio, arbitrary remote configuration, OAuth and UI state; adapted guards to TypeBox and AgentPress Tool Registry.
 - Verification: lazy coalesced startup, degraded recovery, deterministic close, schema mismatch, secret redaction and hostile output size.
 
+### Oh My Pi MCP Reconnect Behavior
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`
+- Source: `packages/coding-agent/src/mcp/tool-bridge.ts`, `packages/coding-agent/src/mcp/manager.ts`, `packages/coding-agent/src/mcp/timeout.ts`, `packages/coding-agent/test/mcp-reconnect.test.ts`, `packages/coding-agent/test/mcp-reconnect-storm.test.ts`
+- Local: `packages/mcp-runtime/src/client-gateway.ts`, `packages/mcp-runtime/src/server-manager.ts`, `packages/mcp-runtime/test/client-gateway.test.ts`, `packages/mcp-runtime/test/server-manager.test.ts`, `packages/mcp-runtime/test/streamable-http.integration.test.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: retained conservative connection-error classification, single tool-call retry, reconnect coalescing and storm circuit behavior; removed OAuth, Smithery, stdio, arbitrary server configuration and TUI lifecycle; integrated abort with AgentPress Tool Registry and compare-and-evict client generations.
+- Verification: non-retriable errors, retry failure, abort-before-reconnect, concurrent stale-client failures, bounded reconnect probe, circuit cooldown and real Streamable HTTP restart with one successful server invocation.
+
 ### Oh My Pi Hashline Anchoring
 
 - Upstream: `https://github.com/can1357/oh-my-pi`

@@ -65,6 +65,25 @@ describe('MCP Server lifecycle', () => {
     expect(manager.state('licensed_media')).toBe('stopped');
   });
 
+  it('ignores a stale failure from a client that has already been replaced', async () => {
+    const oldClient = fakeClient();
+    const newClient = fakeClient();
+    let attempt = 0;
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => Promise.resolve(attempt++ === 0 ? oldClient : newClient),
+    });
+    await manager.getClient('web_research');
+    await expect(manager.markDegraded('web_research', oldClient)).resolves.toBe(true);
+    await expect(manager.getClient('web_research')).resolves.toBe(newClient);
+    await expect(manager.markDegraded('web_research', oldClient)).resolves.toBe(false);
+    await expect(manager.getClient('web_research')).resolves.toBe(newClient);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
   it('opens a reconnect-storm circuit and permits one probe after cooldown', async () => {
     let now = new Date('2026-08-04T00:00:00.000Z');
     let attempt = 0;

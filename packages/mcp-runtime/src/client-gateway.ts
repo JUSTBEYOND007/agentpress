@@ -16,24 +16,22 @@ export class McpClientGateway implements BuiltInMcpGateway {
   public constructor(private readonly manager: McpServerManager) {}
 
   public async call(input: Parameters<BuiltInMcpGateway['call']>[0]): Promise<unknown> {
-    const client = await this.manager.getClient(input.serverId);
+    let client = await this.manager.getClient(input.serverId);
     try {
-      // Tool calls are never replayed here: the durable AgentPress ToolCall ledger owns retries.
-      const result = await client.callTool(
-        {
-          name: input.toolName,
-          arguments: { ...input.arguments, _agentpressRunId: input.context.runId },
-        },
-        undefined,
-        { signal: input.context.signal },
-      );
-      const structured = result.structuredContent;
-      return typeof structured === 'object' && structured !== null && 'value' in structured
-        ? structured.value
-        : result;
+      return await callTool(client, input);
     } catch (error) {
-      if (isConnectionFailure(error)) await this.manager.markDegraded(input.serverId);
-      throw error;
+      if (!isConnectionFailure(error)) throw error;
+      await this.manager.markDegraded(input.serverId, client);
+      throwIfAborted(input.context.signal);
+      client = await this.reconnectClient(input.serverId, input.context.signal);
+      try {
+        return await callTool(client, input);
+      } catch (retryError) {
+        if (isConnectionFailure(retryError)) {
+          await this.manager.markDegraded(input.serverId, client);
+        }
+        throw retryError;
+      }
     }
   }
 
@@ -43,7 +41,7 @@ export class McpClientGateway implements BuiltInMcpGateway {
       const result = await client.listTools();
       return [...result.tools].sort((left, right) => left.name.localeCompare(right.name));
     } catch (error) {
-      if (isConnectionFailure(error)) await this.manager.markDegraded(serverId);
+      if (isConnectionFailure(error)) await this.manager.markDegraded(serverId, client);
       throw error;
     }
   }
@@ -133,10 +131,72 @@ export class McpClientGateway implements BuiltInMcpGateway {
       client.setNotificationHandler(ToolListChangedNotificationSchema, handlers.toolListChanged);
     }
   }
+
+  private async reconnectClient(
+    serverId: BuiltInMcpServerId,
+    signal: AbortSignal,
+  ): Promise<Client> {
+    try {
+      return await this.manager.getClient(serverId);
+    } catch (error) {
+      throwIfAborted(signal);
+      if (!isConnectionFailure(error)) throw error;
+      return this.manager.getClient(serverId);
+    }
+  }
+}
+
+async function callTool(
+  client: Client,
+  input: Parameters<BuiltInMcpGateway['call']>[0],
+): Promise<unknown> {
+  const result = await client.callTool(
+    {
+      name: input.toolName,
+      arguments: { ...input.arguments, _agentpressRunId: input.context.runId },
+    },
+    undefined,
+    { signal: input.context.signal },
+  );
+  const structured = result.structuredContent;
+  return typeof structured === 'object' && structured !== null && 'value' in structured
+    ? structured.value
+    : result;
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error('MCP tool call was aborted');
 }
 
 function isConnectionFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const code = 'code' in error && typeof error.code === 'string' ? error.code : '';
-  return ['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'UND_ERR_SOCKET'].includes(code);
+  if (
+    [
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'EPIPE',
+      'ENETUNREACH',
+      'EHOSTUNREACH',
+      'UND_ERR_SOCKET',
+    ].includes(code)
+  ) {
+    return true;
+  }
+  const message = error.message.toLocaleLowerCase();
+  return (
+    /^http (404|502|503):/.test(message) ||
+    [
+      'econnrefused',
+      'econnreset',
+      'epipe',
+      'enetunreach',
+      'ehostunreach',
+      'fetch failed',
+      'transport not connected',
+      'transport closed',
+      'network error',
+    ].some((pattern) => message.includes(pattern))
+  );
 }
