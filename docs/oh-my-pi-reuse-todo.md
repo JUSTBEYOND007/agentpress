@@ -462,7 +462,13 @@ TODO：
       Eval Trial claim token/worker lease、`FOR UPDATE SKIP LOCKED` 并发领取与过期 worker fence。
       过期 Trial 先标记 `worker_lease_expired`，retry 创建新 trialId，因此得到新的 sandbox object
       prefix/Kafka group。真实容器、Kafka 和网络 namespace 仍待基础设施环境验收。
-- [ ] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
+- [x] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
+      `loadPersistedRunTrace` 直接从 PostgreSQL 投影 RunEvent、AgentTask/TaskResult、ToolCall/Approval、
+      Evidence、Action/Edit Proposal、Batch 与 operation decision；正文、Tool 参数/输出和编辑操作不复制，
+      只保留 ID、状态、版本、计数、时间与稳定 hash。绑定真实 Run 的 Eval Trial 仅允许在 Agent Run
+      终态后结算，并在同一 Trial settlement 事务内写 `eval_run_traces`，stale claim 不会留下 Trace。
+      递归 key redaction 之外还清理 Bearer、常见 API key 和 query-style secret；真实 PostgreSQL
+      集成测试覆盖全部事实类型、非终态拒绝、自动 capture 和敏感正文不落 Eval Trace。
 - [x] 结果指标覆盖任务成功、Schema 有效率、引用正确性、文章质量、编辑最小性和无答案准确率。
       `packages/agent-evals/src/experiment-report.ts` 将这些结果指标与过程指标统一投影，并只使用已决 trial 计算聚合值。
 - [x] 过程指标覆盖路由、委派、工具选择、参数、审批、重试、循环、恢复、重复副作用、token、成本和延迟。

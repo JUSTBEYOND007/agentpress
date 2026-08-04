@@ -37,8 +37,14 @@ describe('evaluation judge and trace metrics', () => {
       rubric: [{ id: 'accuracy', instruction: 'Factual accuracy' }],
       seed: 'fixed-seed',
     });
-    expect(report).toMatchObject({ caseId: 'case-1', winner: 'a', promptVersion: 'agentpress.llm-judge@1' });
-    expect(new Set([report.displayedA, report.displayedB])).toEqual(new Set(['candidateA', 'candidateB']));
+    expect(report).toMatchObject({
+      caseId: 'case-1',
+      winner: 'a',
+      promptVersion: 'agentpress.llm-judge@1',
+    });
+    expect(new Set([report.displayedA, report.displayedB])).toEqual(
+      new Set(['candidateA', 'candidateB']),
+    );
   });
 
   it('rejects schema-invalid Judge output instead of accepting raw scores', async () => {
@@ -77,7 +83,11 @@ describe('evaluation judge and trace metrics', () => {
       { type: 'usage.updated', payload: { inputTokens: 4, outputTokens: 2, costUsd: 0.01 } },
       { type: 'run.completed', payload: { timestamp: 25 } },
     ];
-    expect(scoreProcessTrace(events)).toMatchObject({ delegationCount: 1, toolCallCount: 1, latencyMs: 15 });
+    expect(scoreProcessTrace(events)).toMatchObject({
+      delegationCount: 1,
+      toolCallCount: 1,
+      latencyMs: 15,
+    });
     expect(redactTrace(events)[0]?.payload).toMatchObject({ apiKey: '[REDACTED]' });
     expect(
       redactTrace([
@@ -91,18 +101,44 @@ describe('evaluation judge and trace metrics', () => {
     ).toEqual({
       calls: [{ headers: { authorization: '[REDACTED]' }, args: [{ token: '[REDACTED]' }] }],
     });
+    expect(
+      redactTrace([
+        {
+          type: 'tool.failure',
+          payload: {
+            message: 'Bearer opaque-token api_key=visible sk-1234567890abcdef',
+          },
+        },
+      ])[0]?.payload,
+    ).toEqual({
+      message: 'Bearer [REDACTED] api_key=[REDACTED] sk-[REDACTED]',
+    });
   });
 
   it('calibrates against human gold labels and exposes deterministic conflicts', () => {
     const reports: readonly JudgePairReport[] = [
       {
-        caseId: 'case-1', displayedA: 'candidateB', displayedB: 'candidateA', winner: 'b',
-        scoreA: 4, scoreB: 3, criterionScores: [], rationale: 'gold', model: 'judge/v1',
+        caseId: 'case-1',
+        displayedA: 'candidateB',
+        displayedB: 'candidateA',
+        winner: 'b',
+        scoreA: 4,
+        scoreB: 3,
+        criterionScores: [],
+        rationale: 'gold',
+        model: 'judge/v1',
         promptVersion: 'agentpress.llm-judge@1',
       },
       {
-        caseId: 'case-2', displayedA: 'candidateA', displayedB: 'candidateB', winner: 'a',
-        scoreA: 5, scoreB: 1, criterionScores: [], rationale: 'wrong', model: 'judge/v1',
+        caseId: 'case-2',
+        displayedA: 'candidateA',
+        displayedB: 'candidateB',
+        winner: 'a',
+        scoreA: 5,
+        scoreB: 1,
+        criterionScores: [],
+        rationale: 'wrong',
+        model: 'judge/v1',
         promptVersion: 'agentpress.llm-judge@1',
       },
     ];
@@ -125,8 +161,15 @@ describe('evaluation judge and trace metrics', () => {
 
   it('reports repeated-judge winner agreement and score variance deterministically', () => {
     const base: JudgePairReport = {
-      caseId: 'case-variance', displayedA: 'candidateA', displayedB: 'candidateB', winner: 'a',
-      scoreA: 4, scoreB: 2, criterionScores: [], rationale: '', model: 'judge/v1',
+      caseId: 'case-variance',
+      displayedA: 'candidateA',
+      displayedB: 'candidateB',
+      winner: 'a',
+      scoreA: 4,
+      scoreB: 2,
+      criterionScores: [],
+      rationale: '',
+      model: 'judge/v1',
       promptVersion: 'agentpress.llm-judge@1',
     };
     const report = summarizeJudgeStability([

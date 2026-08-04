@@ -6,6 +6,7 @@ export * from './online-model-configuration.js';
 export * from './judge.js';
 export * from './judge-calibration.js';
 export * from './trace-metrics.js';
+export * from './persisted-trace.js';
 export * from './sandbox-policy.js';
 export * from './experiment-store.js';
 export * from './experiment-report.js';

@@ -36,6 +36,15 @@ and process metrics, costs, failure categories, arm comparisons, and trends are 
 the browser. Trace remains diagnostic-only and is loaded separately from its redacted PostgreSQL
 fact.
 
+Eval trace capture decision: AgentPress does not trust a worker-supplied narrative as the complete
+execution trace. Once the bound Agent Run is terminal, Trial settlement projects RunEvent,
+Task/TaskResult, ToolCall/Approval, Evidence, Action/Edit Proposal, Batch, and operation-decision
+facts directly from PostgreSQL and writes the redacted snapshot in the same settlement transaction.
+Large or sensitive bodies such as tool arguments/output, evidence excerpts, and edit operations are
+represented by existing or computed hashes plus status, version, count, and timing metadata. The
+projection recursively redacts sensitive keys and common token shapes; a stale claim or nonterminal
+Run cannot publish a diagnostic trace.
+
 Specialist lifecycle decision: Oh My Pi's in-memory `AgentLifecycleManager` binds every park/revive
 and late finalizer to the exact `AgentRef` that started it. AgentPress adapts that stale-owner
 invariant at the durable boundary instead of copying sessions or timers: Task settlement is fenced

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
+  agentRuns,
   evalArms,
   evalExperiments,
   evalRunTraces,
@@ -17,6 +18,7 @@ import {
 } from './experiment-report.js';
 import { redactTrace, type EvalTraceEvent } from './trace-metrics.js';
 import { createEvalSandboxDescriptor, type EvalSandboxDescriptor } from './sandbox-policy.js';
+import { loadPersistedRunTrace } from './persisted-trace.js';
 
 export type EvalArmInput = {
   readonly name: string;
@@ -274,20 +276,10 @@ export class ExperimentStore {
     readonly failure?: Readonly<Record<string, unknown>>;
   }): Promise<boolean> {
     const now = this.now();
-    const rows = await this.database
-      .update(evalTrials)
-      .set({
-        status: input.status,
-        resultMetrics: input.resultMetrics ?? {},
-        processMetrics: input.processMetrics ?? {},
-        ...(input.failure ? { failure: input.failure } : {}),
-        claimToken: null,
-        workerId: null,
-        claimedAt: null,
-        leaseExpiresAt: null,
-        completedAt: now,
-        updatedAt: now,
-      })
+    const candidates = await this.database
+      .select({ runId: evalTrials.runId, runStatus: agentRuns.status })
+      .from(evalTrials)
+      .leftJoin(agentRuns, eq(agentRuns.id, evalTrials.runId))
       .where(
         and(
           eq(evalTrials.id, input.trialId),
@@ -295,8 +287,55 @@ export class ExperimentStore {
           eq(evalTrials.claimToken, input.claimToken),
         ),
       )
-      .returning({ id: evalTrials.id });
-    return rows.length === 1;
+      .limit(1);
+    const candidate = candidates[0];
+    if (!candidate) return false;
+    if (
+      candidate.runId &&
+      !['cancelled', 'completed', 'completed_with_degradation', 'failed'].includes(
+        candidate.runStatus ?? '',
+      )
+    ) {
+      throw new Error('Evaluation Trial cannot settle before its Agent Run is terminal');
+    }
+    const trace = candidate.runId
+      ? prepareTrace(await loadPersistedRunTrace(this.database, candidate.runId))
+      : undefined;
+    return this.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .update(evalTrials)
+        .set({
+          status: input.status,
+          resultMetrics: input.resultMetrics ?? {},
+          processMetrics: input.processMetrics ?? {},
+          ...(input.failure ? { failure: input.failure } : {}),
+          claimToken: null,
+          workerId: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(evalTrials.id, input.trialId),
+            eq(evalTrials.status, 'running'),
+            eq(evalTrials.claimToken, input.claimToken),
+          ),
+        )
+        .returning({ id: evalTrials.id });
+      if (rows.length !== 1) return false;
+      if (trace) {
+        await transaction
+          .insert(evalRunTraces)
+          .values({ id: this.createId(), trialId: input.trialId, ...trace })
+          .onConflictDoUpdate({
+            target: evalRunTraces.trialId,
+            set: trace,
+          });
+      }
+      return true;
+    });
   }
 
   public async failExpiredTrials(experimentId: string): Promise<readonly string[]> {
@@ -371,19 +410,33 @@ export class ExperimentStore {
   }
 
   public async persistTrace(trialId: string, events: readonly EvalTraceEvent[]): Promise<string> {
-    const redactedTrace = redactTrace(events);
-    const traceHash = createHash('sha256').update(JSON.stringify(redactedTrace)).digest('hex');
+    const trace = prepareTrace(events);
     const rows = await this.database
       .insert(evalRunTraces)
-      .values({ id: this.createId(), trialId, redactedTrace, traceHash })
+      .values({ id: this.createId(), trialId, ...trace })
       .onConflictDoUpdate({
         target: evalRunTraces.trialId,
-        set: { redactedTrace, traceHash },
+        set: trace,
       })
       .returning({ id: evalRunTraces.id });
     const id = rows[0]?.id;
     if (!id) throw new Error('Evaluation trace could not be persisted');
     return id;
+  }
+
+  public async capturePersistedTrialTrace(trialId: string): Promise<string | undefined> {
+    const rows = await this.database
+      .select({ runId: evalTrials.runId, status: evalTrials.status })
+      .from(evalTrials)
+      .where(eq(evalTrials.id, trialId))
+      .limit(1);
+    const trial = rows[0];
+    if (!trial) return undefined;
+    if (trial.status === 'pending' || trial.status === 'running') {
+      throw new Error('Evaluation Trial must settle before its complete trace is captured');
+    }
+    if (!trial.runId) throw new Error('Evaluation Trial has no persisted Agent Run');
+    return this.persistTrace(trialId, await loadPersistedRunTrace(this.database, trial.runId));
   }
 
   public async getExperimentReport(
@@ -556,6 +609,17 @@ export class ExperimentStore {
     ).filter((report): report is EvalExperimentReport => report !== undefined);
     return buildEvalRegressionTrend(reports, { arm: input.arm, metricKey: input.metricKey });
   }
+}
+
+function prepareTrace(events: readonly EvalTraceEvent[]): {
+  readonly redactedTrace: readonly EvalTraceEvent[];
+  readonly traceHash: string;
+} {
+  const redactedTrace = redactTrace(events);
+  return {
+    redactedTrace,
+    traceHash: createHash('sha256').update(JSON.stringify(redactedTrace)).digest('hex'),
+  };
 }
 
 function validateTrialLease(workerId: string, claimToken: string, leaseMs: number): void {

@@ -75,7 +75,14 @@ function redactValue(value: unknown): unknown {
   if (value && typeof value === 'object') {
     return redactRecord(value as Readonly<Record<string, unknown>>);
   }
-  return value;
+  return typeof value === 'string' ? redactString(value) : value;
+}
+
+function redactString(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [REDACTED]')
+    .replace(/\b(sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/gu, '$1-[REDACTED]')
+    .replace(/\b(api[_-]?key|token|password|secret)=([^&\s]+)/giu, '$1=[REDACTED]');
 }
 
 function numberValue(value: unknown): number {
@@ -84,6 +91,9 @@ function numberValue(value: unknown): number {
 
 function durationValue(events: readonly EvalTraceEvent[]): number | undefined {
   const start = events.find(({ type }) => type === 'run.started')?.payload?.timestamp;
-  const end = [...events].reverse().find(({ type }) => type === 'run.completed')?.payload?.timestamp;
-  return typeof start === 'number' && typeof end === 'number' && end >= start ? end - start : undefined;
+  const end = [...events].reverse().find(({ type }) => type === 'run.completed')
+    ?.payload?.timestamp;
+  return typeof start === 'number' && typeof end === 'number' && end >= start
+    ? end - start
+    : undefined;
 }

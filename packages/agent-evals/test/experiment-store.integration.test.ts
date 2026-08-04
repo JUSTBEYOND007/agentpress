@@ -2,11 +2,31 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import {
+  actionProposals,
+  agentRuns,
+  agentTasks,
+  appUsers,
+  approvals,
+  articleRevisions,
+  articles,
   connectDatabase,
+  conversationBranches,
+  conversationMessages,
+  conversations,
+  editProposalBatches,
+  editProposalDecisions,
+  editProposals,
   evalArms,
   evalExperiments,
   evalRunTraces,
   evalTrials,
+  evidenceRecords,
+  executionPlans,
+  planRevisions,
+  rootRequests,
+  runEvents,
+  taskResults,
+  toolCalls,
   workspaces,
 } from '@agentpress/database';
 import { eq } from 'drizzle-orm';
@@ -200,6 +220,287 @@ describeWithDatabase('evaluation experiment persistence', () => {
       .from(evalTrials)
       .where(eq(evalTrials.id, trialIds[0] ?? ''));
     expect(succeeded).toEqual([{ status: 'succeeded' }]);
+  });
+
+  it('captures the complete persisted Run fact chain without copying sensitive bodies', async () => {
+    const store = new ExperimentStore(connection.db);
+    const workspaceId = randomUUID();
+    const userId = randomUUID();
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const messageId = randomUUID();
+    const requestId = randomUUID();
+    const runId = randomUUID();
+    const planId = randomUUID();
+    const planRevisionId = randomUUID();
+    const taskId = randomUUID();
+    const toolCallId = randomUUID();
+    const articleId = randomUUID();
+    const revisionId = randomUUID();
+    const editProposalId = randomUUID();
+    const startedAt = new Date('2026-08-04T01:00:00.000Z');
+    const settledAt = new Date('2026-08-04T01:00:01.000Z');
+
+    await connection.db.transaction(async (transaction) => {
+      await transaction.insert(workspaces).values({ id: workspaceId, name: 'Trace workspace' });
+      await transaction.insert(appUsers).values({
+        id: userId,
+        logtoSubject: `trace:${userId}`,
+        displayName: 'Trace evaluator',
+      });
+      await transaction.insert(conversations).values({
+        id: conversationId,
+        workspaceId,
+        title: 'Trace conversation',
+      });
+      await transaction.insert(conversationBranches).values({ id: branchId, conversationId });
+      await transaction.insert(conversationMessages).values({
+        id: messageId,
+        branchId,
+        role: 'user',
+        sequence: 1,
+        content: [{ type: 'text', text: 'evaluate' }],
+        stable: true,
+      });
+      await transaction.insert(rootRequests).values({
+        id: requestId,
+        branchId,
+        messageId,
+        requestedByUserId: userId,
+        idempotencyKey: `trace:${requestId}`,
+      });
+      await transaction.insert(agentRuns).values({
+        id: runId,
+        workspaceId,
+        branchId,
+        rootRequestId: requestId,
+        mode: 'planned',
+        status: 'running',
+      });
+      await transaction.insert(runEvents).values([
+        {
+          id: randomUUID(),
+          runId,
+          sequence: 1,
+          eventType: 'run.started',
+          payload: { apiKey: 'raw-key', note: 'Bearer opaque-token' },
+          createdAt: startedAt,
+        },
+        {
+          id: randomUUID(),
+          runId,
+          sequence: 2,
+          eventType: 'run.completed',
+          payload: { usage: { inputTokens: 2, outputTokens: 1, costUsd: 0.01 } },
+          createdAt: settledAt,
+        },
+      ]);
+      await transaction.insert(executionPlans).values({ id: planId, runId });
+      await transaction.insert(planRevisions).values({
+        id: planRevisionId,
+        planId,
+        revisionNumber: 1,
+        reason: 'initial',
+        summary: 'Evaluate persisted facts',
+      });
+      await transaction.insert(agentTasks).values({
+        id: taskId,
+        runId,
+        planRevisionId,
+        objective: 'Collect evidence',
+        criticality: 'required',
+        owner: 'researcher',
+        acceptanceCriteria: ['Evidence persisted'],
+        outputSchema: { type: 'object', properties: { answer: { type: 'string' } } },
+        toolPolicy: { allow: ['knowledge.search'] },
+        budget: { maxCalls: 2 },
+        status: 'succeeded',
+        attempt: 1,
+        completedAt: settledAt,
+      });
+      await transaction.insert(taskResults).values({
+        id: randomUUID(),
+        taskId,
+        attempt: 1,
+        status: 'succeeded',
+        summary: 'done',
+        artifacts: [{ id: 'artifact-secret-body' }],
+        evidence: [{ id: 'evidence-secret-body' }],
+        usage: { inputTokens: 2, outputTokens: 1 },
+        warnings: [],
+        createdAt: settledAt,
+      });
+      await transaction.insert(toolCalls).values({
+        id: toolCallId,
+        runId,
+        taskId,
+        providerToolCallId: 'provider-call-1',
+        toolId: 'knowledge.search',
+        toolVersion: '1.0.0',
+        arguments: { query: 'private body', apiKey: 'tool-secret' },
+        argumentsHash: 'arguments-hash',
+        risk: 'read_only',
+        sideEffect: 'none',
+        idempotencyKey: 'private-idempotency-key',
+        status: 'succeeded',
+        output: { answer: 'private output', token: 'output-secret' },
+        settledAt,
+      });
+      await transaction.insert(approvals).values({
+        id: randomUUID(),
+        toolCallId,
+        requestedFromUserId: userId,
+        decidedByUserId: userId,
+        decision: 'approved',
+        toolVersion: '1.0.0',
+        argumentsHash: 'arguments-hash',
+        displayedSideEffect: 'none',
+        estimatedCost: { usd: 0 },
+        expiresAt: new Date('2026-08-04T02:00:00.000Z'),
+        decidedAt: settledAt,
+      });
+      await transaction.insert(evidenceRecords).values({
+        id: randomUUID(),
+        runId,
+        taskId,
+        sourceType: 'knowledge',
+        sourceUri: 'https://example.com/private',
+        title: 'Private title',
+        excerpt: 'Private excerpt',
+        sourceRevision: 'knowledge@1',
+        contentHash: 'evidence-content-hash',
+        metadata: { apiKey: 'metadata-secret' },
+      });
+      await transaction.insert(articles).values({ id: articleId, workspaceId, title: 'Trace' });
+      await transaction.insert(articleRevisions).values({
+        id: revisionId,
+        articleId,
+        revisionNumber: 1,
+        schemaVersion: 1,
+        document: { type: 'doc', content: [] },
+        documentHash: 'document-hash',
+        source: 'manual',
+        createdByUserId: userId,
+      });
+      await transaction.insert(actionProposals).values({
+        id: randomUUID(),
+        sourceRunId: runId,
+        articleId,
+        baseRevisionId: revisionId,
+        requestedByUserId: userId,
+        instruction: 'Private instruction',
+        summary: 'Private summary',
+        selectedBlocks: [{ blockId: 'block-1', contentHash: 'block-hash' }],
+        grantedCapabilities: ['article.edit'],
+        status: 'rejected',
+        expiresAt: new Date('2026-08-04T02:00:00.000Z'),
+      });
+      await transaction.insert(editProposals).values({
+        id: editProposalId,
+        articleId,
+        runId,
+        baseRevisionId: revisionId,
+        operations: [{ operationId: 'operation-1', replacement: 'Private replacement' }],
+        diffs: [{ before: 'private', after: 'private' }],
+        reviewMode: 'granular',
+        sourceToolCallId: toolCallId,
+        status: 'accepted',
+        expiresAt: new Date('2026-08-04T02:00:00.000Z'),
+      });
+      await transaction.insert(editProposalBatches).values({
+        id: randomUUID(),
+        proposalId: editProposalId,
+        runId,
+        batchNumber: 1,
+        operations: [{ operationId: 'operation-1', replacement: 'Private replacement' }],
+        diffs: [{ before: 'private', after: 'private' }],
+        beforeHash: 'before-hash',
+        afterHash: 'after-hash',
+        status: 'active',
+      });
+      await transaction.insert(editProposalDecisions).values({
+        proposalId: editProposalId,
+        operationId: 'operation-1',
+        decision: 'accepted',
+        decidedByUserId: userId,
+        decidedAt: settledAt,
+      });
+    });
+
+    const created = await store.createExperiment({
+      workspaceId,
+      name: `persisted-trace-${randomUUID()}`,
+      datasetVersion: 'trace@1',
+      config: {},
+      arms: [
+        {
+          name: 'baseline',
+          model: 'provider/model',
+          promptVersion: 'main@1',
+          skillVersions: {},
+          toolPolicyVersion: 'tools@1',
+          contextPolicyVersion: 'context@1',
+        },
+      ],
+    });
+    const [trialId] = await store.enqueueTrials({
+      armId: created.armIds[0] ?? '',
+      caseIds: ['trace-case'],
+      attempts: 1,
+      seed: 'trace-seed',
+    });
+    await store.startExperiment(created.experimentId);
+    const claim = await store.claimTrial({
+      trialId: trialId ?? '',
+      workerId: 'trace-worker',
+      claimToken: randomUUID(),
+      leaseMs: 60_000,
+      runId,
+    });
+    await expect(store.capturePersistedTrialTrace(trialId ?? '')).rejects.toThrow(/must settle/u);
+    await expect(
+      store.settleTrial({
+        trialId: trialId ?? '',
+        claimToken: claim?.claimToken ?? '',
+        status: 'succeeded',
+        resultMetrics: { succeeded: true },
+      }),
+    ).rejects.toThrow(/Agent Run is terminal/u);
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'completed', completedAt: settledAt })
+      .where(eq(agentRuns.id, runId));
+    await store.settleTrial({
+      trialId: trialId ?? '',
+      claimToken: claim?.claimToken ?? '',
+      status: 'succeeded',
+      resultMetrics: { succeeded: true },
+    });
+
+    const trace = await store.getTrialTrace(trialId ?? '');
+    expect(trace?.events.map(({ type }) => type)).toEqual(
+      expect.arrayContaining([
+        'run.started',
+        'run.completed',
+        'task.fact',
+        'task.settlement',
+        'tool.settlement',
+        'approval.settlement',
+        'evidence.persisted',
+        'action_proposal.settlement',
+        'edit_proposal.settlement',
+        'proposal_batch.settlement',
+        'proposal_operation.settlement',
+      ]),
+    );
+    const serialized = JSON.stringify(trace?.events);
+    expect(serialized).not.toContain('raw-key');
+    expect(serialized).not.toContain('opaque-token');
+    expect(serialized).not.toContain('private body');
+    expect(serialized).not.toContain('private output');
+    expect(serialized).not.toContain('Private excerpt');
+    expect(serialized).not.toContain('Private replacement');
+    expect(serialized).toContain('[REDACTED]');
   });
 
   it('fences an expired worker and retries in a fresh sandbox', async () => {
