@@ -42,6 +42,7 @@ import type {
   RuntimeUsage,
 } from './contracts.js';
 import { convertAgentPressMessages } from './current-turn.js';
+import { adaptProviderSchema, providerFromId } from './schema-compatibility.js';
 
 type PiBackend = {
   readonly models: Models;
@@ -143,7 +144,10 @@ export class PiRuntimeAdapter implements AgentRuntime {
         systemPrompt: request.systemPrompt,
         model: this.backend.model,
         messages: request.history.map(toPiMessage),
-        tools: request.tools?.map((tool) => toPiTool(tool, request.runId)) ?? [],
+        tools:
+          request.tools?.map((tool) =>
+            toPiTool(tool, request.runId, providerFromId(this.backend.model.provider)),
+          ) ?? [],
         thinkingLevel: 'off',
       },
       streamFn: this.backend.models.streamSimple.bind(this.backend.models),
@@ -316,12 +320,17 @@ function estimateRequestTokens(request: RuntimeRequest): number {
   return Math.ceil(Buffer.byteLength(serialized, 'utf8') / 4);
 }
 
-function toPiTool(tool: RuntimeTool, runId: string): AgentTool {
+function toPiTool(tool: RuntimeTool, runId: string, provider: ReturnType<typeof providerFromId>): AgentTool {
+  const adaptation = adaptProviderSchema(tool.parameters, {
+    provider,
+    strict:
+      tool.constrainedSampling !== false && tool.constrainedSampling?.strict === 'require',
+  });
   return {
     name: tool.name,
     label: tool.label,
     description: tool.description,
-    parameters: tool.parameters,
+    parameters: adaptation.schema,
     ...(tool.constrainedSampling ? { constrainedSampling: tool.constrainedSampling } : {}),
     ...(tool.executionMode ? { executionMode: tool.executionMode } : {}),
     execute: async (providerToolCallId, parameters, signal, onUpdate) => {
