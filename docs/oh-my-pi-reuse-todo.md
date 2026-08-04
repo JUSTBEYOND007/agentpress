@@ -270,17 +270,22 @@ TODO：
 TODO：
 
 - [ ] 先对照 `packages/agent-context/src/memory.ts`、`memory_candidates` 和 PostgreSQL 检索实现，记录缺口。
-- [ ] 短期 Memory 采用 Conversation Summary、最近消息、当前 Run facts 和 Task Results，不另建并行事实源。
+- [x] 短期 Memory 采用 Conversation Summary、最近消息、当前 Run facts 和 Task Results，不另建并行事实源。
+      `packages/agent-context/src/context-assembler.ts` 只接收 Context Candidate/已接受 Memory，
+      Summary/Run facts/Task Results 由上游 Context Pack 装配，不建立第二事实源。
 - [x] 定义长期 Memory 类型：fact、preference、decision、commitment、goal、event、instruction、learning、
       error、artifact，并映射到现有 Memory Candidate 状态机。
 - [x] 复制并适配 vector + FTS + temporal decay + importance 的混合召回与排序测试。
 - [ ] 评估 MMR、query intent、episodic graph、entity/triple 和 consolidation 的独立纯逻辑复用价值。
 - [x] Memory extraction 只能生成用户可见 Candidate；接受后才可检索，Specialist 不能直接写长期 Memory。
-- [ ] 不复制关键词模式作为权威分类；用结构化模型输出加确定性 Schema 校验，并保留人工覆盖。
+- [x] 不复制关键词模式作为权威分类；用结构化模型输出加确定性 Schema 校验，并保留人工覆盖。
+      Memory Candidate 通过结构化字段和 PostgreSQL 状态决策，检索不使用关键词分类授权。
 - [x] 增加 workspace/user 隔离、source Evidence、confidence、validity、supersedes、删除和导出契约。
       删除写入 `deleted` tombstone 并清除 subject/value/source/evidence，导出默认排除 tombstone；API 只允许当前 workspace 成员操作自己的 Memory。
 - [x] Consolidation 不得覆盖原始候选或 provenance；新事实通过 supersedes 链替代旧事实。
-- [ ] 建立相反语义测试：拒绝的记忆不召回、跨 workspace 不召回、过期事实不作为当前事实、指令不变权限。
+- [x] 建立相反语义测试：拒绝的记忆不召回、跨 workspace 不召回、过期事实不作为当前事实、指令不变权限。
+      `packages/agent-context/test/context.test.ts` 覆盖 rejected、跨 user、过期和 instruction-like
+      memory；Context Pack 将记忆固定标记为 untrusted 且不产生 capability。
 - [ ] 真实目标模型评估 accepted-memory precision、recall、污染率和跨租户泄漏为零。
 
 首选本地落点：`packages/agent-context/`、`packages/knowledge-retrieval/`、`packages/database/`。
