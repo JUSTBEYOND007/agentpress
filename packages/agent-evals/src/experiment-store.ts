@@ -16,6 +16,10 @@ import {
   type EvalRegressionPoint,
 } from './experiment-report.js';
 import { redactTrace, type EvalTraceEvent } from './trace-metrics.js';
+import {
+  createEvalSandboxDescriptor,
+  type EvalSandboxDescriptor,
+} from './sandbox-policy.js';
 
 export type EvalArmInput = {
   readonly name: string;
@@ -280,6 +284,33 @@ export class ExperimentStore {
     const row = rows[0];
     if (!row) return undefined;
     return { traceHash: row.traceHash, events: row.events as readonly EvalTraceEvent[] };
+  }
+
+  /** Resolves sandbox resources from persisted trial ownership facts. */
+  public async getTrialSandboxDescriptor(
+    trialId: string,
+    allowedHosts: readonly string[] = [],
+  ): Promise<EvalSandboxDescriptor | undefined> {
+    const rows = await this.database
+      .select({
+        trialId: evalTrials.id,
+        armId: evalArms.id,
+        experimentId: evalExperiments.id,
+      })
+      .from(evalTrials)
+      .innerJoin(evalArms, eq(evalArms.id, evalTrials.armId))
+      .innerJoin(evalExperiments, eq(evalExperiments.id, evalArms.experimentId))
+      .where(eq(evalTrials.id, trialId))
+      .limit(1);
+    const row = rows[0];
+    return row
+      ? createEvalSandboxDescriptor({
+          experimentId: row.experimentId,
+          armId: row.armId,
+          trialId: row.trialId,
+          allowedHosts,
+        })
+      : undefined;
   }
 
   public async listRegressionTrend(input: {
