@@ -18,6 +18,7 @@ import {
   appendRunEvent,
   type AgentPressDatabase,
   conversationBranches,
+  conversationCompactions,
   conversationMessages,
   conversations,
   checkpoints,
@@ -34,7 +35,7 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, desc, eq, gt, inArray, lt, lte, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -52,12 +53,19 @@ import {
 } from './contracts.js';
 import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
-import { projectConversationHistory } from './agent-transcript-projector.js';
+import {
+  projectConversationHistory,
+  readConversationCompactionBoundary,
+} from './agent-transcript-projector.js';
 import { RunContextService } from './run-context-service.js';
 import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
 import { projectRunExecutionFacts } from './run-execution-facts.js';
 import { projectRunProgress } from './run-progress.js';
 import { ArtifactQueryService, type ArtifactLookupResult } from './artifact-query-service.js';
+import {
+  ConversationCompactionService,
+  type ConversationCompactionResult,
+} from './conversation-compaction-service.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -84,12 +92,18 @@ export class DirectRunService {
   private readonly plannedRuns: PlannedRunExecutor;
   private readonly contexts: RunContextService;
   private readonly artifactQueries: ArtifactQueryService;
+  private readonly compactions: ConversationCompactionService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.plannedRuns = new PlannedRunExecutor(options);
     this.artifactQueries = new ArtifactQueryService(options.database);
+    this.compactions = new ConversationCompactionService({
+      database: options.database,
+      runtimeFactory: options.runtimeFactory,
+      createId: this.createId,
+    });
     this.contexts = new RunContextService(
       options.database,
       options.systemPrompt,
@@ -206,6 +220,54 @@ export class DirectRunService {
             createdAt: message.createdAt,
           })),
         );
+      const parentCompactions = await transaction
+        .select()
+        .from(conversationCompactions)
+        .where(
+          and(
+            eq(conversationCompactions.branchId, branchId),
+            eq(conversationCompactions.status, 'completed'),
+            lte(conversationCompactions.firstKeptMessageSequence, forkPoint.sequence),
+          ),
+        )
+        .orderBy(desc(conversationCompactions.version))
+        .limit(1);
+      const parentCompaction = parentCompactions[0];
+      if (parentCompaction && parentCompaction.firstKeptMessageSequence !== null) {
+        const sourceFrom = copied.find(
+          ({ message }) => message.sequence === parentCompaction.sourceFromSequence,
+        );
+        const sourceThrough = copied.find(
+          ({ message }) => message.sequence === parentCompaction.sourceThroughSequence,
+        );
+        const firstKept = copied.find(
+          ({ message }) => message.sequence === parentCompaction.firstKeptMessageSequence,
+        );
+        if (sourceFrom && sourceThrough && firstKept) {
+          await transaction.insert(conversationCompactions).values({
+            id: this.createId(),
+            branchId: newBranchId,
+            version: 1,
+            status: 'completed',
+            reason: 'branch_fork',
+            sourceFromMessageId: sourceFrom.id,
+            sourceFromSequence: parentCompaction.sourceFromSequence,
+            sourceThroughMessageId: sourceThrough.id,
+            sourceThroughSequence: parentCompaction.sourceThroughSequence,
+            firstKeptMessageId: firstKept.id,
+            firstKeptMessageSequence: parentCompaction.firstKeptMessageSequence,
+            summary: parentCompaction.summary,
+            shortSummary: parentCompaction.shortSummary,
+            tokensBefore: parentCompaction.tokensBefore,
+            tokenCount: parentCompaction.tokenCount,
+            preserveData: parentCompaction.preserveData,
+            model: parentCompaction.model,
+            promptVersion: parentCompaction.promptVersion,
+            reserveTokens: parentCompaction.reserveTokens,
+            reserveProvenance: parentCompaction.reserveProvenance,
+          });
+        }
+      }
       return {
         branchId: newBranchId,
         parentBranchId: branchId,
@@ -372,7 +434,11 @@ export class DirectRunService {
       const messageSequence = (sequenceRows[0]?.sequence ?? 0) + 1;
       const existingMessage = input.existingMessageId
         ? await transaction
-            .select({ id: conversationMessages.id, content: conversationMessages.content })
+            .select({
+              id: conversationMessages.id,
+              content: conversationMessages.content,
+              sequence: conversationMessages.sequence,
+            })
             .from(conversationMessages)
             .where(
               and(
@@ -444,6 +510,8 @@ export class DirectRunService {
       });
       const contextPack = await this.contexts.prepare(transaction, {
         runId,
+        branchId: input.branchId,
+        rootMessageSequence: existingRoot?.sequence ?? messageSequence,
         workspaceId: branch.workspaceId,
         userId: input.userId,
         mentionTargetIds: input.mentionTargetIds ?? [],
@@ -760,6 +828,38 @@ export class DirectRunService {
 
   public enqueueFollowUp(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
     return this.enqueueQueuedFollowUp(runId, content);
+  }
+
+  public async compactConversation(
+    branchId: string,
+    userId: string,
+    signal?: AbortSignal,
+  ): Promise<ConversationCompactionResult> {
+    const membership = await this.options.database
+      .select({ role: workspaceMembers.role })
+      .from(conversationBranches)
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+      .innerJoin(
+        workspaceMembers,
+        and(
+          eq(workspaceMembers.workspaceId, conversations.workspaceId),
+          eq(workspaceMembers.userId, userId),
+        ),
+      )
+      .where(eq(conversationBranches.id, branchId))
+      .limit(1);
+    if (!membership[0]) {
+      throw new AgentApplicationError(
+        'unauthorized_user',
+        'User cannot compact a conversation outside their workspace',
+      );
+    }
+    return this.compactions.compact({
+      branchId,
+      reason: 'manual',
+      force: true,
+      ...(signal ? { signal } : {}),
+    });
   }
 
   public async cancelFollowUp(runId: string, followUpId: string): Promise<boolean> {
@@ -1184,6 +1284,13 @@ export class DirectRunService {
       throw new Error(`Root message for Agent Run ${runId} is invalid`);
     }
 
+    const contextPack = await this.contexts.load(runId);
+    if (!contextPack) throw new Error(`Agent Run ${runId} has no persisted Context Pack`);
+    const compactedBoundary = readConversationCompactionBoundary(
+      contextPack.manifest,
+      run.branchId,
+      run.messageSequence,
+    );
     const historyRows = await this.options.database
       .select({ content: conversationMessages.content })
       .from(conversationMessages)
@@ -1192,6 +1299,9 @@ export class DirectRunService {
           eq(conversationMessages.branchId, run.branchId),
           eq(conversationMessages.stable, true),
           lt(conversationMessages.sequence, run.messageSequence),
+          ...(compactedBoundary === undefined
+            ? []
+            : [gte(conversationMessages.sequence, compactedBoundary)]),
         ),
       )
       .orderBy(desc(conversationMessages.sequence))
@@ -1202,8 +1312,6 @@ export class DirectRunService {
         return message ? [message] : [];
       }),
     );
-    const contextPack = await this.contexts.load(runId);
-    if (!contextPack) throw new Error(`Agent Run ${runId} has no persisted Context Pack`);
     const answeredQuestions = await this.options.database
       .select({ prompt: runQuestions.prompt, answer: runQuestions.answer })
       .from(runQuestions)
@@ -1518,9 +1626,16 @@ export class DirectRunService {
     });
 
     const terminal = durableEvents.at(-1)?.eventType;
+    const compactionEvent =
+      terminal === 'run.cancelled'
+        ? undefined
+        : await this.compactAfterSettlement(branchId, runId);
     if (terminal !== 'run.cancelled') await this.activateNextFollowUp(branchId);
     for (const event of durableEvents) {
       await this.options.publisher.publish({ durable: true, event });
+    }
+    if (compactionEvent) {
+      await this.options.publisher.publish({ durable: true, event: compactionEvent });
     }
     const response: ExecuteDirectRunResult = {
       runId,
@@ -1534,6 +1649,41 @@ export class DirectRunService {
             : 'failed',
     };
     return response;
+  }
+
+  private async compactAfterSettlement(
+    branchId: string,
+    runId: string,
+  ): Promise<DurableRunEvent | undefined> {
+    try {
+      const result = await this.compactions.compact({ branchId, reason: 'automatic' });
+      if (result.status === 'not_needed') return undefined;
+      const persisted = await this.options.database.transaction((transaction) =>
+        appendRunEvent(transaction, {
+          id: this.createId(),
+          runId,
+          eventType:
+            result.status === 'completed'
+              ? 'conversation.compaction_completed'
+              : 'conversation.compaction_failed',
+          payload: { compactionId: result.compactionId, version: result.version },
+        }),
+      );
+      return toDurableEvent(persisted);
+    } catch (error) {
+      const persisted = await this.options.database.transaction((transaction) =>
+        appendRunEvent(transaction, {
+          id: this.createId(),
+          runId,
+          eventType: 'conversation.compaction_failed',
+          payload: {
+            code: 'persistence_error',
+            message: error instanceof Error ? error.message : 'Conversation compaction failed',
+          },
+        }),
+      );
+      return toDurableEvent(persisted);
+    }
   }
 
   private async activateNextFollowUp(branchId: string): Promise<void> {

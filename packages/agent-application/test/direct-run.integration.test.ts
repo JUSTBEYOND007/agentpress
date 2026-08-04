@@ -10,6 +10,7 @@ import {
   agentTranscriptEntries,
   agentTasks,
   agentRuns,
+  appendConversationCompaction,
   approvals,
   appUsers,
   artifacts,
@@ -19,6 +20,7 @@ import {
   connectDatabase,
   contextPacks,
   conversationBranches,
+  conversationCompactions,
   conversationMessages,
   conversations,
   executionPlans,
@@ -782,6 +784,68 @@ describeWithDatabase('Direct Run application flow', () => {
     await expect(
       service.forkBranch(randomUUID(), branchId, source.messageId, ids.user),
     ).rejects.toMatchObject({ code: 'branch_not_found' });
+  });
+
+  it('rebinds an inherited compaction to copied child-branch messages', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Compacted fork',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const messageIds = Array.from({ length: 6 }, () => randomUUID());
+    await connection.db.insert(conversationMessages).values(
+      messageIds.map((id, index) => ({
+        id,
+        branchId,
+        role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        sequence: index + 1,
+        content: [
+          {
+            type: 'agentpress.runtime-message',
+            version: 1,
+            message: {
+              role: index % 2 === 0 ? 'user' : 'assistant',
+              content: `message-${String(index + 1)}`,
+              timestamp: Date.now(),
+            },
+          },
+        ],
+        stable: true,
+      })),
+    );
+    const parent = await appendConversationCompaction(connection.db, {
+      id: randomUUID(),
+      branchId,
+      reason: 'manual',
+      sourceFromSequence: 1,
+      sourceThroughSequence: 4,
+      firstKeptMessageSequence: 5,
+      summary: 'Earlier branch summary',
+      tokensBefore: 200,
+      tokenCount: 20,
+      preserveData: { evidenceIds: [] },
+      model: 'test/model',
+      promptVersion: 'agentpress.conversation-compaction@1',
+      reserveTokens: 100,
+      reserveProvenance: 'explicit',
+    });
+
+    const fork = await service.forkBranch(conversationId, branchId, messageIds[5] ?? '', ids.user);
+    const childRows = await connection.db
+      .select()
+      .from(conversationCompactions)
+      .where(eq(conversationCompactions.branchId, fork.branchId));
+    expect(childRows[0]).toMatchObject({
+      version: 1,
+      reason: 'branch_fork',
+      summary: parent.summary,
+      previousCompactionId: null,
+    });
+    expect(childRows[0]?.sourceFromMessageId).not.toBe(parent.sourceFromMessageId);
+    expect(childRows[0]?.firstKeptMessageId).not.toBe(parent.firstKeptMessageId);
   });
 
   it('versions declarative Skills and requires confirmation before recalling Agent memory', async () => {

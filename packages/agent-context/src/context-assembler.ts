@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { ContextCandidate, ContextKind, ContextPack } from './contracts.js';
+import type {
+  ContextCandidate,
+  ContextKind,
+  ContextPack,
+  ConversationCompactionReference,
+} from './contracts.js';
 
 const shares: Readonly<Record<ContextKind, number>> = {
   policy: 0.1,
@@ -16,6 +21,7 @@ export function assembleContext(input: {
   readonly acceptedMemoryIds: ReadonlySet<string>;
   readonly skillVersions?: Readonly<Record<string, string>>;
   readonly retrievalVersion?: string;
+  readonly conversationCompaction?: ConversationCompactionReference;
 }): ContextPack {
   const reservedOutputTokens = Math.ceil(input.contextWindow * 0.2);
   const maxInputTokens = input.contextWindow - reservedOutputTokens;
@@ -65,6 +71,9 @@ export function assembleContext(input: {
     tokenCount: included.reduce((sum, item) => sum + item.tokenCount, 0),
     skillVersions: input.skillVersions ?? {},
     ...(input.retrievalVersion ? { retrievalVersion: input.retrievalVersion } : {}),
+    ...(input.conversationCompaction
+      ? { conversationCompaction: input.conversationCompaction }
+      : {}),
   };
   return {
     content,

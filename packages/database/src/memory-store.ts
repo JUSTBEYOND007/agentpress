@@ -6,6 +6,8 @@ export type ProposeMemoryInput = {
   readonly id: string;
   readonly workspaceId: string;
   readonly userId: string;
+  readonly sourceRunId?: string;
+  readonly sourceToolCallId?: string;
   readonly subject: string;
   readonly value: string;
   readonly valueHash: string;

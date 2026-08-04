@@ -117,6 +117,33 @@ export function projectConversationHistory(
   return natural.slice(-limit);
 }
 
+export function readConversationCompactionBoundary(
+  manifest: Readonly<Record<string, unknown>>,
+  branchId: string,
+  beforeMessageSequence: number,
+): number | undefined {
+  const reference = manifest.conversationCompaction;
+  if (!isRecord(reference)) return undefined;
+  const firstKept = reference.firstKeptMessageSequence;
+  const sourceThrough = reference.sourceThroughSequence;
+  if (
+    reference.branchId !== branchId ||
+    typeof reference.id !== 'string' ||
+    typeof reference.version !== 'number' ||
+    !Number.isSafeInteger(reference.version) ||
+    reference.version < 1 ||
+    typeof sourceThrough !== 'number' ||
+    !Number.isSafeInteger(sourceThrough) ||
+    typeof firstKept !== 'number' ||
+    !Number.isSafeInteger(firstKept) ||
+    firstKept <= sourceThrough ||
+    firstKept > beforeMessageSequence
+  ) {
+    return undefined;
+  }
+  return firstKept;
+}
+
 export function projectCommittedTranscript(
   entries: readonly TranscriptEntry[],
   dialogueLimit = DEFAULT_DIALOGUE_LIMIT,

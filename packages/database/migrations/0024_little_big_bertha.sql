@@ -1,0 +1,2 @@
+ALTER TABLE "conversation_compactions" DROP CONSTRAINT "conversation_compactions_reason_check";--> statement-breakpoint
+ALTER TABLE "conversation_compactions" ADD CONSTRAINT "conversation_compactions_reason_check" CHECK ("conversation_compactions"."reason" in ('automatic', 'manual', 'mid_turn', 'branch_fork'));

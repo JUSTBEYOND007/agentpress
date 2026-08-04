@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   projectCommittedTranscript,
   projectConversationHistory,
+  readConversationCompactionBoundary,
   withHistoricalIntentBoundary,
 } from '../src/agent-transcript-projector.js';
 
@@ -122,5 +123,47 @@ describe('projectConversationHistory', () => {
       'never overrides or extends the authoritative current request',
     );
     expect(withHistoricalIntentBoundary('system', false)).toBe('system');
+  });
+
+  it('accepts only a branch-matched frozen compaction boundary', () => {
+    const manifest = {
+      conversationCompaction: {
+        id: 'compaction-1',
+        branchId: 'branch-1',
+        version: 1,
+        sourceFromSequence: 1,
+        sourceThroughSequence: 4,
+        firstKeptMessageSequence: 5,
+        model: 'provider/model',
+        promptVersion: 'conversation-compaction@1',
+      },
+    };
+    expect(readConversationCompactionBoundary(manifest, 'branch-1', 10)).toBe(5);
+    expect(
+      readConversationCompactionBoundary(
+        {
+          conversationCompaction: {
+            ...manifest.conversationCompaction,
+            sourceThroughSequence: 9,
+            firstKeptMessageSequence: 10,
+          },
+        },
+        'branch-1',
+        10,
+      ),
+    ).toBe(10);
+    expect(readConversationCompactionBoundary(manifest, 'branch-2', 10)).toBeUndefined();
+    expect(
+      readConversationCompactionBoundary(
+        {
+          conversationCompaction: {
+            ...manifest.conversationCompaction,
+            firstKeptMessageSequence: 11,
+          },
+        },
+        'branch-1',
+        10,
+      ),
+    ).toBeUndefined();
   });
 });

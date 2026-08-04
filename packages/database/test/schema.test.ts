@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentRuns,
+  conversationCompactions,
   DATABASE_AGENT_RUN_STATES,
   DATABASE_AGENT_TASK_STATES,
   DATABASE_TOOL_CALL_STATES,
@@ -18,6 +19,7 @@ describe('database schema', () => {
     expect(getTableConfig(agentRuns).name).toBe('agent_runs');
     expect(getTableConfig(runEvents).name).toBe('run_events');
     expect(getTableConfig(toolCalls).name).toBe('tool_calls');
+    expect(getTableConfig(conversationCompactions).name).toBe('conversation_compactions');
   });
 
   it('defines transactional messaging tables', () => {

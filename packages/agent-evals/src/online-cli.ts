@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { DirectRunService, type RunEventPublisher } from '@agentpress/agent-application';
-import { PiRuntimeAdapter, type RuntimeUsage } from '@agentpress/agent-runtime';
+import type { RuntimeUsage } from '@agentpress/agent-runtime';
 import {
   actionProposals,
   agentRuns,
@@ -33,6 +33,7 @@ import {
   type OrchestratorEvalHarness,
 } from './online-runner.js';
 import { EVAL_CATEGORIES, evalScenarios, type EvalCategory } from './scenarios.js';
+import { loadOnlineModelConfiguration } from './online-model-configuration.js';
 
 const { values } = parseArgs({
   options: {
@@ -46,7 +47,7 @@ const { values } = parseArgs({
   },
   strict: true,
 });
-const modelConfiguration = loadModelConfiguration();
+const modelConfiguration = loadOnlineModelConfiguration();
 const proModel = modelConfiguration.proModel;
 const turboModel = modelConfiguration.turboModel;
 const databaseUrl = requiredEnv('DATABASE_URL');
@@ -368,48 +369,6 @@ function encodeEvalMessage(message: Readonly<Record<string, unknown>>): readonly
   return [{ type: 'agentpress.runtime-message', version: 1, message }];
 }
 
-function loadModelConfiguration() {
-  const customApiKey = process.env.AGENT_MODEL_API_KEY?.trim();
-  const customBaseUrl = process.env.AGENT_MODEL_BASE_URL?.trim();
-  const customProModel = process.env.AGENT_MODEL_PRO?.trim();
-  const customTurboModel = process.env.AGENT_MODEL_TURBO?.trim();
-  const customValues = [customApiKey, customBaseUrl, customProModel];
-  if (customValues.some(Boolean) && !customValues.every(Boolean)) {
-    throw new Error(
-      'AGENT_MODEL_API_KEY, AGENT_MODEL_BASE_URL and AGENT_MODEL_PRO must be configured together',
-    );
-  }
-  if (customApiKey && customBaseUrl && customProModel) {
-    return {
-      kind: 'openai-compatible' as const,
-      proModel: customProModel,
-      turboModel: customTurboModel,
-      create: (modelId: string) =>
-        PiRuntimeAdapter.forOpenAICompatible({
-          providerId: 'agentpress-eval',
-          providerName: 'AgentPress eval provider',
-          apiKey: customApiKey,
-          baseUrl: customBaseUrl,
-          modelId,
-        }),
-    };
-  }
-
-  const arkApiKey = requiredEnv('ARK_API_KEY');
-  const arkBaseUrl = process.env.ARK_BASE_URL?.trim();
-  return {
-    kind: 'volcengine-ark' as const,
-    proModel: requiredEnv('ARK_MODEL_PRO'),
-    turboModel: process.env.ARK_MODEL_TURBO?.trim(),
-    create: (modelId: string) =>
-      PiRuntimeAdapter.forArk({
-        apiKey: arkApiKey,
-        modelId,
-        ...(arkBaseUrl ? { baseUrl: arkBaseUrl } : {}),
-      }),
-  };
-}
-
 async function approvePendingToolCall(
   runId: string,
   userId: string,
@@ -437,7 +396,7 @@ async function approvePendingToolCall(
   throw new Error(`Timed out waiting for required approval in Run ${runId}`);
 }
 
-function requiredEnv(name: 'ARK_API_KEY' | 'ARK_MODEL_PRO' | 'DATABASE_URL'): string {
+function requiredEnv(name: 'DATABASE_URL'): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required for full Orchestrator online eval`);
   return value;

@@ -1,6 +1,7 @@
 export * from './contracts.js';
 export * from './context-governance-service.js';
 export * from './conversation-overview-service.js';
+export * from './conversation-compaction-service.js';
 export * from './action-capability-policy.js';
 export * from './agent-turn-profile.js';
 export * from './agent-session-runner.js';
@@ -10,6 +11,7 @@ export * from './artifact-query-service.js';
 export * from './direct-run-service.js';
 export * from './planned-run-executor.js';
 export * from './persistent-tool-bridge.js';
+export * from './pi-conversation-summary-generator.js';
 export * from './run-context-service.js';
 export * from './execution-fact-cache.js';
 export * from './terminal-outcome-policy.js';

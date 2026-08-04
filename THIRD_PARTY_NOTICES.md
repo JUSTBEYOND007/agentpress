@@ -55,6 +55,17 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
 - Changes: replaced code-file line anchors and short xxHash tags with canonical Tiptap block JSON, stable block IDs, and SHA-256; retained snapshot preflight, stale-input rejection, atomic apply, and preview-first behavior.
 - Verification: revision drift, block drift, atomic preflight, partial acceptance, structural inserts, ProseMirror step replay, and red-delete/green-insert diff output.
 
+### Oh My Pi Conversation Compaction Behavior
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` (`v17.1.8`)
+- Source: `packages/agent/src/compaction/compaction.ts`, `packages/coding-agent/src/session/session-entries.ts`, `packages/coding-agent/src/session/session-context.ts`
+- Tests: `packages/agent/test/compaction-error-status.test.ts`, `packages/agent/test/tool-protection.test.ts`, `packages/coding-agent/test/compaction-serialization.test.ts`, `packages/coding-agent/test/compaction-lifecycle.test.ts`, `packages/coding-agent/test/agent-session-branching.test.ts`
+- Local: `packages/database/src/conversation-compaction-store.ts`, `packages/database/test/conversation-compaction.integration.test.ts`, `packages/agent-context/src/context-assembler.ts`, `packages/agent-application/src/agent-transcript-projector.ts`, and corresponding tests
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: replaced JSONL session entries with branch-scoped append-only PostgreSQL facts; replaced entry IDs with stable message IDs and sequences; froze the effective compaction reference in each Run Context Pack; retained incremental lineage, keep-boundary projection, reserve provenance, and failure records without replacing the last successful summary.
+- Verification: schema/unit/type checks, branch isolation, incremental lineage, malformed boundary fail-closed behavior, and failed-compaction fallback. PostgreSQL integration remains required in an environment with `pgvector` installed.
+
 ### InkOS Structured Action Envelope
 
 - Upstream: `https://github.com/Narcooo/inkos`

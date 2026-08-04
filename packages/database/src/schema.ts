@@ -174,6 +174,12 @@ export const memoryCandidates = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => appUsers.id, { onDelete: 'cascade' }),
+    sourceRunId: uuid('source_run_id').references((): AnyPgColumn => agentRuns.id, {
+      onDelete: 'set null',
+    }),
+    sourceToolCallId: uuid('source_tool_call_id').references((): AnyPgColumn => toolCalls.id, {
+      onDelete: 'set null',
+    }),
     subject: varchar('subject', { length: 200 }).notNull(),
     value: text('value').notNull(),
     valueHash: varchar('value_hash', { length: 80 }).notNull(),
@@ -199,6 +205,7 @@ export const memoryCandidates = pgTable(
       table.status,
       table.updatedAt,
     ),
+    index('memory_candidates_source_run_idx').on(table.sourceRunId),
     check('memory_candidates_confidence_check', sql`${table.confidenceBps} between 0 and 10000`),
   ],
 );
@@ -303,6 +310,96 @@ export const conversationMessages = pgTable(
     check(
       'conversation_messages_role_check',
       sql`${table.role} in ('system', 'user', 'assistant', 'tool')`,
+    ),
+  ],
+);
+
+export const conversationCompactions = pgTable(
+  'conversation_compactions',
+  {
+    id: uuid('id').primaryKey(),
+    branchId: uuid('branch_id')
+      .notNull()
+      .references(() => conversationBranches.id, { onDelete: 'cascade' }),
+    previousCompactionId: uuid('previous_compaction_id').references(
+      (): AnyPgColumn => conversationCompactions.id,
+      { onDelete: 'set null' },
+    ),
+    version: integer('version').notNull(),
+    status: varchar('status', { length: 24 }).notNull(),
+    reason: varchar('reason', { length: 24 }).notNull(),
+    sourceFromMessageId: uuid('source_from_message_id')
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: 'restrict' }),
+    sourceFromSequence: bigint('source_from_sequence', { mode: 'number' }).notNull(),
+    sourceThroughMessageId: uuid('source_through_message_id')
+      .notNull()
+      .references(() => conversationMessages.id, { onDelete: 'restrict' }),
+    sourceThroughSequence: bigint('source_through_sequence', { mode: 'number' }).notNull(),
+    firstKeptMessageId: uuid('first_kept_message_id').references(() => conversationMessages.id, {
+      onDelete: 'restrict',
+    }),
+    firstKeptMessageSequence: bigint('first_kept_message_sequence', { mode: 'number' }),
+    summary: text('summary'),
+    shortSummary: text('short_summary'),
+    tokensBefore: integer('tokens_before').notNull(),
+    tokenCount: integer('token_count'),
+    preserveData: jsonb('preserve_data').$type<Readonly<Record<string, unknown>>>().notNull(),
+    model: varchar('model', { length: 240 }).notNull(),
+    promptVersion: varchar('prompt_version', { length: 160 }).notNull(),
+    reserveTokens: integer('reserve_tokens').notNull(),
+    reserveProvenance: varchar('reserve_provenance', { length: 24 }).notNull(),
+    failure: jsonb('failure').$type<{
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: boolean;
+      readonly details?: Readonly<Record<string, unknown>>;
+    }>(),
+    createdAt,
+  },
+  (table) => [
+    unique('conversation_compactions_branch_version_unique').on(table.branchId, table.version),
+    index('conversation_compactions_branch_status_version_idx').on(
+      table.branchId,
+      table.status,
+      table.version,
+    ),
+    check('conversation_compactions_version_check', sql`${table.version} > 0`),
+    check('conversation_compactions_status_check', sql`${table.status} in ('completed', 'failed')`),
+    check(
+      'conversation_compactions_reason_check',
+      sql`${table.reason} in ('automatic', 'manual', 'mid_turn', 'branch_fork')`,
+    ),
+    check(
+      'conversation_compactions_source_range_check',
+      sql`${table.sourceFromSequence} > 0 and ${table.sourceThroughSequence} >= ${table.sourceFromSequence}`,
+    ),
+    check(
+      'conversation_compactions_token_check',
+      sql`${table.tokensBefore} >= 0 and ${table.reserveTokens} >= 0 and (${table.tokenCount} is null or ${table.tokenCount} >= 0)`,
+    ),
+    check(
+      'conversation_compactions_reserve_provenance_check',
+      sql`${table.reserveProvenance} in ('default', 'explicit', 'proportional')`,
+    ),
+    check(
+      'conversation_compactions_result_check',
+      sql`(
+        ${table.status} = 'completed'
+        and length(trim(${table.summary})) > 0
+        and ${table.firstKeptMessageId} is not null
+        and ${table.firstKeptMessageSequence} > ${table.sourceThroughSequence}
+        and ${table.tokenCount} is not null
+        and ${table.failure} is null
+      ) or (
+        ${table.status} = 'failed'
+        and ${table.summary} is null
+        and ${table.shortSummary} is null
+        and ${table.firstKeptMessageId} is null
+        and ${table.firstKeptMessageSequence} is null
+        and ${table.tokenCount} is null
+        and ${table.failure} is not null
+      )`,
     ),
   ],
 );
