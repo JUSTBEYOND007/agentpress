@@ -32,8 +32,9 @@ describeWithDatabase('evaluation experiment persistence', () => {
 
   it('persists versioned arms, atomic trials, metrics, and a redacted trace', async () => {
     const store = new ExperimentStore(connection.db);
+    const experimentName = `routing-${randomUUID()}`;
     const created = await store.createExperiment({
-      name: `routing-${randomUUID()}`,
+      name: experimentName,
       datasetVersion: 'routing@1',
       config: { sandbox: 'isolated-schema' },
       arms: [
@@ -104,6 +105,35 @@ describeWithDatabase('evaluation experiment persistence', () => {
     expect(traces[0]?.redactedTrace).toEqual([
       { type: 'run.started', payload: { apiKey: '[REDACTED]', timestamp: 1 } },
       { type: 'run.completed', payload: { timestamp: 2 } },
+    ]);
+    const report = await store.getExperimentReport(created.experimentId);
+    expect(report?.arms[0]).toMatchObject({
+      name: 'baseline',
+      totalTrials: 3,
+      decidedTrials: 2,
+      passedTrials: 1,
+      failedTrials: 1,
+      traceCount: 1,
+    });
+    await expect(store.getTrialTrace(trialIds[0] ?? '')).resolves.toMatchObject({
+      traceHash: traces[0]?.traceHash,
+      events: [
+        { type: 'run.started', payload: { apiKey: '[REDACTED]', timestamp: 1 } },
+        { type: 'run.completed', payload: { timestamp: 2 } },
+      ],
+    });
+    await expect(
+      store.listRegressionTrend({
+        experimentName,
+        arm: 'baseline',
+        metricKey: 'succeeded',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        experimentId: created.experimentId,
+        datasetVersion: 'routing@1',
+        value: 0.5,
+      }),
     ]);
     expect(await store.cancelExperiment(created.experimentId)).toBe(true);
     const retry = await connection.db

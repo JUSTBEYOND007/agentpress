@@ -7,3 +7,4 @@ export * from './judge.js';
 export * from './judge-calibration.js';
 export * from './trace-metrics.js';
 export * from './experiment-store.js';
+export * from './experiment-report.js';

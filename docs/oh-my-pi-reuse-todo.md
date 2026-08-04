@@ -378,9 +378,14 @@ TODO：
 - [ ] 复用 Harbor 的容器化任务思想，建立隔离数据库/schema、对象存储前缀、Kafka topic/group 和网络策略。
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
 - [ ] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
-- [ ] 结果指标覆盖任务成功、Schema 有效率、引用正确性、文章质量、编辑最小性和无答案准确率。
+- [x] 结果指标覆盖任务成功、Schema 有效率、引用正确性、文章质量、编辑最小性和无答案准确率。
+      `packages/agent-evals/src/experiment-report.ts` 将这些结果指标与过程指标统一投影，并只使用已决 trial 计算聚合值。
 - [x] 过程指标覆盖路由、委派、工具选择、参数、审批、重试、循环、恢复、重复副作用、token、成本和延迟。
-- [ ] 复制 benchmark-native metric definition、统一 trace normalization 和 arm comparison 行为。
+- [x] 复制 benchmark-native metric definition、统一 trace normalization 和 arm comparison 行为。
+      已核对 Oh My Pi 固定 commit `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` 的
+      `packages/metaharness/src/benchmarks.ts`、`experiments.ts` 及
+      `test/benchmarks.test.ts`、`test/experiments.test.ts`；AgentPress 适配为
+      `readEvalMetricDefinitions`、`buildEvalExperimentReport`、`buildEvalRegressionTrend`，事实源仍为 PostgreSQL。
 - [x] 增加独立 LLM Judge：固定 rubric、结构化输出、blind comparison、位置随机化和 judge 模型/版本记录。
 - [x] 增加 Judge 校准集、人工金标、与确定性指标的冲突报告，以及多次 Judge 方差阈值。
       `packages/agent-evals/src/judge-calibration.ts` 提供人工金标准确率/MAE、重复 Judge 一致率/方差和安全/确定性冲突报告；Judge 输出由宿主再次做结构化校验。

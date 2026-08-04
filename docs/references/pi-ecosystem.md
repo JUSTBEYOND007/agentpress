@@ -36,6 +36,19 @@ The executable, test-first adoption backlog for Oh My Pi is maintained in
 current reuse row: every item remains a TODO until dependency reuse or copied behavior has passed the
 license, adapter-boundary, PostgreSQL-authority, contract-test, and real-model gates recorded there.
 
+### MetaHarness behavior adopted without copying its store
+
+At `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`, MetaHarness declares benchmark-owned metric
+definitions in `packages/metaharness/src/benchmarks.ts`, normalizes native traces into a common
+shape, and compares arms using decided trials in `packages/metaharness/src/experiments.ts`.
+The contracts are exercised by `packages/metaharness/test/benchmarks.test.ts` and
+`packages/metaharness/test/experiments.test.ts`, including weighted metrics, in-flight cost
+projection, and arm comparison behavior. AgentPress adopted those pure behaviors in
+`packages/agent-evals/src/experiment-report.ts` and its tests, while deliberately rejecting the
+upstream filesystem/SQLite store: PostgreSQL `evalExperiments`, `evalArms`, `evalTrials`, and
+`evalRunTraces` remain the only source of truth. No upstream source file was copied, so no new
+third-party notice is required for this adapter.
+
 ## Primary Pi Business Reference
 
 **Primary reference: [`Narcooo/inkos`](https://github.com/Narcooo/inkos) at release `v1.7.2`, commit `c7851b94ada27f2810b903e96d8fec6f33e5d9bc`.** This is the default upstream to inspect before changing AgentPress conversation-to-writing behavior, long-form writing orchestration, review, recovery, or session restoration. Other repositories in this document remain secondary references for narrower infrastructure concerns.

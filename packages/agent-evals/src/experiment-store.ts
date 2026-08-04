@@ -7,8 +7,14 @@ import {
   evalTrials,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 
+import {
+  buildEvalExperimentReport,
+  buildEvalRegressionTrend,
+  type EvalExperimentReport,
+  type EvalRegressionPoint,
+} from './experiment-report.js';
 import { redactTrace, type EvalTraceEvent } from './trace-metrics.js';
 
 export type EvalArmInput = {
@@ -219,6 +225,86 @@ export class ExperimentStore {
     const id = rows[0]?.id;
     if (!id) throw new Error('Evaluation trace could not be persisted');
     return id;
+  }
+
+  public async getExperimentReport(
+    experimentId: string,
+  ): Promise<EvalExperimentReport | undefined> {
+    const experiments = await this.database
+      .select()
+      .from(evalExperiments)
+      .where(eq(evalExperiments.id, experimentId))
+      .limit(1);
+    const experiment = experiments[0];
+    if (!experiment) return undefined;
+    const arms = await this.database
+      .select()
+      .from(evalArms)
+      .where(eq(evalArms.experimentId, experimentId))
+      .orderBy(asc(evalArms.createdAt), asc(evalArms.name));
+    const armIds = arms.map(({ id }) => id);
+    const trials =
+      armIds.length === 0
+        ? []
+        : await this.database
+            .select()
+            .from(evalTrials)
+            .where(inArray(evalTrials.armId, armIds))
+            .orderBy(asc(evalTrials.caseId), asc(evalTrials.attempt));
+    const trialIds = trials.map(({ id }) => id);
+    const traces =
+      trialIds.length === 0
+        ? []
+        : await this.database
+            .select({ trialId: evalRunTraces.trialId, traceHash: evalRunTraces.traceHash })
+            .from(evalRunTraces)
+            .where(inArray(evalRunTraces.trialId, trialIds));
+    return buildEvalExperimentReport({ experiment, arms, trials, traces });
+  }
+
+  public async getTrialTrace(trialId: string): Promise<
+    | {
+        readonly traceHash: string;
+        readonly events: readonly EvalTraceEvent[];
+      }
+    | undefined
+  > {
+    const rows = await this.database
+      .select({
+        traceHash: evalRunTraces.traceHash,
+        events: evalRunTraces.redactedTrace,
+      })
+      .from(evalRunTraces)
+      .where(eq(evalRunTraces.trialId, trialId))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return undefined;
+    return { traceHash: row.traceHash, events: row.events as readonly EvalTraceEvent[] };
+  }
+
+  public async listRegressionTrend(input: {
+    readonly experimentName: string;
+    readonly arm: string;
+    readonly metricKey: string;
+    readonly limit?: number;
+  }): Promise<readonly EvalRegressionPoint[]> {
+    const limit = input.limit ?? 20;
+    if (!input.experimentName.trim() || !input.arm.trim() || !input.metricKey.trim()) {
+      throw new TypeError('Regression trend requires experiment, arm, and metric identities');
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Regression trend limit must be between 1 and 100');
+    }
+    const rows = await this.database
+      .select({ id: evalExperiments.id })
+      .from(evalExperiments)
+      .where(eq(evalExperiments.name, input.experimentName))
+      .orderBy(desc(evalExperiments.createdAt))
+      .limit(limit);
+    const reports = (
+      await Promise.all(rows.reverse().map(({ id }) => this.getExperimentReport(id)))
+    ).filter((report): report is EvalExperimentReport => report !== undefined);
+    return buildEvalRegressionTrend(reports, { arm: input.arm, metricKey: input.metricKey });
   }
 }
 
