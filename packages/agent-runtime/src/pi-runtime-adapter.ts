@@ -21,6 +21,10 @@ import {
 } from '@earendil-works/pi-ai';
 
 import { createArkBackend, type ArkRuntimeConfig } from './ark-provider.js';
+import {
+  createOpenAICompatibleBackend,
+  type OpenAICompatibleRuntimeConfig,
+} from './openai-compatible-provider.js';
 import type {
   AgentRuntime,
   RuntimeAssistantContentBlock,
@@ -37,6 +41,7 @@ import type {
   RuntimeUserMessage,
   RuntimeUsage,
 } from './contracts.js';
+import { convertAgentPressMessages } from './current-turn.js';
 
 type PiBackend = {
   readonly models: Models;
@@ -68,10 +73,28 @@ export type FauxRuntimeConfig = {
 export class PiRuntimeAdapter implements AgentRuntime {
   private activeAgent: Agent | undefined;
 
-  private constructor(private readonly backend: PiBackend) {}
+  public readonly identity: {
+    readonly provider: string;
+    readonly model: string;
+    readonly contextWindow: number;
+    readonly maxOutputTokens: number;
+  };
+
+  private constructor(private readonly backend: PiBackend) {
+    this.identity = {
+      provider: backend.model.provider,
+      model: backend.model.id,
+      contextWindow: backend.model.contextWindow,
+      maxOutputTokens: backend.model.maxTokens,
+    };
+  }
 
   public static forArk(config: ArkRuntimeConfig): PiRuntimeAdapter {
     return new PiRuntimeAdapter(createArkBackend(config));
+  }
+
+  public static forOpenAICompatible(config: OpenAICompatibleRuntimeConfig): PiRuntimeAdapter {
+    return new PiRuntimeAdapter(createOpenAICompatibleBackend(config));
   }
 
   public static forTests(config: FauxRuntimeConfig): PiRuntimeAdapter {
@@ -94,6 +117,17 @@ export class PiRuntimeAdapter implements AgentRuntime {
     sink: RuntimeEventSink,
     signal?: AbortSignal,
   ): Promise<RuntimeResult> {
+    const budget = this.identity.contextWindow - this.identity.maxOutputTokens;
+    const estimatedInput = estimateRequestTokens(request);
+    if (estimatedInput > budget) {
+      const error: RuntimeFailure = {
+        code: 'invalid_history',
+        message: `Model input budget exceeded (${String(estimatedInput)} > ${String(budget)} tokens)`,
+        retryable: false,
+      };
+      await sink({ type: 'run.failed', error });
+      return { status: 'failed', messages: [], error };
+    }
     const stableMessages: RuntimeMessage[] = request.history.filter(
       (message): message is RuntimeMessage => message.role !== 'tool',
     );
@@ -113,6 +147,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
         thinkingLevel: 'off',
       },
       streamFn: this.backend.models.streamSimple.bind(this.backend.models),
+      convertToLlm: convertAgentPressMessages,
       sessionId: request.runId,
       maxRetryDelayMs: 10_000,
       ...(request.beforeToolCall || request.maxToolCalls !== undefined
@@ -222,7 +257,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
       if (request.continuation) {
         await agent.continue();
       } else {
-        await agent.prompt(request.prompt);
+        await agent.prompt(request.currentTurn);
       }
 
       if (state.failure) {
@@ -265,6 +300,20 @@ export class PiRuntimeAdapter implements AgentRuntime {
     agent.steer(toPiMessage(message));
     return true;
   }
+}
+
+function estimateRequestTokens(request: RuntimeRequest): number {
+  const serialized = JSON.stringify({
+    systemPrompt: request.systemPrompt,
+    history: request.history,
+    currentTurn: request.currentTurn,
+    tools: request.tools?.map(({ name, description, parameters }) => ({
+      name,
+      description,
+      parameters,
+    })),
+  });
+  return Math.ceil(Buffer.byteLength(serialized, 'utf8') / 4);
 }
 
 function toPiTool(tool: RuntimeTool, runId: string): AgentTool {

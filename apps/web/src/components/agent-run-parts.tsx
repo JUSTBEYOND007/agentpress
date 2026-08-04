@@ -1,21 +1,19 @@
 'use client';
 
-import { ActionBarPrimitive, MessagePartPrimitive, MessagePrimitive } from '@assistant-ui/react';
+import { ActionBarPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import {
   Check,
   CircleAlert,
   Clock3,
-  Coins,
   Copy,
   ExternalLink,
   FileCheck2,
-  FileText,
   ListChecks,
-  RotateCcw,
   LoaderCircle,
+  RefreshCw,
   X,
 } from 'lucide-react';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import {
   activityLabel,
@@ -24,32 +22,23 @@ import {
   proposalFromPart,
   safeExternalUrl,
   statusLabel,
-  type Proposal,
 } from './agent-view-model';
-import {
-  numberValue,
-  recordValue,
-  stringValue,
-  type RunPart,
-} from '../lib/agentpress-assistant-runtime';
-
-export type RunActions = {
-  readonly decideTool: (toolCallId: string, decision: 'approved' | 'denied') => Promise<void>;
-  readonly answerQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
-  readonly decideProposal: (
-    proposalId: string,
-    decisions: Readonly<Record<string, 'accepted' | 'rejected'>>,
-  ) => Promise<Readonly<Record<string, unknown>>>;
-  readonly onArticleUpdated?: () => Promise<void>;
-  readonly onProposalReady?: (proposal: Proposal) => void;
-};
-
-export const RunActionsContext = createContext<RunActions | undefined>(undefined);
+import { recordValue, stringValue, type RunPart } from '../lib/agentpress-assistant-runtime';
+import { AssistantMarkdownPart, UserTextPart } from './agent-message-content';
+import { ExecutionTimelineRenderer } from './agent-execution-timeline';
+import { NoticePart } from './agent-notice-part';
+import { ReasoningPart } from './agent-reasoning-part';
+import { ArtifactPart } from './agent-artifact-drawer';
+import { ContextSourcesPart } from './agent-context-sources';
+import { AgentArticleChangePart } from './agent-article-change-part';
+import { useRunActions } from './agent-run-actions';
+import { AgentUsagePart } from './agent-usage-part';
+import { AgentProgressPart } from './agent-progress-part';
 
 export function UserMessage(): React.JSX.Element {
   return (
     <MessagePrimitive.Root className="aui-message aui-user-message">
-      <MessagePrimitive.Parts components={{ Text: MessageText }} />
+      <MessagePrimitive.Parts components={{ Text: UserTextPart }} />
     </MessagePrimitive.Root>
   );
 }
@@ -60,44 +49,118 @@ export function AssistantMessage(): React.JSX.Element {
       <div className="assistant-content">
         <MessagePrimitive.Parts
           components={{
-            Text: MessageText,
-            data: { by_name: { 'agentpress-run-part': RunPartRenderer } },
+            Text: AssistantMarkdownPart,
+            data: {
+              by_name: {
+                'agentpress-run-part': RunPartRenderer,
+                'agentpress-execution-timeline': ExecutionTimelineRenderer,
+              },
+            },
           }}
         />
         <ActionBarPrimitive.Root className="message-actions" hideWhenRunning>
           <ActionBarPrimitive.Copy aria-label="复制回答" title="复制回答">
             <Copy aria-hidden="true" size={13} />
           </ActionBarPrimitive.Copy>
+          <ActionBarPrimitive.Reload aria-label="创建分支并重新生成" title="重新生成">
+            <RefreshCw aria-hidden="true" size={13} />
+          </ActionBarPrimitive.Reload>
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
   );
 }
 
-function MessageText(): React.JSX.Element {
-  return <MessagePartPrimitive.Text className="message-text" smooth />;
-}
-
 function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Element | null {
   const part = parseRunPart(data);
   if (!part) return null;
+  if (part.type === 'reasoning') return <ReasoningPart part={part} />;
   if (part.type === 'plan') return <PlanPart part={part} />;
+  if (part.type === 'action-proposal') return <ActionProposalPart part={part} />;
   if (part.type === 'tool-approval') return <ApprovalPart part={part} />;
   if (part.type === 'ask-user') return <AskUserPart part={part} />;
   if (part.type === 'artifact') return <ArtifactPart part={part} />;
+  if (part.type === 'context') return <ContextSourcesPart part={part} />;
   if (part.type === 'evidence') return <EvidencePart part={part} />;
-  if (part.type === 'article-change') return <ArticleChangePart part={part} />;
-  if (part.type === 'usage') return <UsagePart part={part} />;
+  if (part.type === 'article-change') return <AgentArticleChangePart part={part} />;
+  if (part.type === 'usage') return <AgentUsagePart part={part} />;
+  if (part.type === 'progress') return <AgentProgressPart part={part} />;
   if (part.type === 'warning' || part.type === 'recovery') return <NoticePart part={part} />;
   if (part.type === 'activity') {
     const proposal = proposalFromPart(part);
     return proposal ? (
-      <ArticleChangePart part={part} proposal={proposal} />
+      <AgentArticleChangePart part={{ ...part, type: 'article-change' }} />
     ) : (
       <ActivityPart part={part} />
     );
   }
   return null;
+}
+
+function ActionProposalPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+  const actions = useRunActions();
+  const proposalId = stringValue(part.payload.id);
+  const [decision, setDecision] = useState<'confirmed' | 'rejected' | undefined>(() =>
+    part.status === 'action.confirmed'
+      ? 'confirmed'
+      : part.status === 'action.rejected'
+        ? 'rejected'
+        : undefined,
+  );
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+  const decide = (next: 'confirmed' | 'rejected'): void => {
+    if (!proposalId || pending || decision) return;
+    setPending(true);
+    setError(undefined);
+    void actions
+      .decideActionProposal(proposalId, next)
+      .then(() => {
+        setDecision(next);
+      })
+      .catch((reason: unknown) => {
+        setError(friendlyFailure(reason, '动作没有确认成功，请重试。'));
+      })
+      .finally(() => {
+        setPending(false);
+      });
+  };
+  return (
+    <section className="run-part action-proposal-part" aria-label="文章动作确认">
+      <div>
+        <strong>{stringValue(part.payload.summary) || '修改当前文章'}</strong>
+        <span>{stringValue(part.payload.instruction)}</span>
+      </div>
+      <div>
+        <button
+          aria-label="确认文章修改"
+          disabled={pending || Boolean(decision)}
+          onClick={() => {
+            decide('confirmed');
+          }}
+          title="确认"
+          type="button"
+        >
+          <Check size={14} />
+        </button>
+        <button
+          aria-label="拒绝文章修改"
+          disabled={pending || Boolean(decision)}
+          onClick={() => {
+            decide('rejected');
+          }}
+          title="拒绝"
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      {decision ? (
+        <p className="interaction-result">{decision === 'confirmed' ? '已确认' : '已拒绝'}</p>
+      ) : null}
+      {error ? <p className="interaction-error">{error}</p> : null}
+    </section>
+  );
 }
 
 function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
@@ -262,37 +325,6 @@ function AskUserPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   );
 }
 
-function ArtifactPart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const artifacts = Array.isArray(part.payload.artifacts)
-    ? part.payload.artifacts.map(recordValue)
-    : [part.payload];
-  return (
-    <section className="run-part artifact-part">
-      <h3>
-        <FileText size={14} />
-        产出
-      </h3>
-      {artifacts.map((artifact, index) => (
-        <div key={stringValue(artifact.id) || stringValue(artifact.artifactId) || String(index)}>
-          <strong>
-            {stringValue(artifact.title) || artifactLabel(stringValue(artifact.type))}
-          </strong>
-          <span>{stringValue(artifact.summary)}</span>
-          {safeExternalUrl(artifact.url) || safeExternalUrl(artifact.downloadUrl) ? (
-            <a
-              href={safeExternalUrl(artifact.url) ?? safeExternalUrl(artifact.downloadUrl)}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              打开 <ExternalLink aria-hidden="true" size={11} />
-            </a>
-          ) : null}
-        </div>
-      ))}
-    </section>
-  );
-}
-
 function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const href = safeExternalUrl(part.payload.url) ?? safeExternalUrl(part.payload.sourceUrl);
   return (
@@ -309,99 +341,4 @@ function EvidencePart({ part }: { readonly part: RunPart }): React.JSX.Element {
       <span>{stringValue(part.payload.source)}</span>
     </section>
   );
-}
-
-function ArticleChangePart({
-  part,
-  proposal = proposalFromPart(part),
-}: {
-  readonly part: RunPart;
-  readonly proposal?: Proposal;
-}): React.JSX.Element | null {
-  const actions = useRunActions();
-  useEffect(() => {
-    if (proposal) actions.onProposalReady?.(proposal);
-  }, [actions, proposal]);
-  if (!proposal) return null;
-  return (
-    <section className="run-part proposal-preview">
-      <div className="proposal-heading">
-        <div>
-          <strong>文章修改</strong>
-          <span>{proposal.operations.length} 处修改</span>
-        </div>
-        <button
-          className="proposal-view-button"
-          onClick={() => {
-            actions.onProposalReady?.(proposal);
-          }}
-          type="button"
-        >
-          显示修改
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const fallback =
-    part.type === 'recovery'
-      ? '连接中断，正在恢复当前工作。'
-      : '这一步没有完成，你可以调整要求后继续。';
-  return (
-    <div className={`run-part notice-part notice-${part.type}`}>
-      <RotateCcw size={13} />
-      <span>
-        {friendlyFailure(
-          stringValue(part.payload.message) || recordValue(part.payload.failure),
-          fallback,
-        )}
-      </span>
-    </div>
-  );
-}
-
-function UsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const usage = recordValue(part.payload.usage);
-  const tokens = numberValue(usage.inputTokens) + numberValue(usage.outputTokens);
-  const cost = numberValue(part.payload.credits) || numberValue(part.payload.cost);
-  const duration = numberValue(part.payload.durationMs);
-  return (
-    <details className="run-part usage-part">
-      <summary>
-        <Coins size={13} />
-        运行详情
-      </summary>
-      <div>
-        {cost > 0 ? <span>{cost.toLocaleString()} 积分</span> : null}
-        {duration > 0 ? <span>{formatDuration(duration)}</span> : null}
-        {tokens > 0 ? <span>{tokens.toLocaleString()} tokens</span> : null}
-      </div>
-    </details>
-  );
-}
-
-function artifactLabel(type: string): string {
-  const labels: Record<string, string> = {
-    ResearchBrief: '研究摘要',
-    Outline: '文章大纲',
-    ArticleDraft: '文章草稿',
-    EditProposal: '文章修改',
-    ClaimReview: '事实核查',
-    ImagePlan: '配图方案',
-    AssetProposal: '素材建议',
-  };
-  return labels[type] ?? '结构化产出';
-}
-
-function formatDuration(durationMs: number): string {
-  if (durationMs < 60_000) return `${String(Math.max(1, Math.round(durationMs / 1000)))} 秒`;
-  return `${String(Math.round(durationMs / 60_000))} 分钟`;
-}
-
-function useRunActions(): RunActions {
-  const actions = useContext(RunActionsContext);
-  if (!actions) throw new Error('Run actions are unavailable');
-  return actions;
 }

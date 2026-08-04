@@ -19,13 +19,14 @@
     "build": "tsc -p tsconfig.build.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/migrate.ts",
-    "dev": "tsc -p tsconfig.json --watch",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test drizzle.config.ts",
     "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
     "test:integration": "vitest run test/postgres.integration.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/contracts": "workspace:*",
     "@agentpress/domain": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "catalog:"

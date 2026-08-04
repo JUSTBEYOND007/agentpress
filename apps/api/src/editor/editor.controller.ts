@@ -31,6 +31,8 @@ type AutosaveBody = {
   readonly steps?: unknown;
 };
 type ProposalBody = { readonly decisions?: unknown };
+type OperationDecisionBody = { readonly decision?: unknown };
+type RevertBatchBody = { readonly userId?: never };
 type CommitDraftBody = {
   readonly writerLeaseId?: unknown;
   readonly expectedServerSequence?: unknown;
@@ -155,6 +157,55 @@ export class EditorController {
         userId: user.id,
         decisions: decisions as Record<string, 'accepted' | 'rejected'>,
       });
+    } catch (error) {
+      throw mapEditorError(error);
+    }
+  }
+
+  @Get('articles/:articleId/edit-proposals/pending')
+  public async pendingProposal(
+    @Param('articleId') articleId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertArticleAccess(articleId, user.id);
+    return { proposal: (await this.proposals.getPending(articleId)) ?? null };
+  }
+
+  @Post('edit-proposals/:proposalId/operations/:operationId/decision')
+  @HttpCode(200)
+  public async decideOperation(
+    @Param('proposalId') proposalId: string,
+    @Param('operationId') operationId: string,
+    @Body() body: OperationDecisionBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (body.decision !== 'accepted' && body.decision !== 'rejected') {
+      throw new BadRequestException('decision must be accepted or rejected');
+    }
+    await this.authorization.assertProposalAccess(proposalId, user.id);
+    try {
+      return await this.proposals.decideOperation({
+        proposalId,
+        operationId,
+        userId: user.id,
+        decision: body.decision,
+      });
+    } catch (error) {
+      throw mapEditorError(error);
+    }
+  }
+
+  @Post('edit-proposals/:proposalId/batches/:batchId/revert')
+  @HttpCode(200)
+  public async revertBatch(
+    @Param('proposalId') proposalId: string,
+    @Param('batchId') batchId: string,
+    @Body() _body: RevertBatchBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertProposalAccess(proposalId, user.id);
+    try {
+      return await this.proposals.revertBatch({ proposalId, batchId, userId: user.id });
     } catch (error) {
       throw mapEditorError(error);
     }

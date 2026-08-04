@@ -28,38 +28,60 @@ export type ConversationView = {
   readonly title: string;
   readonly isDefault: boolean;
   readonly archivedAt?: string | null;
+  readonly parentBranchId?: string | null;
+  readonly forkedFromMessageId?: string | null;
+  readonly branchCreatedAt?: string;
+  readonly status?: string;
+  readonly latestRunId?: string;
+  readonly pendingReview?: boolean;
+  readonly unread?: boolean;
 };
 
 export type Proposal = {
   readonly proposalId: string;
-  readonly status: 'pending';
+  readonly status: 'pending' | 'partially_accepted' | 'accepted' | 'rejected' | 'expired';
   readonly articleId?: string;
   readonly baseRevisionId?: string;
   readonly operations: readonly EditOperation[];
+  readonly reviewMode?: 'granular' | 'document';
   readonly diffs: readonly DiffEntry[];
+  readonly batches?: readonly {
+    readonly id: string;
+    readonly batchNumber: number;
+    readonly status: string;
+  }[];
 };
 
 export function proposalFromPart(part: RunPart): Proposal | undefined {
   const output = recordValue(part.payload.output);
   const value = Object.keys(output).length > 0 ? output : part.payload;
   const proposalId = stringValue(value.proposalId);
-  if (
-    !proposalId ||
-    stringValue(part.payload.proposalStatus) !== 'pending' ||
-    !Array.isArray(value.operations) ||
-    !Array.isArray(value.diffs)
-  )
+  if (!proposalId || !Array.isArray(value.operations) || !Array.isArray(value.diffs))
     return undefined;
+  const status = proposalStatus(part.payload.proposalStatus);
   return {
     proposalId,
-    status: 'pending',
+    status,
     ...(stringValue(value.articleId) ? { articleId: stringValue(value.articleId) } : {}),
     ...(stringValue(value.baseRevisionId)
       ? { baseRevisionId: stringValue(value.baseRevisionId) }
       : {}),
     operations: value.operations as readonly EditOperation[],
+    reviewMode: value.reviewMode === 'document' ? 'document' : 'granular',
     diffs: value.diffs as readonly DiffEntry[],
+    batches: Array.isArray(value.batches)
+      ? (value.batches as NonNullable<Proposal['batches']>)
+      : [],
   };
+}
+
+function proposalStatus(value: unknown): Proposal['status'] {
+  return value === 'partially_accepted' ||
+    value === 'accepted' ||
+    value === 'rejected' ||
+    value === 'expired'
+    ? value
+    : 'pending';
 }
 
 export function parseRunPart(value: unknown): RunPart | undefined {
@@ -67,15 +89,19 @@ export function parseRunPart(value: unknown): RunPart | undefined {
   const type = stringValue(candidate.type);
   const allowed: readonly RunPart['type'][] = [
     'text',
+    'reasoning',
     'plan',
+    'action-proposal',
     'activity',
     'tool-approval',
     'ask-user',
     'evidence',
     'article-change',
     'artifact',
+    'context',
     'warning',
     'recovery',
+    'progress',
     'usage',
   ];
   if (!allowed.includes(type as RunPart['type'])) return undefined;
@@ -146,7 +172,8 @@ export function safeExternalUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined;
+    const webProtocol = url.protocol === 'https:' || url.protocol === 'http:';
+    return webProtocol && !url.username && !url.password ? url.toString() : undefined;
   } catch {
     return undefined;
   }

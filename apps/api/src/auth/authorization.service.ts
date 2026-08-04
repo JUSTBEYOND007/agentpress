@@ -1,6 +1,8 @@
 import {
   agentRuns,
   articles,
+  conversationBranches,
+  conversations,
   type AgentPressDatabase,
   editProposals,
   workspaceMembers,
@@ -52,6 +54,21 @@ export class AuthorizationService {
       .where(eq(agentRuns.id, runId))
       .limit(1);
     if (!rows[0]) throw new NotFoundException('Agent Run does not exist');
+    await this.assertWorkspaceMember(rows[0].workspaceId, userId);
+  }
+
+  public async assertConversationBranchAccess(
+    conversationId: string,
+    branchId: string,
+    userId: string,
+  ): Promise<void> {
+    const rows = await this.database
+      .select({ workspaceId: conversations.workspaceId })
+      .from(conversationBranches)
+      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+      .where(and(eq(conversations.id, conversationId), eq(conversationBranches.id, branchId)))
+      .limit(1);
+    if (!rows[0]) throw new NotFoundException('Conversation branch does not exist');
     await this.assertWorkspaceMember(rows[0].workspaceId, userId);
   }
 

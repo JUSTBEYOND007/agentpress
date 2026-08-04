@@ -1,5 +1,7 @@
 import type { TSchema } from 'typebox';
 
+import type { RuntimeCurrentTurn } from './current-turn.js';
+
 export type RuntimeUsage = {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -91,7 +93,7 @@ export type RuntimeRequest = {
   readonly runId: string;
   readonly systemPrompt: string;
   readonly history: readonly RuntimeTranscriptMessage[];
-  readonly prompt: string;
+  readonly currentTurn: RuntimeCurrentTurn;
   readonly tools?: readonly RuntimeTool[];
   readonly continuation?: boolean;
   readonly maxToolCalls?: number;
@@ -168,6 +170,12 @@ export type RuntimeResult =
 export type RuntimeEventSink = (event: RuntimeEvent) => Promise<void> | void;
 
 export type AgentRuntime = {
+  readonly identity?: {
+    readonly provider: string;
+    readonly model: string;
+    readonly contextWindow?: number;
+    readonly maxOutputTokens?: number;
+  };
   execute(
     request: RuntimeRequest,
     sink: RuntimeEventSink,

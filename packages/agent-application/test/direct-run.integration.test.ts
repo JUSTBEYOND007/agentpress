@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
+import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
+import { hashBlock } from '@agentpress/editor-patch';
 import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import {
   agentSessions,
@@ -10,6 +12,8 @@ import {
   agentRuns,
   approvals,
   appUsers,
+  artifacts,
+  artifactVersions,
   articleRevisions,
   articles,
   connectDatabase,
@@ -18,6 +22,7 @@ import {
   conversationMessages,
   conversations,
   executionPlans,
+  editProposals,
   planRevisions,
   rootRequests,
   runContextPacks,
@@ -26,7 +31,9 @@ import {
   runSkillBindings,
   skillRevisions,
   memoryCandidates,
+  modelSelections,
   mentionBindings,
+  queuedFollowups,
   taskResults,
   toolCalls,
   workspaceMembers,
@@ -34,11 +41,12 @@ import {
 } from '@agentpress/database';
 import { hashToolArguments, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  ActionProposalService,
   ContextGovernanceService,
   DirectRunService,
   PersistentToolBridge,
@@ -199,7 +207,440 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(
       await connection.db.select().from(runEvents).where(eq(runEvents.runId, second.runId)),
     ).toHaveLength(5);
+    const selections = await connection.db
+      .select({ purpose: modelSelections.purpose, selectedModel: modelSelections.selectedModel })
+      .from(modelSelections)
+      .where(eq(modelSelections.runId, second.runId));
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.purpose).toBe('main');
+    expect(typeof selections[0]?.selectedModel).toBe('string');
+    expect(selections[0]?.selectedModel).not.toBe('main');
     expect(published.some((event) => !event.durable)).toBe(true);
+  });
+
+  it('rejects unauthorized, missing, and stale context bindings before creating a Run', async () => {
+    const otherWorkspaceId = randomUUID();
+    const otherArticleId = randomUUID();
+    const otherRevisionId = randomUUID();
+    const otherDocument = { type: 'doc', content: [] };
+    await connection.db.insert(workspaces).values({
+      id: otherWorkspaceId,
+      name: 'Other Workspace',
+    });
+    await connection.db.insert(articles).values({
+      id: otherArticleId,
+      workspaceId: otherWorkspaceId,
+      title: 'Private article',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: otherRevisionId,
+      articleId: otherArticleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document: otherDocument,
+      documentHash: createHash('sha256').update(JSON.stringify(otherDocument)).digest('hex'),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: otherRevisionId })
+      .where(eq(articles.id, otherArticleId));
+
+    const base = {
+      conversationId: ids.conversation,
+      branchId: ids.branch,
+      userId: ids.user,
+      prompt: '读取上下文',
+    };
+    const runsBefore = await connection.db.select({ id: agentRuns.id }).from(agentRuns);
+    const unauthorizedBindings = [
+      [{ type: 'mention' as const, targetId: otherArticleId }],
+      [{ type: 'attachment' as const, attachmentId: randomUUID() }],
+      [{ type: 'evidence' as const, evidenceId: randomUUID() }],
+      [{ type: 'skill' as const, skillId: 'missing', version: '1.0.0' }],
+    ];
+    for (const contextBindings of unauthorizedBindings) {
+      await expect(
+        service.create({ ...base, idempotencyKey: randomUUID(), contextBindings }),
+      ).rejects.toMatchObject({ code: 'unauthorized_context' });
+    }
+    await expect(
+      service.create({
+        ...base,
+        idempotencyKey: randomUUID(),
+        contextBindings: [
+          {
+            type: 'article_selection',
+            articleId: ids.article,
+            revisionId: ids.articleRevision,
+            blocks: [{ blockId: 'mention-block', contentHash: 'stale-hash' }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_context' });
+
+    const runsAfter = await connection.db.select({ id: agentRuns.id }).from(agentRuns);
+    expect(runsAfter).toHaveLength(runsBefore.length);
+  });
+
+  it('settles an unexpected runtime initialization error instead of leaving the Run active', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Runtime failure',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const failedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => {
+          throw new Error('Runtime model is not configured');
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await failedService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '你好',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(failedService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'failed',
+    });
+    const rows = await connection.db
+      .select({ status: agentRuns.status, finalOutcome: agentRuns.finalOutcome })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(rows[0]).toMatchObject({
+      status: 'failed',
+      finalOutcome: {
+        error: {
+          code: 'runtime_error',
+          message: 'Runtime model is not configured',
+          retryable: false,
+        },
+      },
+    });
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.at(-1)?.eventType).toBe('run.failed');
+  });
+
+  it('settles an invalid persisted root message instead of blocking later commands', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Invalid persisted request',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const run = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '你好',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db
+      .update(conversationMessages)
+      .set({ content: [{ type: 'legacy-message' }] })
+      .where(eq(conversationMessages.id, run.messageId));
+
+    await expect(service.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'failed',
+    });
+    const rows = await connection.db
+      .select({ status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(rows[0]?.status).toBe('failed');
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.at(-1)?.eventType).toBe('run.failed');
+  });
+
+  it('leaves an aborted worker attempt recoverable instead of committing a business failure', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Interrupted worker',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const interruptedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => ({
+          execute: () => Promise.reject(new Error('Worker is shutting down')),
+        }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await interruptedService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '继续执行',
+      idempotencyKey: randomUUID(),
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(interruptedService.execute(run.runId, controller.signal)).rejects.toThrow();
+    const rows = await connection.db
+      .select({ status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(rows[0]?.status).toBe('running');
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.some(({ eventType }) => eventType === 'run.failed')).toBe(false);
+  });
+
+  it('creates button runs only from a server-built confirmed action envelope', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const proposalId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Confirmed edit',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const run = await service.createConfirmedAction({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      proposalId,
+      instruction: '继续上一段',
+      articleId: ids.article,
+      baseRevisionId: ids.articleRevision,
+      selectedBlocks: [],
+      grantedCapabilities: ['article.read', 'article.propose'],
+    });
+    const rows = await connection.db
+      .select({ actionEnvelope: rootRequests.actionEnvelope })
+      .from(rootRequests)
+      .where(eq(rootRequests.id, run.rootRequestId));
+    expect(rows[0]?.actionEnvelope).toMatchObject({
+      source: 'button',
+      actionProposalId: proposalId,
+      payload: { instruction: '继续上一段', articleId: ids.article },
+      grantedCapabilities: ['article.read', 'article.propose'],
+    });
+    const bindings = await connection.db
+      .select({ targetId: mentionBindings.targetId, revision: mentionBindings.revision })
+      .from(mentionBindings)
+      .where(eq(mentionBindings.runId, run.runId));
+    expect(bindings).toEqual([{ targetId: ids.article, revision: ids.articleRevision }]);
+  });
+
+  it('lets Main create a reviewable article draft without a plan or confirmation run', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Direct article editing',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const registry = new ToolRegistry();
+    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const toolCallsService = new ToolCallService({
+      database: connection.db,
+      publisher,
+      registry,
+    });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: toolCallsService,
+    });
+    const editRuntime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse(runtimeToolName('article.propose_edits', '1.0.0'), {
+          operations: [
+            {
+              operationId: 'main-replace',
+              kind: 'replace',
+              blockId: 'mention-block',
+              expectedHash: hashBlock({
+                type: 'paragraph',
+                attrs: { blockId: 'mention-block' },
+                content: [{ type: 'text', text: 'Mentioned immutable content' }],
+              }),
+              block: {
+                type: 'paragraph',
+                attrs: { blockId: 'mention-block' },
+                content: [{ type: 'text', text: 'Main edited content' }],
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const directEditService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => editRuntime },
+      runtimeToolFactory: bridge,
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await directEditService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '把正文改得更直接',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(directEditService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'completed',
+    });
+    const [proposals, plans, bindings] = await Promise.all([
+      connection.db.select().from(editProposals).where(eq(editProposals.runId, run.runId)),
+      connection.db.select().from(executionPlans).where(eq(executionPlans.runId, run.runId)),
+      connection.db.select().from(mentionBindings).where(eq(mentionBindings.runId, run.runId)),
+    ]);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.status).toBe('pending');
+    expect(plans).toHaveLength(0);
+    expect(bindings).toMatchObject([{ targetId: ids.article }]);
+    const projection = await directEditService.getProjection(run.runId);
+    const executionPart = projection?.parts.find(({ type }) => type === 'usage');
+    const executions = Array.isArray(executionPart?.payload.executions)
+      ? executionPart.payload.executions
+      : [];
+    expect(projection?.status).toBe('completed');
+    expect(executionPart?.status).toBe('execution.facts');
+    expect(executions).toMatchObject([
+      {
+        purpose: 'main',
+        provider: 'faux',
+        model: 'faux-1',
+        contextWindow: 128_000,
+        maxOutputTokens: 16_384,
+      },
+    ]);
+  });
+
+  it('loads only the requested persisted artifact version for its owning Run', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: '生成报告',
+      idempotencyKey: randomUUID(),
+    });
+    const artifactId = randomUUID();
+    await connection.db.insert(artifacts).values({
+      id: artifactId,
+      runId: run.runId,
+      type: 'ResearchBrief',
+      title: '持久化报告',
+      currentVersion: 1,
+    });
+    await connection.db.insert(artifactVersions).values({
+      id: randomUUID(),
+      artifactId,
+      version: 1,
+      summary: '版本一',
+      content: { markdown: '# 报告' },
+      contentHash: createHash('sha256')
+        .update(JSON.stringify({ markdown: '# 报告' }))
+        .digest('hex'),
+    });
+
+    await expect(service.getArtifact(run.runId, artifactId, 1)).resolves.toMatchObject({
+      status: 'found',
+      artifact: { id: artifactId, version: 1, summary: '版本一' },
+    });
+    const projection = await service.getProjection(run.runId);
+    expect(projection?.artifacts).toEqual([
+      {
+        id: artifactId,
+        type: 'ResearchBrief',
+        title: '持久化报告',
+        version: 1,
+        summary: '版本一',
+      },
+    ]);
+    expect(projection?.parts.find(({ type }) => type === 'artifact')?.payload).not.toHaveProperty(
+      'content',
+    );
+    await expect(service.getArtifact(run.runId, artifactId, 2)).resolves.toEqual({
+      status: 'stale',
+      currentVersion: 1,
+    });
+    await expect(service.getArtifact(run.runId, randomUUID(), 1)).resolves.toEqual({
+      status: 'not_found',
+    });
+  });
+
+  it('confirms a persisted action proposal idempotently into one authorized run', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Action proposal',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const source = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '继续上一段',
+      idempotencyKey: randomUUID(),
+      mentionTargetIds: [ids.article],
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'completed', completedAt: new Date() })
+      .where(eq(agentRuns.id, source.runId));
+    const actions = new ActionProposalService(connection.db, publisher);
+    const proposal = await actions.create({
+      runId: source.runId,
+      instruction: '继续上一段',
+      summary: '继续写作',
+      selectedBlocks: [],
+    });
+    const confirmed = await actions.confirm(proposal.id, ids.user, service);
+    const replay = await actions.confirm(proposal.id, ids.user, service);
+    expect(confirmed).toMatchObject({ status: 'confirmed' });
+    expect(replay.confirmedRunId).toBe(confirmed.confirmedRunId);
+    const confirmedRuns = await connection.db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.branchId, branchId));
+    expect(confirmedRuns).toHaveLength(2);
   });
 
   it('pins Mention, Skill, prompt and accepted memory into an immutable Context Manifest', async () => {
@@ -231,8 +672,116 @@ describeWithDatabase('Direct Run application flow', () => {
     const manifest = packs[0]?.manifest as { readonly skillVersions?: unknown } | undefined;
     const skillVersions = manifest?.skillVersions as Record<string, unknown> | undefined;
     expect(skillVersions?.concise).toEqual(expect.stringMatching(/^1\.0\.0:/u));
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({
+      context: {
+        manifest: {
+          included: expect.arrayContaining([
+            expect.objectContaining({ id: `article:${ids.article}`, kind: 'mention' }),
+            expect.objectContaining({ id: 'skill:concise', kind: 'policy' }),
+          ]) as unknown,
+        },
+        contextHash: packs[0]?.contentHash,
+      },
+    });
     await service.requestCancellation(run.runId);
     await service.execute(run.runId);
+  });
+
+  it('binds a regenerated Run to the copied fork message without duplicating the user turn', async () => {
+    const branchId = randomUUID();
+    const messageId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+      parentBranchId: ids.branch,
+    });
+    await connection.db.insert(conversationMessages).values({
+      id: messageId,
+      branchId,
+      role: 'user',
+      sequence: 1,
+      content: [
+        {
+          type: 'agentpress.runtime-message',
+          version: 1,
+          message: { role: 'user', content: '重新回答这条消息', timestamp: Date.now() },
+        },
+      ],
+      stable: true,
+    });
+
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: '重新回答这条消息',
+      existingMessageId: messageId,
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(run.messageId).toBe(messageId);
+    await expect(
+      connection.db
+        .select({ id: conversationMessages.id })
+        .from(conversationMessages)
+        .where(eq(conversationMessages.branchId, branchId)),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('forks at the exact stable message boundary and rejects unauthorized branch access', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const outsiderId = randomUUID();
+    await connection.db.insert(appUsers).values({
+      id: outsiderId,
+      logtoSubject: `logto|${outsiderId}`,
+      displayName: 'Outsider',
+    });
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Fork contract',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const source = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '分支根消息',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db.insert(conversationMessages).values({
+      id: randomUUID(),
+      branchId,
+      role: 'assistant',
+      sequence: 2,
+      content: [
+        {
+          type: 'agentpress.runtime-message',
+          version: 1,
+          message: { role: 'assistant', content: '不应被复制', timestamp: Date.now() },
+        },
+      ],
+      stable: true,
+    });
+
+    const fork = await service.forkBranch(conversationId, branchId, source.messageId, ids.user);
+    expect(fork).toMatchObject({
+      parentBranchId: branchId,
+      forkedFromMessageId: source.messageId,
+    });
+    const copied = await connection.db
+      .select({ id: conversationMessages.id, role: conversationMessages.role })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.branchId, fork.branchId));
+    expect(copied).toEqual([{ id: fork.forkedMessageId, role: 'user' }]);
+
+    await expect(
+      service.forkBranch(conversationId, branchId, source.messageId, outsiderId),
+    ).rejects.toMatchObject({ code: 'branch_not_found' });
+    await expect(
+      service.forkBranch(randomUUID(), branchId, source.messageId, ids.user),
+    ).rejects.toMatchObject({ code: 'branch_not_found' });
   });
 
   it('versions declarative Skills and requires confirmation before recalling Agent memory', async () => {
@@ -272,7 +821,10 @@ describeWithDatabase('Direct Run application flow', () => {
       async publish(event) {
         if (!event.durable && event.event.type === 'content.delta' && !cancellationRequested) {
           cancellationRequested = true;
-          await serviceReference.current?.requestCancellation(event.runId);
+          const first = await serviceReference.current?.requestCancellation(event.runId);
+          const repeated = await serviceReference.current?.requestCancellation(event.runId);
+          expect(first).toMatchObject({ outcome: 'accepted', status: 'cancelling' });
+          expect(repeated).toMatchObject({ outcome: 'accepted', status: 'cancelling' });
           controller.abort();
         }
       },
@@ -297,6 +849,7 @@ describeWithDatabase('Direct Run application flow', () => {
       prompt: '开始取消测试',
       idempotencyKey: randomUUID(),
     });
+    const queued = await cancellationService.enqueueFollowUp(run.runId, '取消后不应继续');
 
     await expect(cancellationService.execute(run.runId, controller.signal)).resolves.toMatchObject({
       status: 'cancelled',
@@ -306,6 +859,26 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(agentRuns)
       .where(eq(agentRuns.id, run.runId));
     expect(rows[0]?.status).toBe('cancelled');
+    const userMessages = await connection.db
+      .select({ id: conversationMessages.id })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.branchId, cancellationBranch),
+          eq(conversationMessages.role, 'user'),
+        ),
+      );
+    expect(userMessages).toHaveLength(1);
+    const followUps = await connection.db
+      .select({ status: queuedFollowups.status })
+      .from(queuedFollowups)
+      .where(eq(queuedFollowups.id, queued.directiveId));
+    expect(followUps).toEqual([{ status: 'cancelled' }]);
+    const branchRuns = await connection.db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.branchId, cancellationBranch));
+    expect(branchRuns).toHaveLength(1);
   });
 
   it('persists and executes a five-Specialist DAG with isolated Context Packs', async () => {
@@ -460,7 +1033,9 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(true);
     await expect(service.cancelSteering(run.runId, directive.directiveId)).resolves.toBe(false);
-    await expect(service.getProjection(run.runId)).resolves.toMatchObject({ pendingDirectives: [] });
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({
+      pendingDirectives: [],
+    });
   });
 
   it('fails the Run when a Required Specialist fails', async () => {
@@ -658,13 +1233,13 @@ describeWithDatabase('Direct Run application flow', () => {
       .select({ id: agentSessions.id, nextSequence: agentSessions.nextSequence })
       .from(agentSessions)
       .where(eq(agentSessions.logicalKey, `${run.runId}:main:1`));
-    expect(sessions).toEqual([{ id: sessionId, nextSequence: 6 }]);
+    expect(sessions).toEqual([{ id: sessionId, nextSequence: 5 }]);
     const entries = await connection.db
       .select({ sequence: agentTranscriptEntries.sequence })
       .from(agentTranscriptEntries)
       .where(eq(agentTranscriptEntries.sessionId, sessionId));
     expect(entries.map(({ sequence }) => sequence).sort((left, right) => left - right)).toEqual([
-      1, 2, 3, 4, 5,
+      1, 2, 3, 4,
     ]);
   });
 
@@ -927,9 +1502,26 @@ describeWithDatabase('Direct Run application flow', () => {
         });
       },
     };
+    let nextRunVisibleAtTerminal = false;
+    let observedRootRunId = '';
+    const followUpPublisher: RunEventPublisher = {
+      async publish(event) {
+        if (
+          event.durable &&
+          event.event.runId === observedRootRunId &&
+          event.event.eventType === 'run.completed'
+        ) {
+          const visibleRuns = await connection.db
+            .select({ id: agentRuns.id })
+            .from(agentRuns)
+            .where(eq(agentRuns.branchId, branchId));
+          nextRunVisibleAtTerminal = visibleRuns.some(({ id }) => id !== run.runId);
+        }
+      },
+    };
     const followUpService = new DirectRunService({
       database: connection.db,
-      publisher,
+      publisher: followUpPublisher,
       runtimeFactory: { create: () => runtime },
       systemPrompt: 'You are AgentPress.',
     });
@@ -940,6 +1532,7 @@ describeWithDatabase('Direct Run application flow', () => {
       prompt: '你好',
       idempotencyKey: randomUUID(),
     });
+    observedRootRunId = run.runId;
     const firstDirective = await followUpService.enqueueFollowUp(run.runId, '继续补充');
     const secondDirective = await followUpService.enqueueFollowUp(run.runId, '再给一个例子');
     await expect(followUpService.getProjection(run.runId)).resolves.toMatchObject({
@@ -959,6 +1552,7 @@ describeWithDatabase('Direct Run application flow', () => {
       ],
     });
     await followUpService.execute(run.runId);
+    expect(nextRunVisibleAtTerminal).toBe(true);
 
     const queuedRuns = await connection.db
       .select({ id: agentRuns.id })

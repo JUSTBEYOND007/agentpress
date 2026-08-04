@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { RuntimeTool, RuntimeToolResultMessage } from '@agentpress/agent-runtime';
+import { parseActionEnvelope } from '@agentpress/contracts';
 import {
   agentRuns,
   conversationBranches,
@@ -17,6 +18,7 @@ import { ToolRegistry } from '@agentpress/tool-runtime';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import type { RuntimeToolFactory } from './contracts.js';
+import { effectiveActionCapabilities } from './action-capability-policy.js';
 import { ToolCallApplicationError, ToolCallService } from './tool-call-service.js';
 
 type PersistentToolBridgeOptions = {
@@ -168,6 +170,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
         userId: rootRequests.requestedByUserId,
         role: workspaceMembers.role,
         articleId: conversations.articleId,
+        actionEnvelope: rootRequests.actionEnvelope,
       })
       .from(agentRuns)
       .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
@@ -194,7 +197,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       .from(runSkillBindings)
       .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
       .where(eq(runSkillBindings.runId, runId));
-    const definitions = this.options.registry
+    const policyDefinitions = this.options.registry
       .list()
       .filter((definition) => authorization.role !== 'viewer' || definition.risk === 'read_only')
       .filter(
@@ -209,12 +212,21 @@ export class PersistentToolBridge implements RuntimeToolFactory {
           skillRows.length === 0 ||
           skillRows.every(({ allowedTools }) => allowedTools.includes(definition.toolId)),
       );
+    const actionEnvelope = parseActionEnvelope(authorization.actionEnvelope);
+    const effectiveCapabilities = effectiveActionCapabilities(
+      actionEnvelope,
+      policyDefinitions.flatMap(({ capabilities }) => capabilities),
+      {
+        allowArticleDraftWrite: authorization.articleId !== null && authorization.role !== 'viewer',
+      },
+    );
+    const definitions = policyDefinitions.filter((definition) =>
+      definition.capabilities.every((capability) => effectiveCapabilities.has(capability)),
+    );
     return {
       definitions,
       requestedByUserId: authorization.userId,
-      allowedCapabilities: new Set(
-        definitions.flatMap((definition) => [...definition.capabilities]),
-      ),
+      allowedCapabilities: effectiveCapabilities,
     };
   }
 }

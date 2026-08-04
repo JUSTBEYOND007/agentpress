@@ -1,7 +1,7 @@
 'use client';
 
 import { Archive, Check, ChevronDown, Pencil, Plus, Search, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   friendlyFailure,
@@ -9,10 +9,12 @@ import {
   statusTone,
   type ConversationView,
 } from './agent-view-model';
+import { AgentBranchNavigator } from './agent-branch-navigator';
 
 export function AgentConversationHeader({
   conversations,
   onCreate,
+  onClose,
   onSelect,
   onUpdate,
   selected,
@@ -20,6 +22,7 @@ export function AgentConversationHeader({
 }: {
   readonly conversations: readonly ConversationView[];
   readonly onCreate: () => Promise<void>;
+  readonly onClose?: () => void;
   readonly onSelect: (conversation: ConversationView) => void;
   readonly onUpdate: (
     conversation: ConversationView,
@@ -35,13 +38,29 @@ export function AgentConversationHeader({
   const [archiveConfirm, setArchiveConfirm] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
+  const pickerButtonRef = useRef<HTMLButtonElement>(null);
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    return conversations.filter(
+    const matching = conversations.filter(
       ({ archivedAt, title }) =>
         !archivedAt && (!normalized || title.toLocaleLowerCase().includes(normalized)),
     );
+    return [...new Map(matching.map((conversation) => [conversation.id, conversation])).values()];
   }, [conversations, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.requestAnimationFrame(() => pickerButtonRef.current?.focus());
+    };
+  }, [open]);
 
   const run = async (action: () => Promise<void>, closeAfter = false): Promise<boolean> => {
     setPending(true);
@@ -63,19 +82,21 @@ export function AgentConversationHeader({
       <div className="conversation-picker">
         <button
           aria-expanded={open}
+          aria-haspopup="menu"
           onClick={() => {
             setOpen((value) => !value);
             setEditing(false);
             setArchiveConfirm(false);
             setError(undefined);
           }}
+          ref={pickerButtonRef}
           type="button"
         >
           <strong>{selected?.title ?? '写作助手'}</strong>
           <ChevronDown aria-hidden="true" size={14} />
         </button>
         {open ? (
-          <div className="conversation-menu">
+          <div aria-label="选择对话" className="conversation-menu" role="menu">
             <div className="conversation-search">
               <Search aria-hidden="true" size={13} />
               <input
@@ -92,15 +113,27 @@ export function AgentConversationHeader({
               {visible.map((conversation) => (
                 <button
                   className={conversation.id === selected?.id ? 'is-selected' : ''}
-                  key={conversation.id}
+                  key={`${conversation.id}:${conversation.branchId}`}
                   onClick={() => {
                     onSelect(conversation);
                     setOpen(false);
                   }}
                   type="button"
                 >
-                  <span>{conversation.title}</span>
-                  {conversation.isDefault ? <small>默认</small> : null}
+                  <span className="conversation-item-title">
+                    <span>{conversation.title}</span>
+                    {conversation.isDefault ? <small>默认</small> : null}
+                  </span>
+                  <span className="conversation-item-state">
+                    {conversation.unread ? (
+                      <span aria-label="有未读更新" className="conversation-unread" />
+                    ) : null}
+                    <small>
+                      {conversation.pendingReview
+                        ? '待审阅'
+                        : statusLabel(conversation.status ?? 'ready')}
+                    </small>
+                  </span>
                 </button>
               ))}
               {visible.length === 0 ? <p>没有匹配的对话</p> : null}
@@ -206,7 +239,23 @@ export function AgentConversationHeader({
           </div>
         ) : null}
       </div>
+      <AgentBranchNavigator
+        conversations={conversations}
+        onSelect={onSelect}
+        {...(selected ? { selected } : {})}
+      />
       <span className={`status-dot status-${statusTone(status)}`}>{statusLabel(status)}</span>
+      {onClose ? (
+        <button
+          aria-label="关闭 Agent 面板"
+          className="header-icon-button agent-mobile-close"
+          onClick={onClose}
+          title="关闭"
+          type="button"
+        >
+          <X aria-hidden="true" size={15} />
+        </button>
+      ) : null}
     </header>
   );
 }

@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import { DirectRunService, type RunEventPublisher } from '@agentpress/agent-application';
 import { PiRuntimeAdapter, type RuntimeUsage } from '@agentpress/agent-runtime';
 import {
+  actionProposals,
   agentRuns,
   agentTasks,
   appUsers,
@@ -45,9 +46,9 @@ const { values } = parseArgs({
   },
   strict: true,
 });
-const apiKey = requiredEnv('ARK_API_KEY');
-const proModel = requiredEnv('ARK_MODEL_PRO');
-const turboModel = process.env.ARK_MODEL_TURBO?.trim();
+const modelConfiguration = loadModelConfiguration();
+const proModel = modelConfiguration.proModel;
+const turboModel = modelConfiguration.turboModel;
 const databaseUrl = requiredEnv('DATABASE_URL');
 const category = parseCategory(values.category);
 const categoryScenarios = category
@@ -86,6 +87,7 @@ try {
   const report = await runOnlineEvals({
     orchestrator: harness,
     model: proModel,
+    provider: modelConfiguration.kind,
     scenarios,
     limits,
   });
@@ -216,33 +218,45 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
       const service = new DirectRunService({
         database: connection.db,
         publisher,
+        dispatchCommands: false,
         runtimeFactory: {
           create(purpose = 'main') {
             const modelId =
               (purpose === 'researcher' || purpose === 'fact_checker') && turboModel
                 ? turboModel
                 : proModel;
-            return PiRuntimeAdapter.forArk({
-              apiKey,
-              modelId,
-              ...(process.env.ARK_BASE_URL ? { baseUrl: process.env.ARK_BASE_URL } : {}),
-            });
+            return modelConfiguration.create(modelId);
           },
         },
         runtimeToolFactory: runtimeTools.bridge,
         systemPrompt:
           'You are AgentPress. Use the control tools to execute the user request and preserve evidence. Never reveal hidden chain of thought.',
       });
-      const created = await service.create({
-        conversationId,
-        branchId,
-        userId,
-        prompt: scenario.prompt,
-        idempotencyKey: `eval:${scenario.id}:${randomUUID()}`,
-        ...(articleId && revisionId
-          ? { contextBindings: [{ type: 'article_revision' as const, articleId, revisionId }] }
-          : {}),
-      });
+      const created =
+        scenario.setup?.confirmedArticleEdit && articleId && revisionId
+          ? await service.createConfirmedAction({
+              conversationId,
+              branchId,
+              userId,
+              proposalId: randomUUID(),
+              instruction: scenario.prompt,
+              articleId,
+              baseRevisionId: revisionId,
+              selectedBlocks: [],
+              grantedCapabilities: ['article.read', 'article.propose'],
+            })
+          : await service.create({
+              conversationId,
+              branchId,
+              userId,
+              prompt: scenario.prompt,
+              idempotencyKey: `eval:${scenario.id}:${randomUUID()}`,
+              ...(articleId && revisionId
+                ? {
+                    contextBindings: [{ type: 'article_revision' as const, articleId, revisionId }],
+                  }
+                : {}),
+            });
       const execution = service.execute(created.runId);
       let executionFinished = false;
       void execution.then(
@@ -257,47 +271,59 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
         await approvePendingToolCall(created.runId, userId, () => executionFinished);
       }
       await execution;
-      const [runRows, taskRows, artifactRows, evidenceRows, approvalRows, toolRows, eventRows] =
-        await Promise.all([
-          connection.db
-            .select({
-              mode: agentRuns.mode,
-              status: agentRuns.status,
-              finalOutcome: agentRuns.finalOutcome,
-            })
-            .from(agentRuns)
-            .where(eq(agentRuns.id, created.runId)),
-          connection.db
-            .select({
-              role: agentTasks.owner,
-              toolPolicy: agentTasks.toolPolicy,
-              status: agentTasks.status,
-              acceptanceCriteria: agentTasks.acceptanceCriteria,
-            })
-            .from(agentTasks)
-            .where(eq(agentTasks.runId, created.runId)),
-          connection.db
-            .select({ type: artifacts.type })
-            .from(artifacts)
-            .where(eq(artifacts.runId, created.runId)),
-          connection.db
-            .select({ id: evidenceRecords.id })
-            .from(evidenceRecords)
-            .where(eq(evidenceRecords.runId, created.runId)),
-          connection.db
-            .select({ id: approvals.id })
-            .from(approvals)
-            .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
-            .where(eq(toolCalls.runId, created.runId)),
-          connection.db
-            .select({ status: toolCalls.status })
-            .from(toolCalls)
-            .where(eq(toolCalls.runId, created.runId)),
-          connection.db
-            .select({ eventType: runEvents.eventType })
-            .from(runEvents)
-            .where(eq(runEvents.runId, created.runId)),
-        ]);
+      const [
+        runRows,
+        taskRows,
+        artifactRows,
+        evidenceRows,
+        approvalRows,
+        toolRows,
+        eventRows,
+        actionProposalRows,
+      ] = await Promise.all([
+        connection.db
+          .select({
+            mode: agentRuns.mode,
+            status: agentRuns.status,
+            finalOutcome: agentRuns.finalOutcome,
+          })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, created.runId)),
+        connection.db
+          .select({
+            role: agentTasks.owner,
+            toolPolicy: agentTasks.toolPolicy,
+            status: agentTasks.status,
+            acceptanceCriteria: agentTasks.acceptanceCriteria,
+          })
+          .from(agentTasks)
+          .where(eq(agentTasks.runId, created.runId)),
+        connection.db
+          .select({ type: artifacts.type })
+          .from(artifacts)
+          .where(eq(artifacts.runId, created.runId)),
+        connection.db
+          .select({ id: evidenceRecords.id })
+          .from(evidenceRecords)
+          .where(eq(evidenceRecords.runId, created.runId)),
+        connection.db
+          .select({ id: approvals.id })
+          .from(approvals)
+          .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
+          .where(eq(toolCalls.runId, created.runId)),
+        connection.db
+          .select({ status: toolCalls.status })
+          .from(toolCalls)
+          .where(eq(toolCalls.runId, created.runId)),
+        connection.db
+          .select({ eventType: runEvents.eventType })
+          .from(runEvents)
+          .where(eq(runEvents.runId, created.runId)),
+        connection.db
+          .select({ id: actionProposals.id })
+          .from(actionProposals)
+          .where(eq(actionProposals.sourceRunId, created.runId)),
+      ]);
       const run = runRows[0];
       if (!run) throw new Error('Persisted eval Run disappeared');
       const finalUsage = recordValue(run.finalOutcome).usage;
@@ -319,6 +345,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           artifactTypes: artifactRows.map(({ type }) => type),
           evidenceCount: evidenceRows.length,
           approvalRequests: approvalRows.length,
+          actionProposals: actionProposalRows.length,
           schemaValid: taskRows.every(({ acceptanceCriteria }) => acceptanceCriteria.length > 0),
           recoveryAssertions: eventRows.flatMap(({ eventType }) =>
             eventType.startsWith('run.recover')
@@ -339,6 +366,48 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
 
 function encodeEvalMessage(message: Readonly<Record<string, unknown>>): readonly unknown[] {
   return [{ type: 'agentpress.runtime-message', version: 1, message }];
+}
+
+function loadModelConfiguration() {
+  const customApiKey = process.env.AGENT_MODEL_API_KEY?.trim();
+  const customBaseUrl = process.env.AGENT_MODEL_BASE_URL?.trim();
+  const customProModel = process.env.AGENT_MODEL_PRO?.trim();
+  const customTurboModel = process.env.AGENT_MODEL_TURBO?.trim();
+  const customValues = [customApiKey, customBaseUrl, customProModel];
+  if (customValues.some(Boolean) && !customValues.every(Boolean)) {
+    throw new Error(
+      'AGENT_MODEL_API_KEY, AGENT_MODEL_BASE_URL and AGENT_MODEL_PRO must be configured together',
+    );
+  }
+  if (customApiKey && customBaseUrl && customProModel) {
+    return {
+      kind: 'openai-compatible' as const,
+      proModel: customProModel,
+      turboModel: customTurboModel,
+      create: (modelId: string) =>
+        PiRuntimeAdapter.forOpenAICompatible({
+          providerId: 'agentpress-eval',
+          providerName: 'AgentPress eval provider',
+          apiKey: customApiKey,
+          baseUrl: customBaseUrl,
+          modelId,
+        }),
+    };
+  }
+
+  const arkApiKey = requiredEnv('ARK_API_KEY');
+  const arkBaseUrl = process.env.ARK_BASE_URL?.trim();
+  return {
+    kind: 'volcengine-ark' as const,
+    proModel: requiredEnv('ARK_MODEL_PRO'),
+    turboModel: process.env.ARK_MODEL_TURBO?.trim(),
+    create: (modelId: string) =>
+      PiRuntimeAdapter.forArk({
+        apiKey: arkApiKey,
+        modelId,
+        ...(arkBaseUrl ? { baseUrl: arkBaseUrl } : {}),
+      }),
+  };
 }
 
 async function approvePendingToolCall(

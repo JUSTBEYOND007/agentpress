@@ -296,6 +296,27 @@
   font-size: 11px;
 }
 
+.article-review-error > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.article-review-error button {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.article-review-error button:hover {
+  background: #f2e2dd;
+}
+
 .article-review-error-standalone {
   position: relative;
   top: auto;
@@ -357,7 +378,7 @@
   margin: 3px -4px;
   border-radius: 2px;
   background: #edf6ed;
-  padding: 2px 4px;
+  padding: 2px 66px 2px 4px;
   color: #2b593f;
 }
 
@@ -368,7 +389,8 @@
 .ai-diff-actions {
   position: absolute;
   top: 0;
-  right: -62px;
+  right: 5px;
+  z-index: 20;
   display: flex;
   gap: 1px;
   border: 1px solid #dededb;
@@ -379,6 +401,7 @@
     0 3px 8px rgb(15 15 15 / 6%);
   opacity: 0;
   overflow: hidden;
+  pointer-events: auto;
   transition: opacity 100ms ease;
 }
 
@@ -429,6 +452,17 @@
 }
 
 @media (max-width: 720px) {
+  .editor-toolbar {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding: 0 8px;
+    scrollbar-width: none;
+  }
+
+  .editor-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .article-review-toolbar {
     flex-wrap: wrap;
     gap: 4px 8px;

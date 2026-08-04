@@ -259,15 +259,39 @@ export class RunContextService {
       skillVersions: pinSkills(parsedSkills),
     });
     const promptRevisionId = await this.persistPromptRevision(transaction);
-    if (mentionRows.length > 0)
+    const pinnedArticles = new Map<
+      string,
+      { readonly revisionId: string; readonly contentHash: string }
+    >();
+    for (const binding of [
+      ...mentionRows.map(({ id, revisionId, contentHash }) => ({
+        articleId: id,
+        revisionId,
+        contentHash,
+      })),
+      ...articleBindings,
+    ]) {
+      const existing = pinnedArticles.get(binding.articleId);
+      if (existing && existing.revisionId !== binding.revisionId) {
+        throw new AgentApplicationError(
+          'invalid_context',
+          'One Run cannot bind multiple revisions of the same article',
+        );
+      }
+      pinnedArticles.set(binding.articleId, {
+        revisionId: binding.revisionId,
+        contentHash: binding.contentHash,
+      });
+    }
+    if (pinnedArticles.size > 0)
       await transaction.insert(mentionBindings).values(
-        mentionRows.map((mention) => ({
+        [...pinnedArticles].map(([articleId, binding]) => ({
           id: this.createId(),
           runId: input.runId,
-          targetId: mention.id,
+          targetId: articleId,
           targetKind: 'article',
-          revision: mention.revisionId,
-          contentHash: mention.contentHash,
+          revision: binding.revisionId,
+          contentHash: binding.contentHash,
           authorizedUserId: input.userId,
         })),
       );
@@ -406,7 +430,16 @@ async function loadBoundArticleContent(
   transaction: DatabaseTransaction,
   workspaceId: string,
   bindings: readonly ArticleContextBinding[],
-): Promise<readonly { id: string; content: string; revision: string }[]> {
+): Promise<
+  readonly {
+    id: string;
+    articleId: string;
+    revisionId: string;
+    contentHash: string;
+    content: string;
+    revision: string;
+  }[]
+> {
   const result = [];
   for (const binding of bindings) {
     const rows = await transaction
@@ -430,6 +463,9 @@ async function loadBoundArticleContent(
     if (binding.type === 'article_revision') {
       result.push({
         id: `article-revision:${binding.revisionId}`,
+        articleId: binding.articleId,
+        revisionId: binding.revisionId,
+        contentHash: revision.contentHash,
         content: JSON.stringify(revision.document),
         revision: `${binding.revisionId}:${revision.contentHash}`,
       });
@@ -449,6 +485,9 @@ async function loadBoundArticleContent(
     });
     result.push({
       id: `article-selection:${binding.articleId}:${binding.revisionId}`,
+      articleId: binding.articleId,
+      revisionId: binding.revisionId,
+      contentHash: revision.contentHash,
       content: JSON.stringify({ type: 'doc', content: blocks }),
       revision: `${binding.revisionId}:${blocks.map((block) => hashBlock(block as EditorBlock)).join(':')}`,
     });

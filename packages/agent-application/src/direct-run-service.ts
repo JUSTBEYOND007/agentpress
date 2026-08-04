@@ -6,6 +6,8 @@ import type {
   RuntimeMessage,
   RuntimeResult,
 } from '@agentpress/agent-runtime';
+import { RUNTIME_CURRENT_TURN_VERSION } from '@agentpress/agent-runtime';
+import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {
   agentRuns,
   agentTasks,
@@ -18,9 +20,11 @@ import {
   conversationBranches,
   conversationMessages,
   conversations,
+  checkpoints,
   enqueueOutboxMessage,
   evidenceRecords,
   editProposals,
+  modelSelections,
   rootRequests,
   planRevisions,
   queuedFollowups,
@@ -30,7 +34,7 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -46,9 +50,14 @@ import {
   type RunEventPublisher,
   type RuntimeToolFactory,
 } from './contracts.js';
+import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
+import { projectConversationHistory } from './agent-transcript-projector.js';
 import { RunContextService } from './run-context-service.js';
 import { projectRunParts, type ProposalProjectionStatus } from './run-projection.js';
+import { projectRunExecutionFacts } from './run-execution-facts.js';
+import { projectRunProgress } from './run-progress.js';
+import { ArtifactQueryService, type ArtifactLookupResult } from './artifact-query-service.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -65,6 +74,8 @@ type DirectRunServiceOptions = {
   readonly runtimeToolFactory?: RuntimeToolFactory;
   readonly now?: () => Date;
   readonly createId?: () => string;
+  /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
+  readonly dispatchCommands?: boolean;
 };
 
 export class DirectRunService {
@@ -72,11 +83,13 @@ export class DirectRunService {
   private readonly createId: () => string;
   private readonly plannedRuns: PlannedRunExecutor;
   private readonly contexts: RunContextService;
+  private readonly artifactQueries: ArtifactQueryService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.plannedRuns = new PlannedRunExecutor(options);
+    this.artifactQueries = new ArtifactQueryService(options.database);
     this.contexts = new RunContextService(
       options.database,
       options.systemPrompt,
@@ -121,7 +134,152 @@ export class DirectRunService {
     });
   }
 
+  public async forkBranch(
+    conversationId: string,
+    branchId: string,
+    messageId: string,
+    userId: string,
+  ) {
+    return this.options.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .select({
+          workspaceId: conversations.workspaceId,
+          sequence: conversationMessages.sequence,
+        })
+        .from(conversationMessages)
+        .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
+        .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
+        .innerJoin(
+          workspaceMembers,
+          and(
+            eq(workspaceMembers.workspaceId, conversations.workspaceId),
+            eq(workspaceMembers.userId, userId),
+          ),
+        )
+        .where(
+          and(
+            eq(conversationMessages.id, messageId),
+            eq(conversationMessages.branchId, branchId),
+            eq(conversations.id, conversationId),
+            eq(conversationMessages.stable, true),
+          ),
+        )
+        .limit(1);
+      const forkPoint = rows[0];
+      if (!forkPoint)
+        throw new AgentApplicationError(
+          'branch_not_found',
+          'Fork message does not exist on an authorized conversation branch',
+        );
+      const messages = await transaction
+        .select()
+        .from(conversationMessages)
+        .where(
+          and(
+            eq(conversationMessages.branchId, branchId),
+            eq(conversationMessages.stable, true),
+            lte(conversationMessages.sequence, forkPoint.sequence),
+          ),
+        )
+        .orderBy(asc(conversationMessages.sequence));
+      const newBranchId = this.createId();
+      const copied = messages.map((message) => ({
+        sourceId: message.id,
+        id: this.createId(),
+        message,
+      }));
+      await transaction.insert(conversationBranches).values({
+        id: newBranchId,
+        conversationId,
+        parentBranchId: branchId,
+        forkedFromMessageId: messageId,
+      });
+      if (copied.length > 0)
+        await transaction.insert(conversationMessages).values(
+          copied.map(({ id, message }) => ({
+            id,
+            branchId: newBranchId,
+            role: message.role,
+            sequence: message.sequence,
+            content: message.content,
+            stable: true,
+            createdAt: message.createdAt,
+          })),
+        );
+      return {
+        branchId: newBranchId,
+        parentBranchId: branchId,
+        forkedFromMessageId: messageId,
+        forkedMessageId: copied.find(({ sourceId }) => sourceId === messageId)?.id,
+      };
+    });
+  }
+
   public async create(input: CreateDirectRunInput): Promise<CreateDirectRunResult> {
+    return this.createWithEnvelope(input, {
+      version: 1,
+      source: 'free_text',
+      grantedCapabilities: [],
+    });
+  }
+
+  public async createConfirmedAction(input: {
+    readonly conversationId: string;
+    readonly branchId: string;
+    readonly userId: string;
+    readonly proposalId: string;
+    readonly instruction: string;
+    readonly articleId: string;
+    readonly baseRevisionId: string;
+    readonly selectedBlocks: readonly { readonly blockId: string; readonly contentHash: string }[];
+    readonly grantedCapabilities: readonly string[];
+  }): Promise<CreateDirectRunResult> {
+    const envelope: ActionEnvelopeV1 = {
+      version: 1,
+      source: 'button',
+      requestedIntent: 'article_edit',
+      actionProposalId: input.proposalId,
+      payload: {
+        instruction: input.instruction,
+        articleId: input.articleId,
+        baseRevisionId: input.baseRevisionId,
+        selectedBlocks: [...input.selectedBlocks],
+      },
+      grantedCapabilities: [...input.grantedCapabilities],
+    };
+    return this.createWithEnvelope(
+      {
+        conversationId: input.conversationId,
+        branchId: input.branchId,
+        userId: input.userId,
+        prompt: input.instruction,
+        idempotencyKey: `action:${input.proposalId}`,
+        contextBindings:
+          input.selectedBlocks.length > 0
+            ? [
+                {
+                  type: 'article_selection',
+                  articleId: input.articleId,
+                  revisionId: input.baseRevisionId,
+                  blocks: input.selectedBlocks,
+                },
+              ]
+            : [
+                {
+                  type: 'article_revision',
+                  articleId: input.articleId,
+                  revisionId: input.baseRevisionId,
+                },
+              ],
+      },
+      envelope,
+    );
+  }
+
+  private async createWithEnvelope(
+    input: CreateDirectRunInput,
+    actionEnvelope: ActionEnvelopeV1,
+  ): Promise<CreateDirectRunResult> {
     const prompt = input.prompt.trim();
     if (prompt.length === 0 || prompt.length > 100_000) {
       throw new AgentApplicationError(
@@ -171,6 +329,7 @@ export class DirectRunService {
           branchId: conversationBranches.id,
           conversationId: conversations.id,
           workspaceId: conversations.workspaceId,
+          articleId: conversations.articleId,
         })
         .from(conversationBranches)
         .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
@@ -211,7 +370,31 @@ export class DirectRunService {
         .from(conversationMessages)
         .where(eq(conversationMessages.branchId, input.branchId));
       const messageSequence = (sequenceRows[0]?.sequence ?? 0) + 1;
-      const messageId = this.createId();
+      const existingMessage = input.existingMessageId
+        ? await transaction
+            .select({ id: conversationMessages.id, content: conversationMessages.content })
+            .from(conversationMessages)
+            .where(
+              and(
+                eq(conversationMessages.id, input.existingMessageId),
+                eq(conversationMessages.branchId, input.branchId),
+                eq(conversationMessages.role, 'user'),
+                eq(conversationMessages.stable, true),
+              ),
+            )
+            .limit(1)
+        : [];
+      const existingRoot = existingMessage[0];
+      if (input.existingMessageId) {
+        const decoded = existingRoot ? decodeRuntimeMessage(existingRoot.content) : undefined;
+        if (decoded?.role !== 'user' || decoded.content !== prompt) {
+          throw new AgentApplicationError(
+            'invalid_context',
+            'The existing root message is missing or does not match this Run',
+          );
+        }
+      }
+      const messageId = existingRoot?.id ?? this.createId();
       const rootRequestId = this.createId();
       const runId = this.createId();
       const outboxId = this.createId();
@@ -222,21 +405,31 @@ export class DirectRunService {
         timestamp: now.getTime(),
       };
 
-      await transaction.insert(conversationMessages).values({
-        id: messageId,
-        branchId: input.branchId,
-        role: 'user',
-        sequence: messageSequence,
-        content: encodeRuntimeMessage(userMessage),
-        stable: true,
-        createdAt: now,
-      });
+      if (!existingRoot)
+        await transaction.insert(conversationMessages).values({
+          id: messageId,
+          branchId: input.branchId,
+          role: 'user',
+          sequence: messageSequence,
+          content: encodeRuntimeMessage(userMessage),
+          stable: true,
+          createdAt: now,
+        });
+      if (actionEnvelope.source === 'free_text') {
+        await transaction
+          .update(conversations)
+          .set({ title: prompt.slice(0, 24), updatedAt: now })
+          .where(
+            and(eq(conversations.id, branch.conversationId), eq(conversations.title, '新对话')),
+          );
+      }
       await transaction.insert(rootRequests).values({
         id: rootRequestId,
         branchId: input.branchId,
         messageId,
         requestedByUserId: input.userId,
         idempotencyKey: input.idempotencyKey,
+        actionEnvelope,
         createdAt: now,
       });
       await transaction.insert(agentRuns).values({
@@ -256,7 +449,12 @@ export class DirectRunService {
         mentionTargetIds: input.mentionTargetIds ?? [],
         attachmentIds: input.attachmentIds ?? [],
         skills: input.skills ?? [],
-        contextBindings: input.contextBindings ?? [],
+        contextBindings: [
+          ...(actionEnvelope.source === 'free_text' && branch.articleId
+            ? ([{ type: 'mention', targetId: branch.articleId }] as const)
+            : []),
+          ...(input.contextBindings ?? []),
+        ],
       });
       const queued = await appendRunEvent(transaction, {
         id: this.createId(),
@@ -269,15 +467,17 @@ export class DirectRunService {
           contextHash: contextPack.contentHash,
         },
       });
-      await enqueueOutboxMessage(transaction, {
-        id: outboxId,
-        aggregateType: 'AgentRun',
-        aggregateId: runId,
-        topic: AGENT_RUN_COMMAND_TOPIC,
-        messageKey: runId,
-        payload: { command: 'run.execute', messageId: outboxId, runId },
-        occurredAt: now,
-      });
+      if (this.options.dispatchCommands !== false) {
+        await enqueueOutboxMessage(transaction, {
+          id: outboxId,
+          aggregateType: 'AgentRun',
+          aggregateId: runId,
+          topic: AGENT_RUN_COMMAND_TOPIC,
+          messageKey: runId,
+          payload: { command: 'run.execute', messageId: outboxId, runId },
+          occurredAt: now,
+        });
+      }
 
       return {
         result: {
@@ -299,6 +499,17 @@ export class DirectRunService {
   }
 
   public async execute(runId: string, signal?: AbortSignal): Promise<ExecuteDirectRunResult> {
+    try {
+      return await this.executeClaimed(runId, signal);
+    } catch (error) {
+      return this.settleUnexpectedFailure(runId, error, signal);
+    }
+  }
+
+  private async executeClaimed(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<ExecuteDirectRunResult> {
     const context = await this.loadExecutionContext(runId);
     if (!context) {
       throw new AgentApplicationError('run_not_found', `Agent Run ${runId} does not exist`);
@@ -313,15 +524,54 @@ export class DirectRunService {
       return { runId, status: 'ignored' };
     }
     const currentTurn = {
+      type: 'agentpress_current_turn' as const,
+      version: RUNTIME_CURRENT_TURN_VERSION,
+      source: 'user' as const,
       request: context.prompt,
-      frozenContext: context.contextContent,
+      actionEnvelope: context.actionEnvelope,
+      context: context.contextPack,
+      timestamp: context.timestamp,
     };
     const outcome =
       context.status === 'recovering'
         ? await this.plannedRuns.recover(runId, currentTurn, context.history, signal)
         : await this.plannedRuns.execute(runId, currentTurn, context.history, signal);
     if (!outcome) return { runId, status: 'ignored' };
+    if (signal?.aborted && outcome.result.status === 'failed') {
+      throw new Error(outcome.result.error.message);
+    }
     return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
+  }
+
+  private async settleUnexpectedFailure(
+    runId: string,
+    error: unknown,
+    signal?: AbortSignal,
+  ): Promise<ExecuteDirectRunResult> {
+    const rows = await this.options.database
+      .select({ branchId: agentRuns.branchId, status: agentRuns.status })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, runId))
+      .limit(1);
+    const run = rows[0];
+    if (!run) {
+      throw error;
+    }
+    if (isTerminalRunStatus(run.status)) {
+      return { runId, status: 'ignored' };
+    }
+    if (signal?.aborted && run.status !== 'cancelling') {
+      throw error;
+    }
+    return this.settleRun(run.branchId, runId, {
+      status: 'failed',
+      messages: [],
+      error: {
+        code: 'runtime_error',
+        message: error instanceof Error ? error.message : 'Agent Run execution failed',
+        retryable: false,
+      },
+    });
   }
 
   public async requestCancellation(runId: string): Promise<RequestRunCancellationResult> {
@@ -590,6 +840,8 @@ export class DirectRunService {
       proposalRows,
       steeringRows,
       followUpRows,
+      modelRows,
+      checkpointRows,
     ] = await Promise.all([
       this.listEvents(runId),
       this.options.database
@@ -599,7 +851,6 @@ export class DirectRunService {
           title: artifacts.title,
           version: artifactVersions.version,
           summary: artifactVersions.summary,
-          content: artifactVersions.content,
         })
         .from(artifacts)
         .innerJoin(
@@ -666,6 +917,26 @@ export class DirectRunService {
         .from(queuedFollowups)
         .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')))
         .orderBy(asc(queuedFollowups.sequence)),
+      this.options.database
+        .select({
+          purpose: modelSelections.purpose,
+          selectedModel: modelSelections.selectedModel,
+          policySnapshot: modelSelections.policySnapshot,
+          fallbackUsed: modelSelections.fallbackUsed,
+        })
+        .from(modelSelections)
+        .where(eq(modelSelections.runId, runId))
+        .orderBy(asc(modelSelections.createdAt)),
+      this.options.database
+        .select({
+          sequence: checkpoints.sequence,
+          reason: checkpoints.reason,
+          createdAt: checkpoints.createdAt,
+        })
+        .from(checkpoints)
+        .where(eq(checkpoints.runId, runId))
+        .orderBy(desc(checkpoints.sequence))
+        .limit(1),
     ]);
     const question = questionRows[0];
     const proposalStatuses = new Map<string, ProposalProjectionStatus>(
@@ -681,14 +952,36 @@ export class DirectRunService {
       : approvalRows.length > 0
         ? { type: 'tool-approval', approvals: approvalRows }
         : undefined;
+    const queuedEvent = events.find(({ eventType }) => eventType === 'run.queued');
+    const contextManifest = queuedEvent?.payload.contextManifest;
+    const model = modelRows[0];
+    const executionFacts = projectRunExecutionFacts({
+      runId,
+      events,
+      modelSelections: modelRows,
+      createdAt: run.createdAt,
+      ...(run.completedAt ? { completedAt: run.completedAt } : {}),
+    });
+    const latestCheckpoint = checkpointRows[0];
+    const progress = projectRunProgress({
+      runId,
+      mode: run.mode,
+      status: run.status,
+      events,
+      ...(pendingInteraction ? { pendingInteraction } : {}),
+      ...(latestCheckpoint ? { recoveryPoint: latestCheckpoint } : {}),
+    });
     return {
       runId,
       rootMessageId: run.rootMessageId,
       status: run.status,
+      terminal: isTerminalRunStatus(run.status),
       mode: run.mode,
       ...(run.revisionNumber ? { activePlanRevision: run.revisionNumber } : {}),
       parts: [
-        ...projectRunParts(events, proposalStatuses),
+        ...projectRunParts(events, proposalStatuses).filter(({ type }) => type !== 'usage'),
+        ...(progress ? [progress] : []),
+        ...(executionFacts ? [executionFacts] : []),
         ...evidenceRows.map((evidence) => {
           const toolCallId =
             typeof evidence.metadata.toolCallId === 'string'
@@ -727,8 +1020,40 @@ export class DirectRunService {
             payload: artifact,
           };
         }),
+        ...(run.status === 'failed' &&
+        [...proposalStatuses.values()].some(
+          (status) => status === 'pending' || status === 'partially_accepted',
+        )
+          ? [
+              {
+                id: `${runId}:pending-draft-preserved`,
+                runId,
+                sequence: events.at(-1)?.sequence ?? 0,
+                type: 'warning' as const,
+                status: 'run.failed',
+                payload: { pendingDraft: true },
+              },
+            ]
+          : []),
       ],
       artifacts: artifactRows,
+      ...(contextManifest && typeof contextManifest === 'object'
+        ? {
+            context: {
+              manifest: contextManifest,
+              contextHash: queuedEvent.payload.contextHash,
+              ...(model
+                ? {
+                    model: model.selectedModel,
+                    provider: model.policySnapshot.provider,
+                    contextWindow: model.policySnapshot.contextWindow,
+                    maxOutputTokens: model.policySnapshot.maxOutputTokens,
+                    fallbackUsed: model.fallbackUsed,
+                  }
+                : {}),
+            },
+          }
+        : {}),
       ...(pendingInteraction ? { pendingInteraction } : {}),
       pendingDirectives: [
         ...steeringRows.map((directive) => ({
@@ -746,6 +1071,14 @@ export class DirectRunService {
       createdAt: run.createdAt.toISOString(),
       ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),
     };
+  }
+
+  public async getArtifact(
+    runId: string,
+    artifactId: string,
+    expectedVersion?: number,
+  ): Promise<ArtifactLookupResult> {
+    return this.artifactQueries.get(runId, artifactId, expectedVersion);
   }
 
   public async listRuns(conversationId: string, branchId: string, userId: string) {
@@ -816,6 +1149,15 @@ export class DirectRunService {
         readonly status: string;
         readonly mode: 'direct' | 'planned';
         readonly contextContent: string;
+        readonly actionEnvelope: ActionEnvelopeV1;
+        readonly contextPack: {
+          readonly content: string;
+          readonly contentHash: string;
+          readonly format: string;
+          readonly schemaVersion: number;
+          readonly manifest: Readonly<Record<string, unknown>>;
+        };
+        readonly timestamp: number;
       }
     | undefined
   > {
@@ -826,6 +1168,7 @@ export class DirectRunService {
         mode: agentRuns.mode,
         messageSequence: conversationMessages.sequence,
         content: conversationMessages.content,
+        actionEnvelope: rootRequests.actionEnvelope,
       })
       .from(agentRuns)
       .innerJoin(rootRequests, eq(rootRequests.id, agentRuns.rootRequestId))
@@ -851,11 +1194,14 @@ export class DirectRunService {
           lt(conversationMessages.sequence, run.messageSequence),
         ),
       )
-      .orderBy(asc(conversationMessages.sequence));
-    const history = historyRows.flatMap(({ content }) => {
-      const message = decodeRuntimeMessage(content);
-      return message ? [message] : [];
-    });
+      .orderBy(desc(conversationMessages.sequence))
+      .limit(12);
+    const history = projectConversationHistory(
+      historyRows.reverse().flatMap(({ content }) => {
+        const message = decodeRuntimeMessage(content);
+        return message ? [message] : [];
+      }),
+    );
     const contextPack = await this.contexts.load(runId);
     if (!contextPack) throw new Error(`Agent Run ${runId} has no persisted Context Pack`);
     const answeredQuestions = await this.options.database
@@ -876,6 +1222,15 @@ export class DirectRunService {
       status: run.status,
       mode: run.mode,
       contextContent: contextPack.content,
+      actionEnvelope: parseActionEnvelope(run.actionEnvelope),
+      contextPack: {
+        content: contextPack.content,
+        contentHash: contextPack.contentHash,
+        format: 'json',
+        schemaVersion: 1,
+        manifest: contextPack.manifest,
+      },
+      timestamp: rootMessage.timestamp,
     };
   }
 
@@ -1014,6 +1369,7 @@ export class DirectRunService {
     result: RuntimeResult,
     completedWithDegradation = false,
   ): Promise<ExecuteDirectRunResult> {
+    const terminalOutcome = classifyTerminalOutcome(result);
     const durableEvents = await this.options.database.transaction(async (transaction) => {
       await transaction.execute(
         sql`select id from ${conversationBranches} where id = ${branchId} for update`,
@@ -1027,7 +1383,7 @@ export class DirectRunService {
       const now = this.now();
       const events: DurableRunEvent[] = [];
 
-      if (result.status === 'completed' && currentStatus !== 'cancelling') {
+      if (terminalOutcome === 'completed' && currentStatus !== 'cancelling') {
         const assistant = findLastAssistantMessage(result.messages);
         if (!assistant) {
           throw new Error(`Pi completed Agent Run ${runId} without a stable assistant message`);
@@ -1082,7 +1438,15 @@ export class DirectRunService {
         return events;
       }
 
-      if (result.status === 'cancelled' || currentStatus === 'cancelling') {
+      if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
+        await transaction
+          .update(runDirectives)
+          .set({ status: 'cancelled' })
+          .where(and(eq(runDirectives.runId, runId), eq(runDirectives.status, 'pending')));
+        await transaction
+          .update(queuedFollowups)
+          .set({ status: 'cancelled' })
+          .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')));
         await transaction
           .update(agentRuns)
           .set({
@@ -1123,7 +1487,20 @@ export class DirectRunService {
           updatedAt: now,
           version: sql`${agentRuns.version} + 1`,
         })
-        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            inArray(agentRuns.status, [
+              'queued',
+              'planning',
+              'running',
+              'waiting_for_approval',
+              'waiting_for_user',
+              'interrupted',
+              'recovering',
+            ]),
+          ),
+        );
       await appendCheckpoint(transaction, {
         id: this.createId(),
         runId,
@@ -1140,10 +1517,11 @@ export class DirectRunService {
       return events;
     });
 
+    const terminal = durableEvents.at(-1)?.eventType;
+    if (terminal !== 'run.cancelled') await this.activateNextFollowUp(branchId);
     for (const event of durableEvents) {
       await this.options.publisher.publish({ durable: true, event });
     }
-    const terminal = durableEvents.at(-1)?.eventType;
     const response: ExecuteDirectRunResult = {
       runId,
       status:
@@ -1155,7 +1533,6 @@ export class DirectRunService {
             ? 'cancelled'
             : 'failed',
     };
-    await this.activateNextFollowUp(branchId);
     return response;
   }
 
@@ -1189,6 +1566,10 @@ export class DirectRunService {
       .set({ status: 'consumed', consumedAt: this.now(), createdRunId: created.runId })
       .where(and(eq(queuedFollowups.id, claimed.id), eq(queuedFollowups.status, 'pending')));
   }
+}
+
+export function isTerminalRunStatus(status: string): boolean {
+  return (TERMINAL_RUN_STATES as readonly string[]).includes(status);
 }
 
 function encodeRuntimeMessage(message: RuntimeMessage): readonly unknown[] {

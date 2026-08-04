@@ -5,11 +5,12 @@ import {
   agentRuns,
   conversationBranches,
   conversations,
+  mentionBindings,
 } from '@agentpress/database';
 import type { ToolRegistry } from '@agentpress/tool-runtime';
 import { hashBlock, type ArticleDocument } from '@agentpress/editor-patch';
 import { Type } from '@sinclair/typebox';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { ProposalService } from './proposal-service.js';
 
@@ -52,6 +53,7 @@ const operations = Type.Array(
   ]),
   { minItems: 1, maxItems: 200 },
 );
+const reviewMode = Type.Optional(Type.Union([Type.Literal('granular'), Type.Literal('document')]));
 
 export function registerArticleTools(
   registry: ToolRegistry,
@@ -92,22 +94,31 @@ export function registerArticleTools(
     version: '1.0.0',
     owner: 'agentpress.editor',
     description:
-      'Create a reviewable article edit proposal using stable block IDs and expected SHA-256 hashes; never writes the article directly',
+      'Create a reviewable article edit proposal using stable block IDs and expected SHA-256 hashes; set reviewMode=document when writing or replacing a complete article so the UI treats all internal block operations as one whole-article change; use granular for local edits; never writes the article directly',
     capabilities: ['article.propose'],
-    inputSchema: Type.Object({ operations }, { additionalProperties: false }),
+    inputSchema: Type.Object({ operations, reviewMode }, { additionalProperties: false }),
     outputSchema: Type.Any(),
     risk: 'draft_write',
-    sideEffect: 'Creates an expiring edit proposal; the article changes only after user decisions',
-    idempotency: 'none',
+    sideEffect:
+      'Creates an expiring edit proposal; document mode presents the batch as one whole-article change, while internal block operations remain auditable; the article changes only after user decisions',
+    idempotency: 'provider_key',
     timeoutMs: 10_000,
     estimateCost: () => ({}),
-    execute: async ({ operations: proposedOperations }, context) => {
+    execute: async (
+      { operations: proposedOperations, reviewMode: proposedReviewMode },
+      context,
+    ) => {
       const current = await resolveRunArticle(database, context.runId);
-      return proposals.create({
-        articleId: current.articleId,
-        runId: context.runId,
-        operations: proposedOperations,
-      });
+      return proposals
+        .create({
+          articleId: current.articleId,
+          runId: context.runId,
+          sourceToolCallId: context.toolCallId,
+          baseRevisionId: current.revisionId,
+          operations: proposedOperations,
+          reviewMode: proposedReviewMode ?? 'granular',
+        })
+        .then((proposal) => ({ kind: 'article_edit_proposal' as const, ...proposal }));
     },
   });
 }
@@ -124,9 +135,17 @@ async function resolveRunArticle(database: AgentPressDatabase, runId: string) {
     .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
     .innerJoin(articles, eq(articles.id, conversations.articleId))
     .innerJoin(
+      mentionBindings,
+      and(
+        eq(mentionBindings.runId, agentRuns.id),
+        eq(mentionBindings.targetId, articles.id),
+        eq(mentionBindings.targetKind, 'article'),
+      ),
+    )
+    .innerJoin(
       articleRevisions,
       and(
-        eq(articleRevisions.id, articles.currentRevisionId),
+        sql`${articleRevisions.id}::text = ${mentionBindings.revision}`,
         eq(articleRevisions.articleId, articles.id),
       ),
     )

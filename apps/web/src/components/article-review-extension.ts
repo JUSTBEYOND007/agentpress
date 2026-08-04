@@ -70,7 +70,16 @@ export function buildReviewDecorations(
       decorations.push(
         Decoration.widget(
           anchor,
-          (view) => createAfterWidget(view, review, diff.operationId, diff.kind, diff.after, focus),
+          (view) =>
+            createAfterWidget(
+              view,
+              review,
+              diff.operationId,
+              diff.kind,
+              diff.after,
+              focus,
+              review.proposal.reviewMode !== 'document',
+            ),
           {
             key: widgetKey(review, diff.operationId),
             side: 1,
@@ -83,7 +92,10 @@ export function buildReviewDecorations(
       decorations.push(
         Decoration.widget(
           current.to,
-          (view) => createActionWidget(view, review, diff.operationId, focus, 'inline'),
+          (view) =>
+            review.proposal.reviewMode === 'document'
+              ? document.createElement('span')
+              : createActionWidget(view, review, diff.operationId, focus, 'inline'),
           {
             key: `${widgetKey(review, diff.operationId)}:actions`,
             side: 1,
@@ -115,6 +127,7 @@ function createAfterWidget(
   kind: string,
   block: unknown,
   focus: boolean,
+  showActions = true,
 ): HTMLElement {
   const wrapper = document.createElement('div');
   wrapper.className = `ai-diff-after ai-diff-${kind} ${focus ? 'is-focused' : ''}`;
@@ -128,7 +141,7 @@ function createAfterWidget(
     fallback.textContent = '新的内容';
     wrapper.appendChild(fallback);
   }
-  wrapper.appendChild(createActionWidget(view, review, operationId, focus));
+  if (showActions) wrapper.appendChild(createActionWidget(view, review, operationId, focus));
   return wrapper;
 }
 
@@ -163,10 +176,13 @@ function buttonFor(
   button.textContent = decision === 'accepted' ? '✓' : '×';
   button.dataset.decision = decision;
   button.disabled = review.phase === 'submitting';
-  button.addEventListener('mousedown', (event) => {
+  button.addEventListener('pointerdown', (event) => {
     event.preventDefault();
+    event.stopPropagation();
   });
-  button.addEventListener('click', () => {
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     dispatchReviewDecision(view.state, operationId, decision);
   });
   return button;

@@ -19,7 +19,7 @@ import {
   RotateCcw,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 
 import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
@@ -103,6 +103,14 @@ function WorkspacePage(): React.JSX.Element {
   const [publicationHistory, setPublicationHistory] = useState<readonly ArticlePublication[]>([]);
   const [error, setError] = useState<string>();
   const [agentSelection, setAgentSelection] = useState<ArticleSelectionView>();
+  const agentSendPreparation = useRef<(() => Promise<void>) | undefined>(undefined);
+  const registerAgentSendPreparation = useCallback((prepare?: () => Promise<void>) => {
+    agentSendPreparation.current = prepare;
+  }, []);
+  const prepareAgentSend = useCallback(
+    () => agentSendPreparation.current?.() ?? Promise.resolve(),
+    [],
+  );
 
   const loadArticles = useCallback(async (id: string): Promise<void> => {
     const [articleResponse, folderResponse, trashResponse] = await Promise.all([
@@ -549,6 +557,7 @@ function WorkspacePage(): React.JSX.Element {
             baseRevisionId={activeArticle.revisionId}
             initialDocument={activeArticle.document}
             onSelectionChange={setAgentSelection}
+            onAgentSendPreparation={registerAgentSendPreparation}
             {...(articleReview.review
               ? {
                   review: articleReview.review,
@@ -606,10 +615,15 @@ function WorkspacePage(): React.JSX.Element {
             ? { conversationId: activeArticle.conversationId }
             : {})}
           {...(activeArticle?.branchId ? { branchId: activeArticle.branchId } : {})}
-          onArticleUpdated={reloadArticles}
+          onArticleReviewChanged={articleReview.reload}
+          onOpenArticleProposal={articleReview.openProposal}
+          beforeSend={prepareAgentSend}
+          pendingReview={Boolean(articleReview.review)}
+          onClose={() => {
+            setAgentOpen(false);
+          }}
           articles={articles.map(({ id, revisionId, title }) => ({ id, revisionId, title }))}
           {...(agentSelection ? { articleSelection: agentSelection } : {})}
-          onProposalReady={articleReview.showProposal}
           {...(workspaceId ? { workspaceId } : {})}
           {...(activeArticle
             ? { activeArticleId: activeArticle.id, activeArticleTitle: activeArticle.title }

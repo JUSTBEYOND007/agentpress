@@ -16,12 +16,13 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.json --watch",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/contracts": "workspace:*",
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
     "typebox": "1.1.38"

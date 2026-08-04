@@ -33,7 +33,12 @@ export function AuthProvider({ children }: { readonly children: ReactNode }): Re
         <div className="auth-panel">
           <h1>AgentPress</h1>
           <p>身份服务暂不可用，请检查本地服务状态后重试。</p>
-          <button type="button" onClick={() => window.location.reload()}>
+          <button
+            type="button"
+            onClick={() => {
+              window.location.reload();
+            }}
+          >
             重新加载
           </button>
         </div>

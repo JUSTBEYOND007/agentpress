@@ -16,8 +16,10 @@ import {
   conversationMessages,
   conversations,
   editProposals,
+  mentionBindings,
   outboxMessages,
   rootRequests,
+  toolCalls,
   workspaces,
 } from '@agentpress/database';
 import { ToolRegistry } from '@agentpress/tool-runtime';
@@ -116,6 +118,15 @@ describeWithInfra('editor persistence and recovery', () => {
       mode: 'direct',
       status: 'running',
     });
+    await connection.db.insert(mentionBindings).values({
+      id: randomUUID(),
+      runId: ids.run,
+      targetId: ids.article,
+      targetKind: 'article',
+      revision: ids.revision,
+      contentHash: hashDocument(document),
+      authorizedUserId: ids.user,
+    });
   });
   afterAll(async () => {
     redis.disconnect();
@@ -158,8 +169,20 @@ describeWithInfra('editor persistence and recovery', () => {
 
   it('exposes current block hashes and creates a persisted proposal through Agent tools', async () => {
     const registry = new ToolRegistry();
-    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const proposals = new ProposalService(connection.db);
+    registerArticleTools(registry, connection.db, proposals);
     const context = { runId: ids.run, toolCallId: randomUUID() };
+    await connection.db.insert(toolCalls).values({
+      id: context.toolCallId,
+      runId: ids.run,
+      toolId: 'article.propose_edits',
+      toolVersion: '1.0.0',
+      arguments: {},
+      argumentsHash: 'test',
+      risk: 'draft_write',
+      sideEffect: 'test proposal',
+      status: 'executing',
+    });
     const current = (await registry.execute(
       registry.get('article.read_current', '1.0.0'),
       {},
@@ -202,6 +225,93 @@ describeWithInfra('editor persistence and recovery', () => {
       .from(editProposals)
       .where(eq(editProposals.id, String(created.proposalId)));
     expect(rows[0]).toMatchObject({ articleId: ids.article, runId: ids.run, status: 'pending' });
+    const secondToolCallId = randomUUID();
+    await connection.db.insert(toolCalls).values({
+      id: secondToolCallId,
+      runId: ids.run,
+      toolId: 'article.propose_edits',
+      toolVersion: '1.0.0',
+      arguments: {},
+      argumentsHash: 'test-2',
+      risk: 'draft_write',
+      sideEffect: 'test proposal 2',
+      status: 'executing',
+    });
+    const appended = (await registry.execute(
+      registry.get('article.propose_edits', '1.0.0'),
+      {
+        operations: [
+          {
+            operationId: 'tool-delete-b',
+            kind: 'delete',
+            blockId: 'block-b',
+            expectedHash: hashBlock(second),
+          },
+        ],
+      },
+      { runId: ids.run, toolCallId: secondToolCallId },
+    )) as Record<string, unknown>;
+    expect(appended).toMatchObject({
+      operations: [{ operationId: 'tool-replace-a' }, { operationId: 'tool-delete-b' }],
+    });
+    const batchIds = (appended.batches as readonly { id: string; status: string }[]).filter(
+      ({ status }) => status === 'active',
+    );
+    expect(batchIds).toHaveLength(2);
+    await expect(
+      proposals.revertBatch({
+        proposalId: String(created.proposalId),
+        batchId: batchIds[0]?.id ?? '',
+        userId: ids.user,
+      }),
+    ).rejects.toThrow('latest');
+    await proposals.revertBatch({
+      proposalId: String(created.proposalId),
+      batchId: batchIds[1]?.id ?? '',
+      userId: ids.user,
+    });
+    await expect(
+      proposals.decideOperation({
+        proposalId: String(created.proposalId),
+        operationId: 'tool-replace-a',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'rejected' });
+
+    const onlyBatchProposal = await proposals.create({
+      articleId: ids.article,
+      operations: [
+        {
+          operationId: 'undo-only-batch',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(first),
+          block: paragraph('block-a', 'Temporary'),
+        },
+      ],
+    });
+    const onlyBatch = onlyBatchProposal.batches[0];
+    expect(onlyBatch?.status).toBe('active');
+    await expect(
+      proposals.revertBatch({
+        proposalId: onlyBatchProposal.proposalId,
+        batchId: onlyBatch?.id ?? '',
+        userId: ids.user,
+      }),
+    ).resolves.toMatchObject({ status: 'rejected', operations: [] });
+    await expect(proposals.getPending(ids.article)).resolves.toBeUndefined();
+
+    await connection.db
+      .update(editProposals)
+      .set({ status: 'pending', operations: [], diffs: [] })
+      .where(eq(editProposals.id, onlyBatchProposal.proposalId));
+    await expect(proposals.getPending(ids.article)).resolves.toBeUndefined();
+    const [repaired] = await connection.db
+      .select({ status: editProposals.status })
+      .from(editProposals)
+      .where(eq(editProposals.id, onlyBatchProposal.proposalId));
+    expect(repaired?.status).toBe('rejected');
   });
 
   it('applies accepted proposal operations into an immutable revision', async () => {
@@ -247,6 +357,271 @@ describeWithInfra('editor persistence and recovery', () => {
       .where(eq(articleRevisions.articleId, ids.article));
     expect(revisions).toHaveLength(2);
     expect(revisions[1]?.source).toBe('proposal');
+  });
+
+  it('persists each operation decision and settles only after every operation is decided', async () => {
+    const service = new ProposalService(connection.db);
+    const currentFirst = paragraph('block-a', 'New');
+    await expect(
+      service.create({
+        articleId: ids.article,
+        baseRevisionId: ids.revision,
+        operations: [
+          {
+            operationId: 'stale-replace',
+            kind: 'replace',
+            blockId: 'block-a',
+            expectedHash: hashBlock(first),
+            block: paragraph('block-a', 'Stale'),
+          },
+        ],
+      }),
+    ).rejects.toThrow('authorized');
+    const proposal = await service.create({
+      articleId: ids.article,
+      operations: [
+        {
+          operationId: 'reject-a',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(currentFirst),
+          block: paragraph('block-a', 'Ignored'),
+        },
+        {
+          operationId: 'reject-b',
+          kind: 'delete',
+          blockId: 'block-b',
+          expectedHash: hashBlock(second),
+        },
+      ],
+    });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-a',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'pending', decisions: { 'reject-a': 'rejected' } });
+    await expect(service.getPending(ids.article)).resolves.toMatchObject({
+      proposalId: proposal.proposalId,
+      decisions: { 'reject-a': 'rejected' },
+    });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-a',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'pending' });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-a',
+        userId: ids.user,
+        decision: 'accepted',
+      }),
+    ).rejects.toThrow('opposite decision');
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'reject-b': 'rejected', 'reject-a': 'accepted' },
+      }),
+    ).rejects.toThrow('opposite decision');
+    await expect(service.getPending(ids.article)).resolves.toMatchObject({
+      proposalId: proposal.proposalId,
+      decisions: { 'reject-a': 'rejected' },
+    });
+    await expect(
+      service.decideOperation({
+        proposalId: proposal.proposalId,
+        operationId: 'reject-b',
+        userId: ids.user,
+        decision: 'rejected',
+      }),
+    ).resolves.toMatchObject({ status: 'rejected' });
+  });
+
+  it('commits proposal expiry before returning a stale settlement error', async () => {
+    const articleId = randomUUID();
+    const baseRevisionId = randomUUID();
+    const currentRevisionId = randomUUID();
+    const currentDocument: ArticleDocument = {
+      type: 'doc',
+      content: [paragraph('block-a', 'Manual revision'), second],
+    };
+    await connection.db.insert(articles).values({
+      id: articleId,
+      workspaceId: ids.workspace,
+      title: 'Stale settlement',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: baseRevisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash: hashDocument(document),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: baseRevisionId })
+      .where(eq(articles.id, articleId));
+    const service = new ProposalService(connection.db);
+    const proposal = await service.create({
+      articleId,
+      operations: [
+        {
+          operationId: 'stale-settlement',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(first),
+          block: paragraph('block-a', 'Agent draft'),
+        },
+      ],
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: currentRevisionId,
+      articleId,
+      revisionNumber: 2,
+      schemaVersion: 1,
+      document: currentDocument,
+      documentHash: hashDocument(currentDocument),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId })
+      .where(eq(articles.id, articleId));
+
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'stale-settlement': 'accepted' },
+      }),
+    ).rejects.toThrow('stale');
+    const [expired] = await connection.db
+      .select({ status: editProposals.status })
+      .from(editProposals)
+      .where(eq(editProposals.id, proposal.proposalId));
+    expect(expired?.status).toBe('expired');
+    await expect(service.getPending(articleId)).resolves.toBeUndefined();
+  });
+
+  it('expires a stale working draft before rejecting a new append', async () => {
+    const articleId = randomUUID();
+    const baseRevisionId = randomUUID();
+    const currentRevisionId = randomUUID();
+    const currentFirst = paragraph('block-a', 'Manual revision');
+    const currentDocument: ArticleDocument = { type: 'doc', content: [currentFirst, second] };
+    await connection.db.insert(articles).values({
+      id: articleId,
+      workspaceId: ids.workspace,
+      title: 'Stale append',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: baseRevisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash: hashDocument(document),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: baseRevisionId })
+      .where(eq(articles.id, articleId));
+    const service = new ProposalService(connection.db);
+    const proposal = await service.create({
+      articleId,
+      operations: [
+        {
+          operationId: 'initial-draft',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(first),
+          block: paragraph('block-a', 'Agent draft'),
+        },
+      ],
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: currentRevisionId,
+      articleId,
+      revisionNumber: 2,
+      schemaVersion: 1,
+      document: currentDocument,
+      documentHash: hashDocument(currentDocument),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId })
+      .where(eq(articles.id, articleId));
+
+    await expect(
+      service.create({
+        articleId,
+        operations: [
+          {
+            operationId: 'new-draft',
+            kind: 'replace',
+            blockId: 'block-a',
+            expectedHash: hashBlock(currentFirst),
+            block: paragraph('block-a', 'New agent draft'),
+          },
+        ],
+      }),
+    ).rejects.toThrow('working draft');
+    const [expired] = await connection.db
+      .select({ status: editProposals.status })
+      .from(editProposals)
+      .where(eq(editProposals.id, proposal.proposalId));
+    expect(expired?.status).toBe('expired');
+  });
+
+  it('settles a complete article write as one document decision', async () => {
+    const service = new ProposalService(connection.db);
+    const currentFirst = paragraph('block-a', 'New');
+    const proposal = await service.create({
+      articleId: ids.article,
+      reviewMode: 'document',
+      operations: [
+        {
+          operationId: 'document-replace-a',
+          kind: 'replace',
+          blockId: 'block-a',
+          expectedHash: hashBlock(currentFirst),
+          block: paragraph('block-a', 'Document first'),
+        },
+        {
+          operationId: 'document-replace-b',
+          kind: 'replace',
+          blockId: 'block-b',
+          expectedHash: hashBlock(second),
+          block: paragraph('block-b', 'Document second'),
+        },
+      ],
+    });
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'document-replace-a': 'accepted' },
+      }),
+    ).resolves.toMatchObject({
+      status: 'accepted',
+      appliedOperationIds: ['document-replace-a', 'document-replace-b'],
+      reviewMode: 'document',
+    });
   });
 
   it('atomically promotes an acknowledged draft and schedules its index update', async () => {

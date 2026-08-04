@@ -5,7 +5,8 @@ import { fileURLToPath, URL } from 'node:url';
 
 const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url));
 const allowedExtensions = new Set(['.css', '.ts', '.tsx']);
-const limit = 1000;
+const sourceLimit = 1000;
+const agentModuleLimit = 500;
 const oversized = [];
 
 async function visit(directory) {
@@ -16,13 +17,18 @@ async function visit(directory) {
       continue;
     }
     if (!allowedExtensions.has(extname(entry.name))) continue;
+    const sourcePath = relative(sourceRoot, path);
     const lines = (await readFile(path, 'utf8')).split('\n').length;
-    if (lines > limit) oversized.push(`${relative(sourceRoot, path)}: ${lines} lines`);
+    const isAgentModule =
+      ['.ts', '.tsx'].includes(extname(entry.name)) &&
+      /^(components|lib)\/(?:use-)?agent/u.test(sourcePath);
+    const limit = isAgentModule ? agentModuleLimit : sourceLimit;
+    if (lines > limit) oversized.push(`${sourcePath}: ${lines} lines (limit ${limit})`);
   }
 }
 
 await visit(sourceRoot);
 if (oversized.length > 0) {
-  process.stderr.write(`Source files must not exceed ${limit} lines:\n${oversized.join('\n')}\n`);
+  process.stderr.write(`Source file length limits exceeded:\n${oversized.join('\n')}\n`);
   process.exitCode = 1;
 }

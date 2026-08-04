@@ -86,6 +86,7 @@ export type CreateDirectRunInput = {
   readonly userId: string;
   readonly prompt: string;
   readonly idempotencyKey: string;
+  readonly existingMessageId?: string;
   readonly contextBindings?: readonly RunContextBinding[];
   readonly mentionTargetIds?: readonly string[];
   readonly attachmentIds?: readonly string[];
@@ -143,7 +144,9 @@ export type RunPart = {
   readonly sequence: number;
   readonly type:
     | 'text'
+    | 'reasoning'
     | 'plan'
+    | 'action-proposal'
     | 'activity'
     | 'tool-approval'
     | 'ask-user'
@@ -152,6 +155,7 @@ export type RunPart = {
     | 'artifact'
     | 'warning'
     | 'recovery'
+    | 'progress'
     | 'usage';
   readonly status: string;
   readonly payload: Readonly<Record<string, unknown>>;
@@ -161,10 +165,12 @@ export type RunProjection = {
   readonly runId: string;
   readonly rootMessageId: string;
   readonly status: string;
+  readonly terminal: boolean;
   readonly mode: 'direct' | 'planned';
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
+  readonly context?: Readonly<Record<string, unknown>>;
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
   readonly pendingDirectives: readonly {
     readonly id: string;

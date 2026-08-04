@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.json --watch",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test",
     "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
     "test:integration": "vitest run test/*.integration.test.ts",
@@ -25,11 +25,15 @@
   "dependencies": {
     "@agentpress/agent-context": "workspace:*",
     "@agentpress/agent-runtime": "workspace:*",
+    "@agentpress/contracts": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/editor-patch": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
     "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@agentpress/editor-application": "workspace:*"
   }
 }

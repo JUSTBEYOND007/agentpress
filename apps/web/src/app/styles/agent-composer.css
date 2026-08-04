@@ -116,8 +116,8 @@
 .composer-shell {
   position: relative;
   border-top: 1px solid #ededeb;
-  background: linear-gradient(180deg, rgb(250 250 248 / 72%), #f7f7f5);
-  padding: 10px 12px 12px;
+  background: #f7f7f5;
+  padding: 10px 12px max(12px, env(safe-area-inset-bottom));
 }
 
 .composer-trigger-menu {
@@ -228,6 +228,11 @@
   color: #696a65;
   cursor: pointer;
   pointer-events: auto;
+}
+
+.scroll-button:disabled {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .agent-composer {
@@ -347,6 +352,12 @@
   overflow: hidden;
   flex: 1;
   text-overflow: ellipsis;
+}
+
+.composer-context-chip.is-fixed {
+  border-color: #e3e3df;
+  background: #f4f4f1;
+  color: #62635e;
 }
 
 .composer-context-chip > button {
@@ -670,6 +681,27 @@
   cursor: pointer;
 }
 
+.composer-primary-actions {
+  gap: 6px;
+}
+
+.run-termination-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #dededb;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #5f605b;
+  cursor: pointer;
+}
+
+.run-termination-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .send-button:disabled {
   background: #d8d8d4;
   cursor: default;
@@ -682,10 +714,11 @@
 .composer-context-chip > button:focus-visible,
 .composer-inline-notice button:focus-visible,
 .send-behavior:focus-visible,
+.run-termination-button:focus-visible,
 .send-button:focus-visible,
 .composer-menu button:focus-visible,
 .send-mode-menu button:focus-visible {
-  outline: 2px solid #6f9b7f;
+  outline: 2px solid #2383e2;
   outline-offset: 2px;
 }
 

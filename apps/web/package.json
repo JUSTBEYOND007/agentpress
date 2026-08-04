@@ -9,7 +9,8 @@
     "dev": "next dev --port 3000",
     "lint": "eslint src scripts",
     "start": "next start --port 3000",
-    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test",
+    "test": "vitest run --passWithNoTests --exclude 'tests/e2e/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -18,6 +19,10 @@
     "@assistant-ui/react": "catalog:",
     "@logto/react": "catalog:",
     "@microsoft/fetch-event-source": "catalog:",
+    "@streamdown/cjk": "1.0.3",
+    "@streamdown/code": "1.1.1",
+    "@streamdown/math": "1.0.2",
+    "@streamdown/mermaid": "1.0.2",
     "@tiptap/core": "catalog:",
     "@tiptap/extension-image": "catalog:",
     "@tiptap/extension-placeholder": "3.29.2",
@@ -31,9 +36,11 @@
     "lucide-react": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "streamdown": "2.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@types/react": "catalog:types",
     "@types/react-dom": "catalog:types",
     "tsx": "catalog:"

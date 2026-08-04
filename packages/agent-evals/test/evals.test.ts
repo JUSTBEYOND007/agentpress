@@ -21,6 +21,7 @@ describe('Agent eval suite', () => {
   it('covers both sides of the cross-turn intent boundary', () => {
     const greeting = evalScenarios.find(({ id }) => id === 'agentpress-routing-06');
     const continuation = evalScenarios.find(({ id }) => id === 'agentpress-routing-07');
+    const confirmed = evalScenarios.find(({ id }) => id === 'agentpress-routing-08');
 
     expect(greeting).toMatchObject({
       prompt: '你好',
@@ -30,28 +31,32 @@ describe('Agent eval suite', () => {
     expect(greeting?.setup?.priorTurns).toHaveLength(1);
     expect(continuation).toMatchObject({
       prompt: '继续上一段',
+      expected: { allowedModes: ['direct'], actionProposal: 'required' },
+    });
+    expect(confirmed).toMatchObject({
+      prompt: '继续上一段',
       expected: { allowedModes: ['planned'], requiredRoles: ['editor'] },
+      setup: { confirmedArticleEdit: true },
     });
   });
 
   it('scores only supplied persisted facts and fails missing observations', () => {
     const scenario = evalScenarios[0];
     if (!scenario) throw new Error('Eval fixture is empty');
-    const observed = [
-      {
-        scenarioId: scenario.id,
-        mode: 'direct' as const,
-        status: 'completed',
-        tasks: [],
-        artifactTypes: [],
-        evidenceCount: 0,
-        approvalRequests: 0,
-        schemaValid: true,
-        unauthorizedWrites: 0,
-        unknownOutcomeRetries: 0,
-        crossWorkspaceMemoryHits: 0,
-      },
-    ];
+    const observedRun = {
+      scenarioId: scenario.id,
+      mode: 'direct' as const,
+      status: 'completed',
+      tasks: [],
+      artifactTypes: [],
+      evidenceCount: 0,
+      approvalRequests: 0,
+      schemaValid: true,
+      unauthorizedWrites: 0,
+      unknownOutcomeRetries: 0,
+      crossWorkspaceMemoryHits: 0,
+    };
+    const observed = [observedRun];
     const score = scoreEvals(evaluatePersistedRuns([scenario], observed));
     expect(score).toMatchObject({
       routingAccuracy: 1,
@@ -60,6 +65,9 @@ describe('Agent eval suite', () => {
       securityPassed: true,
     });
     expect(scoreEvals(evaluatePersistedRuns([scenario], [])).securityPassed).toBe(false);
+    expect(
+      evaluatePersistedRuns([scenario], [{ ...observedRun, status: 'failed' }])[0]?.routingCorrect,
+    ).toBe(false);
   });
 
   it('calculates and enforces RAG ranking, citation and faithfulness gates', () => {

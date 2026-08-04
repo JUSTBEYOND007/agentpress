@@ -55,4 +55,33 @@ describe('loadApiEnvironment', () => {
       }),
     ).not.toHaveProperty('arkApiKey');
   });
+
+  it('keeps an OpenAI-compatible Agent model separate from Ark media models', () => {
+    expect(
+      loadWorkerEnvironment({
+        AGENT_MODEL_API_KEY: 'agent-secret',
+        AGENT_MODEL_BASE_URL: 'https://models.example/v1',
+        AGENT_MODEL_PRO: 'model-pro',
+        AGENT_MODEL_TURBO: 'model-turbo',
+        ARK_API_KEY: 'ark-secret',
+        ARK_EMBEDDING_MODEL: 'ark-embedding',
+      }),
+    ).toMatchObject({
+      agentModelApiKey: 'agent-secret',
+      agentModelBaseUrl: 'https://models.example/v1',
+      agentModelPro: 'model-pro',
+      agentModelTurbo: 'model-turbo',
+      arkApiKey: 'ark-secret',
+      arkEmbeddingModel: 'ark-embedding',
+    });
+  });
+
+  it('rejects a partial Agent model configuration', () => {
+    expect(() =>
+      loadWorkerEnvironment({
+        AGENT_MODEL_API_KEY: 'agent-secret',
+        AGENT_MODEL_PRO: 'model-pro',
+      }),
+    ).toThrow('must be configured together');
+  });
 });

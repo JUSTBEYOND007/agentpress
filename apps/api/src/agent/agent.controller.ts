@@ -1,4 +1,5 @@
 import {
+  ActionProposalService,
   AgentApplicationError,
   DirectRunService,
   ToolCallApplicationError,
@@ -7,15 +8,10 @@ import {
   type LiveRunEvent,
 } from '@agentpress/agent-application';
 import {
-  conversationBranches,
-  conversationMessages,
-  conversations,
-  type DatabaseConnection,
-} from '@agentpress/database';
-import {
   BadRequestException,
   Body,
   Controller,
+  ConflictException,
   Get,
   Headers,
   HttpCode,
@@ -24,18 +20,16 @@ import {
   Optional,
   Param,
   Post,
+  Query,
   Sse,
   type MessageEvent,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { and, asc, eq, lte } from 'drizzle-orm';
 import { Observable } from 'rxjs';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { AuthorizationService } from '../auth/authorization.service.js';
-import { DATABASE_CONNECTION } from './agent.providers.js';
 
 type CreateRunBody = {
   readonly branchId?: unknown;
@@ -44,6 +38,7 @@ type CreateRunBody = {
   readonly attachmentIds?: unknown;
   readonly skills?: unknown;
   readonly contextBindings?: unknown;
+  readonly existingMessageId?: unknown;
 };
 
 type RunDirectiveBody = {
@@ -74,8 +69,39 @@ export class AgentController {
     @Inject(RedisRunEventBus) private readonly eventBus: RedisRunEventBus,
     @Inject(ToolCallService) @Optional() private readonly toolCalls?: ToolCallService,
     @Inject(AuthorizationService) private readonly authorization?: AuthorizationService,
-    @Inject(DATABASE_CONNECTION) private readonly connection?: DatabaseConnection,
+    @Inject(ActionProposalService)
+    @Optional()
+    private readonly actionProposals?: ActionProposalService,
   ) {}
+
+  @Post('action-proposals/:proposalId/confirm')
+  @HttpCode(202)
+  public async confirmActionProposal(
+    @Param('proposalId') proposalId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!this.actionProposals)
+      throw new BadRequestException('Action proposal service is unavailable');
+    try {
+      return await this.actionProposals.confirm(proposalId, user.id, this.runs);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
+
+  @Post('action-proposals/:proposalId/reject')
+  public async rejectActionProposal(
+    @Param('proposalId') proposalId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!this.actionProposals)
+      throw new BadRequestException('Action proposal service is unavailable');
+    try {
+      return await this.actionProposals.reject(proposalId, user.id);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
+  }
 
   @Get('conversations/:conversationId/branches/:branchId/messages')
   public async listMessages(
@@ -93,63 +119,13 @@ export class AgentController {
     @Body() body: { readonly messageId?: unknown },
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    if (!this.connection) throw new BadRequestException('Database connection is unavailable');
     if (typeof body.messageId !== 'string')
       throw new BadRequestException('messageId must be a string');
-    const messageId = body.messageId;
-    const rows = await this.connection.db
-      .select({
-        workspaceId: conversations.workspaceId,
-        sequence: conversationMessages.sequence,
-      })
-      .from(conversationMessages)
-      .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
-      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
-      .where(
-        and(
-          eq(conversationMessages.id, messageId),
-          eq(conversationMessages.branchId, branchId),
-          eq(conversations.id, conversationId),
-          eq(conversationMessages.stable, true),
-        ),
-      )
-      .limit(1);
-    const forkPoint = rows[0];
-    if (!forkPoint) throw new NotFoundException('Fork message does not exist on this branch');
-    await this.authorization?.assertWorkspaceMember(forkPoint.workspaceId, user.id);
-    const messages = await this.connection.db
-      .select()
-      .from(conversationMessages)
-      .where(
-        and(
-          eq(conversationMessages.branchId, branchId),
-          eq(conversationMessages.stable, true),
-          lte(conversationMessages.sequence, forkPoint.sequence),
-        ),
-      )
-      .orderBy(asc(conversationMessages.sequence));
-    const newBranchId = randomUUID();
-    await this.connection.db.transaction(async (transaction) => {
-      await transaction.insert(conversationBranches).values({
-        id: newBranchId,
-        conversationId,
-        parentBranchId: branchId,
-        forkedFromMessageId: messageId,
-      });
-      if (messages.length > 0)
-        await transaction.insert(conversationMessages).values(
-          messages.map((message) => ({
-            id: randomUUID(),
-            branchId: newBranchId,
-            role: message.role,
-            sequence: message.sequence,
-            content: message.content,
-            stable: true,
-            createdAt: message.createdAt,
-          })),
-        );
-    });
-    return { branchId: newBranchId, parentBranchId: branchId, forkedFromMessageId: messageId };
+    try {
+      return await this.runs.forkBranch(conversationId, branchId, body.messageId, user.id);
+    } catch (error) {
+      throw mapApplicationError(error);
+    }
   }
 
   @Post('conversations/:conversationId/runs')
@@ -166,6 +142,8 @@ export class AgentController {
     if (typeof body.branchId !== 'string' || typeof body.prompt !== 'string') {
       throw new BadRequestException('branchId and prompt must be strings');
     }
+    if (body.existingMessageId !== undefined && typeof body.existingMessageId !== 'string')
+      throw new BadRequestException('existingMessageId must be a string');
     const mentionTargetIds = parseStringArray(body.mentionTargetIds, 'mentionTargetIds', 20);
     const attachmentIds = parseStringArray(body.attachmentIds, 'attachmentIds', 10);
     const skills = parseSkills(body.skills);
@@ -182,6 +160,9 @@ export class AgentController {
         attachmentIds,
         skills,
         contextBindings,
+        ...(typeof body.existingMessageId === 'string'
+          ? { existingMessageId: body.existingMessageId }
+          : {}),
       });
     } catch (error) {
       throw mapApplicationError(error);
@@ -206,6 +187,7 @@ export class AgentController {
       runId: projection.runId,
       rootMessageId: projection.rootMessageId,
       status: projection.status,
+      terminal: projection.terminal,
       mode: projection.mode,
       ...(projection.activePlanRevision
         ? { activePlanRevision: projection.activePlanRevision }
@@ -234,6 +216,26 @@ export class AgentController {
   public async getArtifacts(@Param('runId') runId: string, @CurrentUser() user: AuthenticatedUser) {
     const projection = await this.getProjection(runId, user);
     return projection.artifacts;
+  }
+
+  @Get('runs/:runId/artifacts/:artifactId')
+  public async getArtifact(
+    @Param('runId') runId: string,
+    @Param('artifactId') artifactId: string,
+    @Query('version') versionValue: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization?.assertRunAccess(runId, user.id);
+    const version = parseOptionalPositiveInteger(versionValue, 'version');
+    const result = await this.runs.getArtifact(runId, artifactId, version);
+    if (result.status === 'not_found') throw new NotFoundException('Artifact does not exist');
+    if (result.status === 'stale') {
+      throw new ConflictException({
+        code: 'artifact_version_stale',
+        currentVersion: result.currentVersion,
+      });
+    }
+    return result.artifact;
   }
 
   @Sse('runs/:runId/events')
@@ -444,6 +446,15 @@ function parseStringArray(value: unknown, field: string, maxItems: number): read
   )
     throw new BadRequestException(`${field} must be an array of at most ${String(maxItems)} IDs`);
   return value as string[];
+}
+
+function parseOptionalPositiveInteger(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new BadRequestException(`${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function parseSkills(value: unknown): readonly { skillId: string; version: string }[] {

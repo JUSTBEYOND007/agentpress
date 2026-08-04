@@ -69,6 +69,10 @@ const WorkerEnvironmentSchema = Type.Intersect([
     ARK_EMBEDDING_MODEL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_RERANK_MODEL: Type.Optional(Type.String({ minLength: 1 })),
     ARK_IMAGE_MODEL: Type.Optional(Type.String({ minLength: 1 })),
+    AGENT_MODEL_API_KEY: Type.Optional(Type.String({ minLength: 1 })),
+    AGENT_MODEL_BASE_URL: Type.Optional(Type.String({ minLength: 1 })),
+    AGENT_MODEL_PRO: Type.Optional(Type.String({ minLength: 1 })),
+    AGENT_MODEL_TURBO: Type.Optional(Type.String({ minLength: 1 })),
     S3_ENDPOINT: Type.Optional(Type.String({ minLength: 1 })),
     S3_BUCKET: Type.Optional(Type.String({ minLength: 1 })),
     S3_ACCESS_KEY: Type.Optional(Type.String({ minLength: 1 })),
@@ -89,6 +93,10 @@ export type WorkerEnvironment = {
   readonly arkEmbeddingModel?: string;
   readonly arkRerankModel?: string;
   readonly arkImageModel?: string;
+  readonly agentModelApiKey?: string;
+  readonly agentModelBaseUrl?: string;
+  readonly agentModelPro?: string;
+  readonly agentModelTurbo?: string;
   readonly s3: ApiEnvironment['s3'];
 };
 
@@ -158,6 +166,19 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
   if (kafkaBrokers.length === 0) {
     throw new Error('KAFKA_BROKERS must contain at least one broker');
   }
+  const requiredAgentModelValues = [
+    clean.AGENT_MODEL_API_KEY,
+    clean.AGENT_MODEL_BASE_URL,
+    clean.AGENT_MODEL_PRO,
+  ];
+  const hasAgentModelConfiguration = [...requiredAgentModelValues, clean.AGENT_MODEL_TURBO].some(
+    Boolean,
+  );
+  if (hasAgentModelConfiguration && !requiredAgentModelValues.every(Boolean)) {
+    throw new Error(
+      'AGENT_MODEL_API_KEY, AGENT_MODEL_BASE_URL and AGENT_MODEL_PRO must be configured together',
+    );
+  }
   const s3Url = new URL(clean.S3_ENDPOINT ?? 'http://localhost:9000');
 
   return {
@@ -181,5 +202,9 @@ export function loadWorkerEnvironment(source: NodeJS.ProcessEnv = process.env): 
     ...(clean.ARK_EMBEDDING_MODEL ? { arkEmbeddingModel: clean.ARK_EMBEDDING_MODEL } : {}),
     ...(clean.ARK_RERANK_MODEL ? { arkRerankModel: clean.ARK_RERANK_MODEL } : {}),
     ...(clean.ARK_IMAGE_MODEL ? { arkImageModel: clean.ARK_IMAGE_MODEL } : {}),
+    ...(clean.AGENT_MODEL_API_KEY ? { agentModelApiKey: clean.AGENT_MODEL_API_KEY } : {}),
+    ...(clean.AGENT_MODEL_BASE_URL ? { agentModelBaseUrl: clean.AGENT_MODEL_BASE_URL } : {}),
+    ...(clean.AGENT_MODEL_PRO ? { agentModelPro: clean.AGENT_MODEL_PRO } : {}),
+    ...(clean.AGENT_MODEL_TURBO ? { agentModelTurbo: clean.AGENT_MODEL_TURBO } : {}),
   };
 }

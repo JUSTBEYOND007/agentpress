@@ -57,6 +57,19 @@ The selection is evidence-based rather than a popularity choice:
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
+### Implemented InkOS behavior baseline
+
+Implemented on 2026-08-02 without copying InkOS source code:
+
+- `packages/agent-application/src/agent-turn-profile.ts` now derives a deterministic turn kind and exact Main control-tool table from the typed action envelope and frozen context manifest. A host-confirmed article edit bypasses Main planning and becomes one persisted editor task.
+- `packages/agent-application/src/agent-session-runner.ts` owns Pi session creation, actual provider/model identity, transcript sequencing, steering, event projection, and settlement. PostgreSQL remains authoritative.
+- `packages/agent-application/src/agent-transcript-projector.ts` restores completed attempts only, limits natural dialogue to 12 messages and tool state to 8 summaries, strips historical thinking/tool protocol, and adds an explicit historical-intent boundary.
+- Conversation titles are generated deterministically by the host rather than through a synchronous model tool. The web composer no longer binds the active article by default.
+- Successful article proposals and confirmed production results are terminal outcomes and do not force a redundant Main synthesis call.
+- Online evals distinguish free-text proposals from confirmed mutation actions, require a successful terminal Run, isolate themselves from the command outbox, and support both Ark and the configured OpenAI-compatible Agent provider.
+
+Verification at this baseline: Agent runtime/application/eval unit and type checks pass; 28 PostgreSQL application integration tests pass against the repository infrastructure. A real-model routing run correctly failed its gate because the configured Ark account returned `403 AccountOverdueError`; real target-model acceptance remains blocked until a working `AGENT_MODEL_*` or Ark credential is available and must not be represented as passed.
+
 ## Pi Business Architecture References
 
 Surveyed on 2026-08-02. These repositories use Pi Agent Core inside working products rather than only exposing framework examples. They are architecture and test references until a concrete change promotes one into the reuse matrix above; promotion still requires a license audit and `THIRD_PARTY_NOTICES.md` entry when code is copied.

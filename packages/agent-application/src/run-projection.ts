@@ -13,12 +13,32 @@ export function projectRunParts(
 ): readonly RunPart[] {
   const projected: RunPart[] = [];
   const lifecycleIndexes = new Map<string, number>();
+  let activeReasoningIndex: number | undefined;
 
   for (const event of events) {
+    if (activeReasoningIndex !== undefined && closesReasoning(event.eventType)) {
+      const reasoning = projected[activeReasoningIndex];
+      const startedAt = reasoning ? dateProperty(reasoning.payload, 'startedAt') : undefined;
+      if (reasoning?.status === 'run.planning') {
+        projected[activeReasoningIndex] = {
+          ...reasoning,
+          status: 'reasoning.completed',
+          payload: {
+            ...reasoning.payload,
+            completedAt: event.createdAt.toISOString(),
+            ...(startedAt
+              ? { durationMs: Math.max(0, event.createdAt.getTime() - startedAt.getTime()) }
+              : {}),
+          },
+        };
+      }
+      activeReasoningIndex = undefined;
+    }
     for (const part of toRunParts(event, proposalStatuses)) {
       const key = lifecycleKey(event);
       if (!key) {
         projected.push(part);
+        if (part.type === 'reasoning') activeReasoningIndex = projected.length - 1;
         continue;
       }
       const previousIndex = lifecycleIndexes.get(key);
@@ -26,12 +46,48 @@ export function projectRunParts(
         lifecycleIndexes.set(key, projected.length);
         projected.push(part);
       } else {
-        projected[previousIndex] = part;
+        const previous = projected[previousIndex];
+        const startedAt = previous
+          ? dateProperty(previous.payload, 'lifecycleStartedAt')
+          : undefined;
+        const eventAt = dateProperty(part.payload, 'eventAt');
+        projected[previousIndex] = previous
+          ? {
+              ...part,
+              payload: {
+                ...previous.payload,
+                ...part.payload,
+                ...(startedAt ? { lifecycleStartedAt: startedAt.toISOString() } : {}),
+                ...(startedAt && eventAt && isSettledLifecycleStatus(part.status)
+                  ? { durationMs: Math.max(0, eventAt.getTime() - startedAt.getTime()) }
+                  : {}),
+              },
+            }
+          : part;
       }
     }
   }
 
   return projected;
+}
+
+function isSettledLifecycleStatus(status: string): boolean {
+  return /\.(succeeded|failed|cancelled|denied|expired)$/u.test(status);
+}
+
+function closesReasoning(eventType: string): boolean {
+  return (
+    eventType === 'message.completed' ||
+    eventType === 'article.proposal.created' ||
+    eventType === 'user.input_requested' ||
+    eventType.startsWith('plan.') ||
+    eventType.startsWith('tool.') ||
+    eventType.startsWith('task.') ||
+    eventType.startsWith('action.') ||
+    eventType.startsWith('run.completed') ||
+    eventType === 'run.failed' ||
+    eventType === 'run.cancelled'
+  );
 }
 
 function lifecycleKey(event: DurableRunEvent): string | undefined {
@@ -42,6 +98,11 @@ function lifecycleKey(event: DurableRunEvent): string | undefined {
   if (event.eventType.startsWith('task.')) {
     const taskId = stringProperty(event.payload, 'taskId');
     return taskId ? `task:${taskId}` : undefined;
+  }
+  if (event.eventType.startsWith('action.')) {
+    const proposalId =
+      stringProperty(event.payload, 'id') ?? stringProperty(event.payload, 'proposalId');
+    return proposalId ? `action:${proposalId}` : undefined;
   }
   return undefined;
 }
@@ -54,23 +115,31 @@ function toRunParts(
   const partType =
     type === 'message.completed'
       ? 'text'
-      : type.startsWith('plan.')
-        ? 'plan'
-        : type === 'tool.approval_requested'
-          ? 'tool-approval'
-          : type === 'user.input_requested'
-            ? 'ask-user'
-            : type.includes('artifact')
-              ? 'artifact'
-              : type.startsWith('run.recover')
-                ? 'recovery'
-                : type === 'run.completed_with_degradation' || type === 'run.failed'
-                  ? 'warning'
-                  : type.startsWith('tool.') || type.startsWith('task.')
-                    ? 'activity'
-                    : type.startsWith('run.completed')
-                      ? 'usage'
-                      : undefined;
+      : type === 'run.planning'
+        ? 'reasoning'
+        : type.startsWith('plan.')
+          ? 'plan'
+          : type.startsWith('action.')
+            ? 'action-proposal'
+            : type === 'article.proposal.created'
+              ? 'article-change'
+              : type === 'tool.approval_requested'
+                ? 'tool-approval'
+                : type === 'user.input_requested'
+                  ? 'ask-user'
+                  : type.includes('artifact')
+                    ? 'artifact'
+                    : type.startsWith('run.recover')
+                      ? 'recovery'
+                      : type === 'run.completed_with_degradation' ||
+                          type === 'run.failed' ||
+                          type === 'run.cancelled'
+                        ? 'warning'
+                        : type.startsWith('tool.') || type.startsWith('task.')
+                          ? 'activity'
+                          : type.startsWith('run.completed')
+                            ? 'usage'
+                            : undefined;
   if (!partType) return [];
 
   const proposalId = proposalIdFromPayload(event.payload);
@@ -83,9 +152,22 @@ function toRunParts(
       sequence: event.sequence,
       type: partType,
       status: type,
-      payload: proposalStatus ? { ...event.payload, proposalStatus } : event.payload,
+      payload: {
+        ...event.payload,
+        eventAt: event.createdAt.toISOString(),
+        ...(lifecycle ? { lifecycleStartedAt: event.createdAt.toISOString() } : {}),
+        ...(partType === 'reasoning' ? { startedAt: event.createdAt.toISOString() } : {}),
+        ...(proposalStatus ? { proposalStatus } : {}),
+      },
     },
   ];
+}
+
+function dateProperty(value: Readonly<Record<string, unknown>>, key: string): Date | undefined {
+  const candidate = value[key];
+  if (typeof candidate !== 'string') return undefined;
+  const date = new Date(candidate);
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 function proposalIdFromPayload(payload: Readonly<Record<string, unknown>>): string | undefined {

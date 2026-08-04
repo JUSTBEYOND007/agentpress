@@ -24,8 +24,17 @@ describe('agent view model', () => {
 
   it('only exposes navigable web links', () => {
     expect(safeExternalUrl('https://example.com/source')).toBe('https://example.com/source');
-    expect(safeExternalUrl('javascript:alert(1)')).toBeUndefined();
-    expect(safeExternalUrl('not a link')).toBeUndefined();
+    for (const hostile of [
+      'javascript:alert(1)',
+      'data:text/html,<script>alert(1)</script>',
+      'file:///etc/passwd',
+      'vbscript:msgbox(1)',
+      '//attacker.example/path',
+      'https://trusted.example@attacker.example/path',
+      'not a link',
+    ]) {
+      expect(safeExternalUrl(hostile)).toBeUndefined();
+    }
   });
 
   it('only opens proposals whose persisted status is pending', () => {
@@ -43,6 +52,6 @@ describe('agent view model', () => {
     expect(proposalFromPart(part)).toMatchObject({ proposalId: 'proposal-1', status: 'pending' });
     expect(
       proposalFromPart({ ...part, payload: { ...part.payload, proposalStatus: 'accepted' } }),
-    ).toBeUndefined();
+    ).toMatchObject({ proposalId: 'proposal-1', status: 'accepted' });
   });
 });

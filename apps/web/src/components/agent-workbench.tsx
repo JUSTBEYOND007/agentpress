@@ -6,15 +6,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AgentComposer } from './agent-composer';
 import type { ArticleSelectionView } from './article-selection';
 import { AgentConversationHeader } from './agent-conversation-header';
-import { RunActionsContext, type RunActions } from './agent-run-parts';
+import { RunActionsContext, type RunActions } from './agent-run-actions';
 import { AgentThread } from './agent-thread';
-import type {
-  AttachmentView,
-  ConversationView,
-  MemoryView,
-  Proposal,
-  SkillView,
-} from './agent-view-model';
+import type { AttachmentView, MemoryView, Proposal, SkillView } from './agent-view-model';
+import { useAgentConversations } from './use-agent-conversations';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
 import {
   useAgentPressAssistantRuntime,
@@ -28,28 +23,38 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
 export function AgentWorkbench({
   conversationId,
   branchId,
-  onArticleUpdated,
+  onArticleReviewChanged,
+  onOpenArticleProposal,
+  onClose,
   workspaceId,
   activeArticleId,
   activeArticleTitle,
   articleSelection,
+  pendingReview = false,
   articles,
-  onProposalReady,
+  beforeSend,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
-  readonly onArticleUpdated?: () => Promise<void>;
+  readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
+  readonly onOpenArticleProposal?: (proposal: Proposal) => Promise<void>;
+  readonly onClose?: () => void;
   readonly workspaceId?: string;
   readonly activeArticleId?: string;
   readonly activeArticleTitle?: string;
   readonly articleSelection?: ArticleSelectionView;
-  readonly articles: readonly { readonly id: string; readonly revisionId: string; readonly title: string }[];
-  readonly onProposalReady?: (proposal: Proposal) => void;
+  readonly pendingReview?: boolean;
+  readonly beforeSend?: () => Promise<void>;
+  readonly articles: readonly {
+    readonly id: string;
+    readonly revisionId: string;
+    readonly title: string;
+  }[];
 }): React.JSX.Element {
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const [skills, setSkills] = useState<readonly SkillView[]>([]);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<readonly string[]>([]);
-  const [mentionActiveArticle, setMentionActiveArticle] = useState(true);
+  const [mentionActiveArticle, setMentionActiveArticle] = useState(false);
   const [selectedArticleIds, setSelectedArticleIds] = useState<readonly string[]>([]);
   const [selectionIncluded, setSelectionIncluded] = useState(Boolean(articleSelection));
   const [attachments, setAttachments] = useState<readonly AttachmentView[]>([]);
@@ -57,12 +62,20 @@ export function AgentWorkbench({
   const [attachmentError, setAttachmentError] = useState<string>();
   const [memories, setMemories] = useState<readonly MemoryView[]>([]);
   const [contextError, setContextError] = useState<string>();
-  const [conversations, setConversations] = useState<readonly ConversationView[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<ConversationView | undefined>(
-    conversationId && branchId
-      ? { id: conversationId, branchId, title: '写作助手', isDefault: true }
-      : undefined,
-  );
+  const {
+    conversations,
+    selected: selectedConversation,
+    select: setSelectedConversation,
+    create: createConversation,
+    update: updateConversation,
+    refresh: loadConversations,
+    error: conversationError,
+  } = useAgentConversations({
+    apiUrl,
+    ...(activeArticleId ? { articleId: activeArticleId } : {}),
+    ...(conversationId ? { initialConversationId: conversationId } : {}),
+    ...(branchId ? { initialBranchId: branchId } : {}),
+  });
   const selectedSkills = useMemo(
     () =>
       skills
@@ -114,20 +127,29 @@ export function AgentWorkbench({
     activeProjection,
     decideTool,
     answerQuestion,
-    decideProposal,
+    decideActionProposal,
     cancelDirective,
     readiness,
     panelError,
-    isRunning,
     submissionSequence,
   } = useAgentPressAssistantRuntime(
-    sendMode,
     selectedConversation
       ? {
           conversationId: selectedConversation.id,
           branchId: selectedConversation.branchId,
           contextBindings,
           sendingDisabled: uploadingAttachments > 0,
+          ...(onArticleReviewChanged ? { onArticleReviewChanged } : {}),
+          ...(beforeSend ? { beforeSend } : {}),
+          onBranchForked: (nextBranchId, forkedFromMessageId) => {
+            setSelectedConversation({
+              ...selectedConversation,
+              branchId: nextBranchId,
+              parentBranchId: selectedConversation.branchId,
+              forkedFromMessageId,
+            });
+            void loadConversations();
+          },
         }
       : {},
   );
@@ -137,15 +159,6 @@ export function AgentWorkbench({
     setAttachments([]);
     setAttachmentError(undefined);
   }, [submissionSequence]);
-
-  useEffect(() => {
-    if (!conversationId || !branchId) return;
-    setSelectedConversation((current) =>
-      current?.id === conversationId
-        ? current
-        : { id: conversationId, branchId, title: '写作助手', isDefault: true },
-    );
-  }, [branchId, conversationId]);
 
   const loadContext = useCallback(async (): Promise<void> => {
     if (!workspaceId) return;
@@ -163,58 +176,9 @@ export function AgentWorkbench({
     }
   }, [workspaceId]);
 
-  const loadConversations = useCallback(async (): Promise<void> => {
-    if (!activeArticleId) return;
-    const response = await authenticatedFetch(
-      `${apiUrl}/articles/${activeArticleId}/conversations`,
-    );
-    if (!response.ok) throw new Error('对话列表加载失败');
-    const items = (await response.json()) as readonly ConversationView[];
-    setConversations(items);
-    setSelectedConversation(
-      (current) =>
-        items.find(({ id }) => id === current?.id) ??
-        items.find(({ id }) => id === conversationId) ??
-        items.find(({ isDefault }) => isDefault) ??
-        items[0],
-    );
-  }, [activeArticleId, conversationId]);
-
   useEffect(() => {
     void loadContext();
-    void loadConversations().catch((error: unknown) => {
-      setContextError(error instanceof Error ? error.message : '对话列表加载失败');
-    });
-  }, [loadContext, loadConversations]);
-
-  const createConversation = async (): Promise<void> => {
-    if (!activeArticleId) return;
-    const response = await authenticatedFetch(
-      `${apiUrl}/articles/${activeArticleId}/conversations`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: '新对话' }),
-      },
-    );
-    if (!response.ok) throw new Error(await response.text());
-    const created = (await response.json()) as ConversationView;
-    setConversations((current) => [created, ...current]);
-    setSelectedConversation(created);
-  };
-
-  const updateConversation = async (
-    target: ConversationView,
-    update: { readonly title?: string; readonly archived?: boolean },
-  ): Promise<void> => {
-    const response = await authenticatedFetch(`${apiUrl}/conversations/${target.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(update),
-    });
-    if (!response.ok) throw new Error(await response.text());
-    await loadConversations();
-  };
+  }, [loadContext]);
 
   const decideMemory = async (candidateId: string, decision: 'accepted' | 'rejected') => {
     if (!workspaceId) return;
@@ -234,11 +198,10 @@ export function AgentWorkbench({
     () => ({
       decideTool,
       answerQuestion,
-      decideProposal,
-      ...(onArticleUpdated ? { onArticleUpdated } : {}),
-      ...(onProposalReady ? { onProposalReady } : {}),
+      decideActionProposal,
+      ...(onOpenArticleProposal ? { openArticleProposal: onOpenArticleProposal } : {}),
     }),
-    [answerQuestion, decideProposal, decideTool, onArticleUpdated, onProposalReady],
+    [answerQuestion, decideActionProposal, decideTool, onOpenArticleProposal],
   );
   const status =
     activeProjection?.status ?? (readiness.status === 'ready' ? 'ready' : readiness.status);
@@ -250,14 +213,15 @@ export function AgentWorkbench({
           <AgentConversationHeader
             conversations={conversations}
             onCreate={createConversation}
+            {...(onClose ? { onClose } : {})}
             onSelect={setSelectedConversation}
             onUpdate={updateConversation}
             {...(selectedConversation ? { selected: selectedConversation } : {})}
             status={status}
           />
-          {panelError || contextError ? (
+          {panelError || contextError || conversationError ? (
             <div className="agent-status-banner" role="status">
-              {panelError ?? contextError}
+              {panelError ?? contextError ?? conversationError}
             </div>
           ) : null}
           <ThreadPrimitive.Root className="aui-thread">
@@ -270,7 +234,9 @@ export function AgentWorkbench({
               attachments={attachments}
               {...(attachmentError ? { attachmentError } : {})}
               {...(selectedConversation ? { conversationId: selectedConversation.id } : {})}
-              mentionActiveArticle={mentionActiveArticle}
+              {...(selectedConversation ? { branchId: selectedConversation.branchId } : {})}
+              {...(activeProjection ? { activeRun: activeProjection } : {})}
+              pendingReview={pendingReview}
               onArticleMentionChange={setSelectedArticleIds}
               onAttachmentRemove={(id) => {
                 setAttachments((current) => current.filter((item) => item.id !== id));
@@ -336,7 +302,6 @@ export function AgentWorkbench({
               selectionIncluded={selectionIncluded}
               onSkillChange={setSelectedSkillKeys}
               readiness={readiness.status}
-              running={isRunning}
               selectedSkillKeys={selectedSkillKeys}
               sendMode={sendMode}
               setSendMode={setSendMode}
