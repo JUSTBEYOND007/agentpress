@@ -79,6 +79,18 @@ describe('evaluation judge and trace metrics', () => {
     ];
     expect(scoreProcessTrace(events)).toMatchObject({ delegationCount: 1, toolCallCount: 1, latencyMs: 15 });
     expect(redactTrace(events)[0]?.payload).toMatchObject({ apiKey: '[REDACTED]' });
+    expect(
+      redactTrace([
+        {
+          type: 'tool.arguments',
+          payload: {
+            calls: [{ headers: { authorization: 'Bearer secret' }, args: [{ token: 'value' }] }],
+          },
+        },
+      ])[0]?.payload,
+    ).toEqual({
+      calls: [{ headers: { authorization: '[REDACTED]' }, args: [{ token: '[REDACTED]' }] }],
+    });
   });
 
   it('calibrates against human gold labels and exposes deterministic conflicts', () => {

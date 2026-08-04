@@ -65,11 +65,17 @@ function redactRecord(value: Readonly<Record<string, unknown>>): Readonly<Record
       key,
       /(authorization|api[_-]?key|token|password|secret)/iu.test(key)
         ? '[REDACTED]'
-        : item && typeof item === 'object' && !Array.isArray(item)
-          ? redactRecord(item as Readonly<Record<string, unknown>>)
-          : item,
+        : redactValue(item),
     ]),
   );
+}
+
+function redactValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value && typeof value === 'object') {
+    return redactRecord(value as Readonly<Record<string, unknown>>);
+  }
+  return value;
 }
 
 function numberValue(value: unknown): number {
