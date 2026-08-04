@@ -280,13 +280,14 @@ Oh My Pi 的 Mnemopi 是 Agent Memory 引擎，不是完整的多租户 FAQ/知�
 
 TODO：
 
-- [ ] 对照现有 `packages/knowledge-retrieval` 的 PostgreSQL FTS、vector、embedding 和 rerank，禁止重复实现。
+- [x] 对照现有 `packages/knowledge-retrieval` 的 PostgreSQL FTS、vector、embedding 和 rerank，禁止重复实现。
 - [x] 评估复制 Mnemopi 的 MMR、polyphonic recall、query cache、query intent 和 temporal weighting 的纯逻辑测试。
-- [ ] 将可复用排序逻辑适配到现有 `KnowledgeDocument/KnowledgeChunk/Evidence` 契约。
+- [x] 将可复用排序逻辑适配到现有 `KnowledgeDocument/KnowledgeChunk/Evidence` 契约。
 - [x] FAQ 建立精确匹配、语义匹配和置信阈值；低置信结果必须回退知识库检索或标记未知。
-- [ ] 保留 source、chunk、revision/hash、retrieval score、rerank score 和 citation mapping。
+- [x] 保留 source、chunk、revision/hash、retrieval score、rerank score 和 citation mapping。
 - [ ] 文章当前 revision 继续直接读取，不允许异步 RAG 结果覆盖更新的文章事实。
 - [ ] 建立检索离线集：FAQ 命中、知识库召回、冲突来源、过期文档、无答案和跨 workspace 隔离。
+      已提供 `evaluateRetrieval` 与 `scoreCitationResolution` 确定性指标和基础 fixture；完整业务离线集仍待补齐。
 - [ ] 使用真实 embedding/rerank provider 验证 Recall@K、MRR/NDCG、引用解析率和无答案精度。
 
 首选本地落点：`packages/knowledge-retrieval/`、`packages/agent-context/`、`packages/agent-evals/`。

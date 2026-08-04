@@ -18,6 +18,7 @@ export type FaqSearchResult =
   | { readonly source: 'unknown'; readonly evidence: readonly Evidence[] };
 
 export function matchFaq(
+  workspaceId: string,
   query: string,
   entries: readonly FaqEntry[],
   allowedAcl: ReadonlySet<string>,
@@ -26,7 +27,9 @@ export function matchFaq(
   const normalized = normalize(query);
   if (!normalized) return undefined;
   const permitted = entries.filter(
-    (entry) => entry.acl.some((principal) => allowedAcl.has(principal)),
+    (entry) =>
+      entry.workspaceId === workspaceId &&
+      entry.acl.some((principal) => allowedAcl.has(principal)),
   );
   const exact = permitted.find((entry) => normalize(entry.question) === normalized);
   if (exact) return { ...exact, confidence: 1, match: 'exact' };
@@ -42,6 +45,7 @@ export function matchFaq(
 }
 
 export function searchFaqOrKnowledge(input: {
+  readonly workspaceId: string;
   readonly query: string;
   readonly entries: readonly FaqEntry[];
   readonly allowedAcl: ReadonlySet<string>;
@@ -49,6 +53,7 @@ export function searchFaqOrKnowledge(input: {
   readonly semanticThreshold?: number;
 }): FaqSearchResult {
   const match = matchFaq(
+    input.workspaceId,
     input.query,
     input.entries,
     input.allowedAcl,
