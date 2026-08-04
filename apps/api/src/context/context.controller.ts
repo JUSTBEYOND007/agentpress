@@ -1,5 +1,14 @@
 import { ContextGovernanceService } from '@agentpress/agent-application';
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Post,
+} from '@nestjs/common';
 
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
@@ -43,6 +52,31 @@ export class ContextController {
   ) {
     await this.authorization.assertWorkspaceMember(workspaceId, user.id);
     return this.contexts.listMemories(workspaceId, user.id);
+  }
+
+  @Get('workspaces/:workspaceId/memories/export')
+  public async exportMemories(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertWorkspaceMember(workspaceId, user.id);
+    return this.contexts.exportMemories(workspaceId, user.id);
+  }
+
+  @Delete('workspaces/:workspaceId/memories/:candidateId')
+  public async deleteMemory(
+    @Param('workspaceId') workspaceId: string,
+    @Param('candidateId') candidateId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertWorkspaceMember(workspaceId, user.id);
+    try {
+      return await this.contexts.deleteMemory(workspaceId, user.id, candidateId);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid memory deletion',
+      );
+    }
   }
 
   @Post('workspaces/:workspaceId/memories/:candidateId/decision')

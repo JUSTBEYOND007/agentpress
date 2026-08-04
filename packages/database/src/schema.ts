@@ -103,6 +103,7 @@ export const memoryCandidateStatusEnum = pgEnum('memory_candidate_status', [
   'accepted',
   'rejected',
   'superseded',
+  'deleted',
 ] as const);
 export const memoryCandidateKindEnum = pgEnum('memory_candidate_kind', [
   'fact',

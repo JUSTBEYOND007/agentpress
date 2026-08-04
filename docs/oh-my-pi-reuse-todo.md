@@ -266,7 +266,8 @@ TODO：
 - [ ] 评估 MMR、query intent、episodic graph、entity/triple 和 consolidation 的独立纯逻辑复用价值。
 - [x] Memory extraction 只能生成用户可见 Candidate；接受后才可检索，Specialist 不能直接写长期 Memory。
 - [ ] 不复制关键词模式作为权威分类；用结构化模型输出加确定性 Schema 校验，并保留人工覆盖。
-- [ ] 增加 workspace/user 隔离、source Evidence、confidence、validity、supersedes、删除和导出契约。
+- [x] 增加 workspace/user 隔离、source Evidence、confidence、validity、supersedes、删除和导出契约。
+      删除写入 `deleted` tombstone 并清除 subject/value/source/evidence，导出默认排除 tombstone；API 只允许当前 workspace 成员操作自己的 Memory。
 - [x] Consolidation 不得覆盖原始候选或 provenance；新事实通过 supersedes 链替代旧事实。
 - [ ] 建立相反语义测试：拒绝的记忆不召回、跨 workspace 不召回、过期事实不作为当前事实、指令不变权限。
 - [ ] 真实目标模型评估 accepted-memory precision、recall、污染率和跨租户泄漏为零。

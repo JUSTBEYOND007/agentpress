@@ -18,7 +18,10 @@ import {
   inboxMessages,
   markOutboxMessagePublished,
   decideMemoryCandidate,
+  deleteMemoryCandidate,
+  exportMemoryCandidates,
   listAcceptedMemory,
+  memoryCandidates,
   proposeMemoryCandidate,
   processInboxMessage,
   rootRequests,
@@ -231,6 +234,8 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       valueHash: 'sha256:detailed',
       confidenceBps: 8500,
       supersedesId: first.id,
+      sourceRunId: ids.run,
+      sourceEvidenceIds: ['sensitive-evidence'],
     });
     await decideMemoryCandidate(connection.db, {
       id: replacement.id,
@@ -264,5 +269,45 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     expect(
       await listAcceptedMemory(connection.db, { workspaceId: randomUUID(), userId: ids.user }),
     ).toEqual([]);
+    expect(
+      await deleteMemoryCandidate(connection.db, {
+        id: replacement.id,
+        workspaceId: randomUUID(),
+        userId: ids.user,
+      }),
+    ).toBeUndefined();
+    await expect(
+      deleteMemoryCandidate(connection.db, {
+        id: replacement.id,
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        deletedAt: new Date('2026-08-04T01:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({
+      status: 'deleted',
+      value: '[deleted]',
+      sourceRunId: null,
+      sourceEvidenceIds: [],
+    });
+    const exported = await exportMemoryCandidates(connection.db, {
+      workspaceId: ids.workspace,
+      userId: ids.user,
+    });
+    expect(exported.some(({ id }) => id === replacement.id)).toBe(false);
+    expect(JSON.stringify(exported)).not.toContain('sensitive-evidence');
+    await expect(
+      connection.db
+        .select()
+        .from(memoryCandidates)
+        .where(eq(memoryCandidates.id, replacement.id)),
+    ).resolves.toMatchObject([
+      {
+        status: 'deleted',
+        value: '[deleted]',
+        sourceRunId: null,
+        sourceToolCallId: null,
+        sourceEvidenceIds: [],
+      },
+    ]);
   });
 });

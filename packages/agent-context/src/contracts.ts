@@ -46,7 +46,7 @@ export type MemoryCandidate = {
   readonly subject: string;
   readonly value: string;
   readonly valueHash: string;
-  readonly status: 'pending' | 'accepted' | 'rejected' | 'superseded';
+  readonly status: 'pending' | 'accepted' | 'rejected' | 'superseded' | 'deleted';
   readonly confidence: number;
   readonly supersedesId?: string;
   readonly kind?:

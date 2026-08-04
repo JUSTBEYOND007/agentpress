@@ -9,6 +9,8 @@ import {
   agentRuns,
   type AgentPressDatabase,
   decideMemoryCandidate,
+  deleteMemoryCandidate,
+  exportMemoryCandidates,
   memoryCandidates,
   proposeMemoryCandidate,
   rootRequests,
@@ -127,6 +129,43 @@ export class ContextGovernanceService {
         'Memory candidate is missing or no longer pending',
       );
     return result;
+  }
+
+  public async deleteMemory(workspaceId: string, userId: string, candidateId: string) {
+    const deleted = await deleteMemoryCandidate(this.database, {
+      id: candidateId,
+      workspaceId,
+      userId,
+    });
+    if (!deleted) {
+      throw new AgentApplicationError(
+        'invalid_context',
+        'Memory candidate is missing, belongs to another user, or was already deleted',
+      );
+    }
+    return { id: deleted.id, status: deleted.status };
+  }
+
+  public async exportMemories(workspaceId: string, userId: string) {
+    const candidates = await exportMemoryCandidates(this.database, { workspaceId, userId });
+    return {
+      workspaceId,
+      userId,
+      candidates: candidates.map((candidate) => ({
+        id: candidate.id,
+        subject: candidate.subject,
+        value: candidate.value,
+        status: candidate.status,
+        kind: candidate.kind,
+        confidenceBps: candidate.confidenceBps,
+        importanceBps: candidate.importanceBps,
+        validFrom: candidate.validFrom?.toISOString() ?? null,
+        validUntil: candidate.validUntil?.toISOString() ?? null,
+        sourceEvidenceIds: candidate.sourceEvidenceIds,
+        createdAt: candidate.createdAt.toISOString(),
+        updatedAt: candidate.updatedAt.toISOString(),
+      })),
+    };
   }
 
   public async proposeMemoryForRun(

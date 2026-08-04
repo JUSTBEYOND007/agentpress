@@ -1,4 +1,6 @@
-import { and, desc, eq, gt, isNull, lte, or } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+
+import { and, desc, eq, gt, isNull, lte, ne, or } from 'drizzle-orm';
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { memoryCandidates } from './schema.js';
 
@@ -125,6 +127,64 @@ export function listAcceptedMemory(
     )
     .orderBy(desc(memoryCandidates.updatedAt))
     .limit(input.limit ?? 50);
+}
+
+export async function deleteMemoryCandidate(
+  database: AgentPressDatabase,
+  input: {
+    readonly id: string;
+    readonly workspaceId: string;
+    readonly userId: string;
+    readonly deletedAt?: Date;
+  },
+): Promise<typeof memoryCandidates.$inferSelect | undefined> {
+  const deletedAt = input.deletedAt ?? new Date();
+  const tombstone = createHash('sha256').update(`deleted:${input.id}`).digest('hex');
+  const rows = await database
+    .update(memoryCandidates)
+    .set({
+      subject: `deleted:${input.id}`,
+      value: '[deleted]',
+      valueHash: tombstone,
+      confidenceBps: 0,
+      importanceBps: 0,
+      validFrom: null,
+      validUntil: null,
+      sourceRunId: null,
+      sourceToolCallId: null,
+      sourceEvidenceIds: [],
+      supersedesId: null,
+      status: 'deleted',
+      decidedAt: deletedAt,
+      updatedAt: deletedAt,
+    })
+    .where(
+      and(
+        eq(memoryCandidates.id, input.id),
+        eq(memoryCandidates.workspaceId, input.workspaceId),
+        eq(memoryCandidates.userId, input.userId),
+        ne(memoryCandidates.status, 'deleted'),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+export function exportMemoryCandidates(
+  database: AgentPressDatabase,
+  input: { readonly workspaceId: string; readonly userId: string },
+): Promise<(typeof memoryCandidates.$inferSelect)[]> {
+  return database
+    .select()
+    .from(memoryCandidates)
+    .where(
+      and(
+        eq(memoryCandidates.workspaceId, input.workspaceId),
+        eq(memoryCandidates.userId, input.userId),
+        ne(memoryCandidates.status, 'deleted'),
+      ),
+    )
+    .orderBy(desc(memoryCandidates.createdAt));
 }
 
 async function supersedeMemory(
