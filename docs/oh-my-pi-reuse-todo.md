@@ -458,6 +458,10 @@ TODO：
       均由 experiment/arm/trial 不可变身份派生，网络默认 deny-by-default 且只接受受限 allowlist；
       真实 Harbor/Docker 容器、隔离数据库/schema 和网络 namespace 仍待基础设施环境验收。
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
+      `ExperimentStore` 已支持固定 seed/attempts、pass@k、cancel、失败重跑和 pending resume；新增
+      Eval Trial claim token/worker lease、`FOR UPDATE SKIP LOCKED` 并发领取与过期 worker fence。
+      过期 Trial 先标记 `worker_lease_expired`，retry 创建新 trialId，因此得到新的 sandbox object
+      prefix/Kafka group。真实容器、Kafka 和网络 namespace 仍待基础设施环境验收。
 - [ ] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
 - [x] 结果指标覆盖任务成功、Schema 有效率、引用正确性、文章质量、编辑最小性和无答案准确率。
       `packages/agent-evals/src/experiment-report.ts` 将这些结果指标与过程指标统一投影，并只使用已决 trial 计算聚合值。

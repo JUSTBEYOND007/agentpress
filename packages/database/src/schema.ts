@@ -1830,6 +1830,10 @@ export const evalTrials = pgTable(
     attempt: integer('attempt').notNull(),
     seed: varchar('seed', { length: 160 }).notNull(),
     status: varchar('status', { length: 24 }).notNull().default('pending'),
+    claimToken: uuid('claim_token'),
+    workerId: varchar('worker_id', { length: 200 }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true, precision: 3 }),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true, precision: 3 }),
     runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
     resultMetrics: jsonb('result_metrics')
       .$type<Readonly<Record<string, unknown>>>()
@@ -1851,6 +1855,10 @@ export const evalTrials = pgTable(
     check(
       'eval_trials_status_check',
       sql`${table.status} in ('pending', 'running', 'succeeded', 'failed', 'cancelled')`,
+    ),
+    check(
+      'eval_trials_lease_check',
+      sql`(${table.claimToken} is null and ${table.workerId} is null and ${table.claimedAt} is null and ${table.leaseExpiresAt} is null) or (${table.claimToken} is not null and ${table.workerId} is not null and ${table.claimedAt} is not null and ${table.leaseExpiresAt} is not null)`,
     ),
   ],
 );

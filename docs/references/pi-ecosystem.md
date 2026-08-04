@@ -170,6 +170,12 @@ Expired detached leases are recovered by the production worker through
 second command for the same expired attempt, and the immutable Context Pack is reused by the next
 claim instead of rebuilding model-visible state.
 
+For Eval, AgentPress keeps Harbor's isolation boundary as a persisted descriptor and adds a
+PostgreSQL Trial lease: `claimNextTrial` uses `FOR UPDATE SKIP LOCKED`, `settleTrial` requires the
+exact claim token, and `failExpiredTrials` marks a lost attempt failed before `retryTrial` creates a
+new Trial identity. This prevents a polluted attempt from reusing its object prefix or Kafka group;
+container/schema/network enforcement remains an infrastructure acceptance gate.
+
 ## Primary Pi Business Reference
 
 **Primary reference: [`Narcooo/inkos`](https://github.com/Narcooo/inkos) at release `v1.7.2`, commit `c7851b94ada27f2810b903e96d8fec6f33e5d9bc`.** This is the default upstream to inspect before changing AgentPress conversation-to-writing behavior, long-form writing orchestration, review, recovery, or session restoration. Other repositories in this document remain secondary references for narrower infrastructure concerns.

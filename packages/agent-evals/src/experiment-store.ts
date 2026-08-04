@@ -7,7 +7,7 @@ import {
   evalTrials,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
 
 import {
   buildEvalExperimentReport,
@@ -16,10 +16,7 @@ import {
   type EvalRegressionPoint,
 } from './experiment-report.js';
 import { redactTrace, type EvalTraceEvent } from './trace-metrics.js';
-import {
-  createEvalSandboxDescriptor,
-  type EvalSandboxDescriptor,
-} from './sandbox-policy.js';
+import { createEvalSandboxDescriptor, type EvalSandboxDescriptor } from './sandbox-policy.js';
 
 export type EvalArmInput = {
   readonly name: string;
@@ -34,6 +31,16 @@ export type EvalTrialOutcome = {
   readonly caseId: string;
   readonly attempt: number;
   readonly status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+};
+
+export type EvalTrialClaim = {
+  readonly trialId: string;
+  readonly armId: string;
+  readonly caseId: string;
+  readonly attempt: number;
+  readonly claimToken: string;
+  readonly workerId: string;
+  readonly leaseExpiresAt: Date;
 };
 
 export class ExperimentStore {
@@ -130,7 +137,15 @@ export class ExperimentStore {
       if (armRows.length > 0) {
         await transaction
           .update(evalTrials)
-          .set({ status: 'cancelled', completedAt: now, updatedAt: now })
+          .set({
+            status: 'cancelled',
+            claimToken: null,
+            workerId: null,
+            claimedAt: null,
+            leaseExpiresAt: null,
+            completedAt: now,
+            updatedAt: now,
+          })
           .where(
             and(
               inArray(
@@ -145,17 +160,103 @@ export class ExperimentStore {
     });
   }
 
-  public async claimTrial(trialId: string, runId?: string): Promise<boolean> {
+  public async claimTrial(input: {
+    readonly trialId: string;
+    readonly workerId: string;
+    readonly claimToken: string;
+    readonly leaseMs: number;
+    readonly runId?: string;
+  }): Promise<EvalTrialClaim | undefined> {
+    validateTrialLease(input.workerId, input.claimToken, input.leaseMs);
+    const claimedAt = this.now();
+    const leaseExpiresAt = new Date(claimedAt.getTime() + input.leaseMs);
     const rows = await this.database
       .update(evalTrials)
-      .set({ status: 'running', ...(runId ? { runId } : {}), updatedAt: this.now() })
-      .where(and(eq(evalTrials.id, trialId), eq(evalTrials.status, 'pending')))
-      .returning({ id: evalTrials.id });
-    return rows.length === 1;
+      .set({
+        status: 'running',
+        claimToken: input.claimToken,
+        workerId: input.workerId,
+        claimedAt,
+        leaseExpiresAt,
+        ...(input.runId ? { runId: input.runId } : {}),
+        updatedAt: claimedAt,
+      })
+      .where(and(eq(evalTrials.id, input.trialId), eq(evalTrials.status, 'pending')))
+      .returning({
+        trialId: evalTrials.id,
+        armId: evalTrials.armId,
+        caseId: evalTrials.caseId,
+        attempt: evalTrials.attempt,
+      });
+    const row = rows[0];
+    return row
+      ? {
+          ...row,
+          claimToken: input.claimToken,
+          workerId: input.workerId,
+          leaseExpiresAt,
+        }
+      : undefined;
+  }
+
+  public async claimNextTrial(input: {
+    readonly experimentId: string;
+    readonly workerId: string;
+    readonly claimToken: string;
+    readonly leaseMs: number;
+  }): Promise<EvalTrialClaim | undefined> {
+    validateTrialLease(input.workerId, input.claimToken, input.leaseMs);
+    return this.database.transaction(async (transaction) => {
+      const candidates = await transaction
+        .select({
+          trialId: evalTrials.id,
+          armId: evalTrials.armId,
+          caseId: evalTrials.caseId,
+          attempt: evalTrials.attempt,
+        })
+        .from(evalTrials)
+        .innerJoin(evalArms, eq(evalArms.id, evalTrials.armId))
+        .innerJoin(evalExperiments, eq(evalExperiments.id, evalArms.experimentId))
+        .where(
+          and(
+            eq(evalExperiments.id, input.experimentId),
+            eq(evalExperiments.status, 'running'),
+            eq(evalTrials.status, 'pending'),
+          ),
+        )
+        .orderBy(asc(evalTrials.caseId), asc(evalTrials.attempt), asc(evalTrials.id))
+        .for('update', { of: evalTrials, skipLocked: true })
+        .limit(1);
+      const candidate = candidates[0];
+      if (!candidate) return undefined;
+      const claimedAt = this.now();
+      const leaseExpiresAt = new Date(claimedAt.getTime() + input.leaseMs);
+      const rows = await transaction
+        .update(evalTrials)
+        .set({
+          status: 'running',
+          claimToken: input.claimToken,
+          workerId: input.workerId,
+          claimedAt,
+          leaseExpiresAt,
+          updatedAt: claimedAt,
+        })
+        .where(and(eq(evalTrials.id, candidate.trialId), eq(evalTrials.status, 'pending')))
+        .returning({ trialId: evalTrials.id });
+      return rows.length === 1
+        ? {
+            ...candidate,
+            claimToken: input.claimToken,
+            workerId: input.workerId,
+            leaseExpiresAt,
+          }
+        : undefined;
+    });
   }
 
   public async settleTrial(input: {
     readonly trialId: string;
+    readonly claimToken: string;
     readonly status: 'succeeded' | 'failed' | 'cancelled';
     readonly resultMetrics?: Readonly<Record<string, unknown>>;
     readonly processMetrics?: Readonly<Record<string, unknown>>;
@@ -169,12 +270,55 @@ export class ExperimentStore {
         resultMetrics: input.resultMetrics ?? {},
         processMetrics: input.processMetrics ?? {},
         ...(input.failure ? { failure: input.failure } : {}),
+        claimToken: null,
+        workerId: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
         completedAt: now,
         updatedAt: now,
       })
-      .where(and(eq(evalTrials.id, input.trialId), eq(evalTrials.status, 'running')))
+      .where(
+        and(
+          eq(evalTrials.id, input.trialId),
+          eq(evalTrials.status, 'running'),
+          eq(evalTrials.claimToken, input.claimToken),
+        ),
+      )
       .returning({ id: evalTrials.id });
     return rows.length === 1;
+  }
+
+  public async failExpiredTrials(experimentId: string): Promise<readonly string[]> {
+    const now = this.now();
+    const armRows = await this.database
+      .select({ id: evalArms.id })
+      .from(evalArms)
+      .where(eq(evalArms.experimentId, experimentId));
+    if (armRows.length === 0) return [];
+    const rows = await this.database
+      .update(evalTrials)
+      .set({
+        status: 'failed',
+        claimToken: null,
+        workerId: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        failure: { code: 'worker_lease_expired', category: 'runtime' },
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          inArray(
+            evalTrials.armId,
+            armRows.map(({ id }) => id),
+          ),
+          eq(evalTrials.status, 'running'),
+          lte(evalTrials.leaseExpiresAt, now),
+        ),
+      )
+      .returning({ id: evalTrials.id });
+    return rows.map(({ id }) => id);
   }
 
   public async retryTrial(input: {
@@ -336,6 +480,15 @@ export class ExperimentStore {
       await Promise.all(rows.reverse().map(({ id }) => this.getExperimentReport(id)))
     ).filter((report): report is EvalExperimentReport => report !== undefined);
     return buildEvalRegressionTrend(reports, { arm: input.arm, metricKey: input.metricKey });
+  }
+}
+
+function validateTrialLease(workerId: string, claimToken: string, leaseMs: number): void {
+  if (!workerId.trim() || workerId.length > 200 || !claimToken.trim()) {
+    throw new TypeError('Evaluation Trial claim identity is invalid');
+  }
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 3_600_000) {
+    throw new RangeError('Evaluation Trial lease must be between 1000 and 3600000 ms');
   }
 }
 
