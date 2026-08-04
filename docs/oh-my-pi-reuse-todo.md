@@ -371,9 +371,11 @@ TODO：
 
 TODO：
 
-- [ ] 复用 Markdown Prompt 模板、变量渲染和小块组合模式，不复制 Coding Agent 巨型 System Prompt。
-- [ ] 将角色/领域语义保留在 Prompt，将权限、路由、终态、恢复、幂等和 Schema 放在确定性代码中。
-- [ ] Prompt revision 继续持久化并绑定 Context Pack；Run 历史不得使用当前 Prompt 冒充历史版本。
+- [x] 复用 Markdown Prompt 模板、变量渲染和小块组合模式，不复制 Coding Agent 巨型 System Prompt。
+      `packages/agent-context/src/prompt.ts` 提供 fail-closed 变量渲染和确定性 block composer，主规划 Prompt 已接入。
+- [x] 将角色/领域语义保留在 Prompt，将权限、路由、终态、恢复、幂等和 Schema 放在确定性代码中。
+      主规划 Prompt 只描述路由语义；能力、Tool、计划和终态仍由 AgentPress policy/state machine 校验。
+- [x] Prompt revision 继续持久化并绑定 Context Pack；Run 历史不得使用当前 Prompt 冒充历史版本。
 - [ ] Tool-specific guidance 放入 Tool contract/policy，不把完整工具规则重复堆进 System Prompt。
 - [ ] 建立 Prompt snapshot 仅用于变更审计；行为验收必须通过真实模型场景和状态事实。
 - [ ] 不复制 Oh My Pi 的 Bun/Bazel/Rust/native/TUI 工程框架；继续沿用 AgentPress pnpm/Turbo/NestJS/Next.js。

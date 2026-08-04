@@ -35,6 +35,7 @@ import {
   toolCalls,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
+import { composePromptBlocks, renderPromptTemplate } from '@agentpress/agent-context';
 import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import type {
@@ -1609,19 +1610,38 @@ export function mainPlanningPrompt(
     : actionSource === 'free_text'
       ? 'If currentRequest asks to change an article but no article.propose capability is available, explain that the current turn has no article editing capability and do not claim the article was changed.'
       : 'This host-confirmed article edit may use only capabilities listed in actionEnvelope.grantedCapabilities.';
-  return `You are the AgentPress Main Agent handling exactly one typed current-turn message. Decide how to handle its currentRequest.
-Current date: ${new Date().toISOString().slice(0, 10)}.
-Conversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The actionEnvelope describes host-granted capabilities; never claim or infer additional grants.
-Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.
-${articleInstruction}
-Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.
-Keep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.
-Choose Specialists from this policy catalog: ${JSON.stringify(specialists)}.
-For a host-confirmed article edit, delegate to editor and request both article.read and article.propose so it can obtain stable block hashes before proposing changes. Use writer for new drafts, not revisions to existing content.
-Request article.read or article.propose only when the frozen root context contains an article revision. A new standalone draft is an Artifact and does not need article tools.
-If required business information is missing, call user_request_input.
-Available capabilities: ${JSON.stringify(capabilities)}.
-Never emit a generic template plan. Never reveal hidden chain of thought.`;
+  return composePromptBlocks([
+    {
+      id: 'identity',
+      content: renderPromptTemplate(
+        'You are the AgentPress Main Agent handling exactly one typed current-turn message. Decide how to handle its currentRequest.\nCurrent date: {{date}}.\nConversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The actionEnvelope describes host-granted capabilities; never claim or infer additional grants.',
+        { date: new Date().toISOString().slice(0, 10) },
+      ),
+    },
+    {
+      id: 'direct-answer',
+      content:
+        'Return a normal final answer whenever the request can be completely answered from the conversation and model knowledge without executing tools. Explanations, summaries, and ordinary questions are Direct Runs; do not add research, writing, or review stages merely to improve a sufficient direct answer.',
+    },
+    { id: 'article-policy', content: articleInstruction },
+    {
+      id: 'planning-policy',
+      content:
+        "Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.\nKeep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.",
+    },
+    {
+      id: 'specialist-catalog',
+      content: `Choose Specialists from this policy catalog: ${JSON.stringify(specialists)}.`,
+    },
+    {
+      id: 'article-routing',
+      content:
+        'For a host-confirmed article edit, delegate to editor and request both article.read and article.propose so it can obtain stable block hashes before proposing changes. Use writer for new drafts, not revisions to existing content.\nRequest article.read or article.propose only when the frozen root context contains an article revision. A new standalone draft is an Artifact and does not need article tools.',
+    },
+    { id: 'missing-input', content: 'If required business information is missing, call user_request_input.' },
+    { id: 'capabilities', content: `Available capabilities: ${JSON.stringify(capabilities)}.` },
+    { id: 'output-boundary', content: 'Never emit a generic template plan. Never reveal hidden chain of thought.' },
+  ]);
 }
 
 function confirmedArticleEditPlan(
