@@ -17,7 +17,20 @@ describe('target-model Skill selection evaluation', () => {
         return Promise.resolve((expected ?? []).map((skillId) => ({ skillId, version: '1.0.0' })));
       },
     };
-    const report = await runSkillSelectionEvals({ evaluator, model: 'target/model' });
+    const report = await runSkillSelectionEvals({
+      evaluator,
+      model: 'target/model',
+      provider: 'provider-under-test',
+      promptVersion: 'prompt-v2',
+      toolVersion: 'selection-tool@2',
+      runtimeVersion: 'runtime-v3',
+    });
+    expect(report).toMatchObject({
+      provider: 'provider-under-test',
+      promptVersion: 'prompt-v2',
+      toolVersion: 'selection-tool@2',
+      runtimeVersion: 'runtime-v3',
+    });
     expect(report.totals).toMatchObject({
       cases: skillSelectionEvalCases.length,
       exactMatchRate: 1,

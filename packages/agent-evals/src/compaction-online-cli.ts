@@ -17,9 +17,10 @@ import {
 } from './compaction-scenarios.js';
 import { loadOnlineModelConfiguration } from './online-model-configuration.js';
 
+const defaultOutputDirectory = resolve(import.meta.dirname, '../../../.agentpress/evals');
 const { values } = parseArgs({
   options: {
-    'output-dir': { type: 'string', default: '.agentpress/evals' },
+    'output-dir': { type: 'string', default: defaultOutputDirectory },
   },
   strict: true,
 });

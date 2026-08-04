@@ -7,6 +7,9 @@ import type {
   SkillPreselectionRequest,
 } from './contracts.js';
 
+export const SKILL_PRESELECTION_PROMPT_VERSION = 'skill-preselection-v1';
+export const SKILL_SELECTION_TOOL_VERSION = 'skill_selection_complete@1';
+
 const selectionSchema = Type.Object(
   {
     skillIds: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), {
@@ -43,7 +46,10 @@ export class PiSkillPreselector {
           !explicitIds.has(candidate.skillId),
       )
       .slice()
-      .sort((left, right) => left.skillId.localeCompare(right.skillId) || left.version.localeCompare(right.version));
+      .sort(
+        (left, right) =>
+          left.skillId.localeCompare(right.skillId) || left.version.localeCompare(right.version),
+      );
     if (candidates.length === 0) return [];
 
     const runtime = this.runtimeFactory.create('skill_selection');

@@ -428,7 +428,10 @@ TODO：
 - [ ] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。
       已完成离线 conformance/prompt-injection 契约集：`validateSkillConformance`、损坏/冲突发现告警、Skill/resource `trust="untrusted"` 断言；
       新增 `pnpm eval:skill`，固定五案测试 exact selection、显式绑定去重、隐藏/禁用项和恶意 description，报告模型、数据集版本、逐案选择、
-      exactMatchRate、forbiddenSelections 和 gatesPassed。真实模型选择准确率和禁用项调用率仍待用目标模型运行该入口后验收。
+      exactMatchRate、forbiddenSelections 和 gatesPassed。入口自动读取根目录 `.env`，报告同时固定 provider、Prompt、Tool 和 Pi current-turn
+      协议版本，并统一写入根目录 `.agentpress/evals`。2026-08-04 使用 `pnpm eval:skill --limit 1` 验证入口后，Ark 返回
+      `403 AccountOverdueError`；该次运行正确记为 `errors=1`、`gatesPassed=false`，不能作为真实模型通过证据。余额恢复后仍需运行完整五案并达到
+      `exactMatchRate >= 0.8`、`forbiddenSelections = 0`、`errors = 0` 才可勾选。
 
 首选本地落点：`packages/agent-context/`、`packages/database/`、`packages/agent-evals/`。
 

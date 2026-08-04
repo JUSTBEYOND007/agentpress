@@ -23,6 +23,10 @@ export type SkillSelectionEvalReport = {
   readonly schemaVersion: 1;
   readonly datasetVersion: typeof SKILL_SELECTION_EVAL_VERSION;
   readonly model: string;
+  readonly provider: string;
+  readonly promptVersion: string;
+  readonly toolVersion: string;
+  readonly runtimeVersion: string;
   readonly startedAt: string;
   readonly completedAt: string;
   readonly totals: {
@@ -115,6 +119,10 @@ export const skillSelectionEvalCases: readonly SkillSelectionEvalCase[] = [
 export async function runSkillSelectionEvals(input: {
   readonly evaluator: SkillSelectionEvaluator;
   readonly model: string;
+  readonly provider?: string;
+  readonly promptVersion?: string;
+  readonly toolVersion?: string;
+  readonly runtimeVersion?: string;
   readonly cases?: readonly SkillSelectionEvalCase[];
   readonly maxCases?: number;
   readonly now?: () => Date;
@@ -168,6 +176,10 @@ export async function runSkillSelectionEvals(input: {
     schemaVersion: 1,
     datasetVersion: SKILL_SELECTION_EVAL_VERSION,
     model: input.model,
+    provider: input.provider ?? 'unknown',
+    promptVersion: input.promptVersion ?? 'skill-preselection-v1',
+    toolVersion: input.toolVersion ?? 'skill_selection_complete@1',
+    runtimeVersion: input.runtimeVersion ?? 'unknown',
     startedAt,
     completedAt: now().toISOString(),
     totals: {
