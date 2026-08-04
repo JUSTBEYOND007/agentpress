@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { loadSkill } from '@agentpress/agent-context';
+import {
+  loadSkill,
+  loadStaticSkillResources,
+  type SkillResourceDocument,
+} from '@agentpress/agent-context';
 import {
   agentRuns,
   type AgentPressDatabase,
@@ -8,6 +12,7 @@ import {
   memoryCandidates,
   proposeMemoryCandidate,
   rootRequests,
+  skillRevisionResources,
   skillRevisions,
 } from '@agentpress/database';
 import type { ToolRegistry } from '@agentpress/tool-runtime';
@@ -22,22 +27,44 @@ export class ContextGovernanceService {
     private readonly createId: () => string = randomUUID,
   ) {}
 
-  public async createSkill(workspaceId: string, markdown: string) {
+  public async createSkill(
+    workspaceId: string,
+    markdown: string,
+    resourceDocuments: readonly SkillResourceDocument[] = [],
+  ) {
     const skill = loadSkill(markdown);
-    const contentHash = createHash('sha256').update(markdown).digest('hex');
-    const inserted = await this.database
-      .insert(skillRevisions)
-      .values({
-        id: this.createId(),
-        workspaceId,
-        skillId: skill.id,
-        version: skill.version,
-        content: markdown,
-        contentHash,
-        allowedTools: skill.allowedTools,
-      })
-      .onConflictDoNothing()
-      .returning();
+    const resources = loadStaticSkillResources(skill, resourceDocuments);
+    const contentHash = createHash('sha256')
+      .update(resources.length === 0 ? markdown : JSON.stringify({ markdown, resources }))
+      .digest('hex');
+    const inserted = await this.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .insert(skillRevisions)
+        .values({
+          id: this.createId(),
+          workspaceId,
+          skillId: skill.id,
+          version: skill.version,
+          content: markdown,
+          contentHash,
+          allowedTools: skill.allowedTools,
+        })
+        .onConflictDoNothing()
+        .returning();
+      const revision = rows[0];
+      if (revision && resources.length > 0) {
+        await transaction.insert(skillRevisionResources).values(
+          resources.map((resource) => ({
+            skillRevisionId: revision.id,
+            path: resource.path,
+            content: resource.content,
+            contentHash: resource.contentHash,
+            byteSize: Buffer.byteLength(resource.content, 'utf8'),
+          })),
+        );
+      }
+      return rows;
+    });
     if (inserted[0]) return toPublicSkill(inserted[0], skill.description);
     const rows = await this.database
       .select()

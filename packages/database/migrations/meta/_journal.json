@@ -190,6 +190,13 @@
       "when": 1785821800000,
       "tag": "0026_eval_experiment_model",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785823000000,
+      "tag": "0027_skill_revision_resources",
+      "breakpoints": true
     }
   ]
 }

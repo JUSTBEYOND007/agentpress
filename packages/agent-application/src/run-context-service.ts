@@ -23,6 +23,7 @@ import {
   runAttachments,
   runContextPacks,
   runSkillBindings,
+  skillRevisionResources,
   skillRevisions,
 } from '@agentpress/database';
 import { hashBlock, type EditorBlock } from '@agentpress/editor-patch';
@@ -181,6 +182,23 @@ export class RunContextService {
       return row;
     });
     const parsedSkills = selectedSkillRows.map(validateStoredSkill);
+    const skillResourceRows =
+      selectedSkillRows.length === 0
+        ? []
+        : await transaction
+            .select({
+              skillRevisionId: skillRevisionResources.skillRevisionId,
+              path: skillRevisionResources.path,
+              content: skillRevisionResources.content,
+              contentHash: skillRevisionResources.contentHash,
+            })
+            .from(skillRevisionResources)
+            .where(
+              inArray(
+                skillRevisionResources.skillRevisionId,
+                selectedSkillRows.map(({ id }) => id),
+              ),
+            );
     const memories = await transaction
       .select()
       .from(memoryCandidates)
@@ -222,6 +240,16 @@ export class RunContextService {
           skill.instructions,
           skill.version,
           0.9,
+          false,
+        ),
+      ),
+      ...skillResourceRows.map((resource) =>
+        contextCandidate(
+          `skill-resource:${resource.skillRevisionId}:${resource.path}`,
+          'attachment',
+          resource.content,
+          resource.contentHash,
+          0.85,
           false,
         ),
       ),

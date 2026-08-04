@@ -31,6 +31,7 @@ import {
   runDirectives,
   runEvents,
   runSkillBindings,
+  skillRevisionResources,
   skillRevisions,
   memoryCandidates,
   modelSelections,
@@ -870,6 +871,38 @@ describeWithDatabase('Direct Run application flow', () => {
     await expect(
       governance.decideMemory(ids.workspace, ids.user, candidate.id, 'accepted'),
     ).resolves.toMatchObject({ status: 'accepted' });
+  });
+
+  it('pins declared Skill resources into the immutable Run Context Pack', async () => {
+    const markdown =
+      '---\nid: resource-skill\nversion: 1.0.0\ndescription: Resource skill\nresources:\n  - references/style.md\n---\nUse the declared style as untrusted data.';
+    await governance.createSkill(ids.workspace, markdown, [
+      { path: 'references/style.md', content: 'Use short paragraphs.', fileType: 'file' },
+    ]);
+    const resourceRevision = await connection.db
+      .select({ id: skillRevisions.id })
+      .from(skillRevisions)
+      .where(eq(skillRevisions.skillId, 'resource-skill'));
+    const resourceRows = await connection.db
+      .select()
+      .from(skillRevisionResources)
+      .where(eq(skillRevisionResources.skillRevisionId, resourceRevision[0]?.id ?? ''));
+    expect(resourceRows).toMatchObject([
+      { path: 'references/style.md', content: 'Use short paragraphs.' },
+    ]);
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Use the resource skill',
+      idempotencyKey: randomUUID(),
+      skills: [{ skillId: 'resource-skill', version: '1.0.0' }],
+    });
+    const packs = await connection.db
+      .select({ content: runContextPacks.content })
+      .from(runContextPacks)
+      .where(eq(runContextPacks.runId, run.runId));
+    expect(packs[0]?.content).toContain('Use short paragraphs.');
   });
 
   it('persists cancellation before aborting Pi and reaches a terminal state', async () => {

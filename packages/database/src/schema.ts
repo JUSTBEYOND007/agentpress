@@ -176,6 +176,27 @@ export const skillRevisions = pgTable(
   ],
 );
 
+export const skillRevisionResources = pgTable(
+  'skill_revision_resources',
+  {
+    skillRevisionId: uuid('skill_revision_id')
+      .notNull()
+      .references(() => skillRevisions.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    content: text('content').notNull(),
+    contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    byteSize: integer('byte_size').notNull(),
+    createdAt,
+  },
+  (table) => [
+    primaryKey({ columns: [table.skillRevisionId, table.path] }),
+    check(
+      'skill_revision_resources_size_check',
+      sql`${table.byteSize} > 0 and ${table.byteSize} <= 256000`,
+    ),
+  ],
+);
+
 export const memoryCandidates = pgTable(
   'memory_candidates',
   {
