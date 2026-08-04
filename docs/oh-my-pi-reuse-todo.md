@@ -225,7 +225,10 @@ TODO：
       `packages/agent-application/test/contracts.test.ts` 覆盖最大深度、自调用拒绝、父级 allowlist、
       合法嵌套和 provider ceiling；固定策略仍由 `specialist-task-contract.ts` 在 host 侧执行。
       已先接入 AgentPress host-side 基础策略：嵌套请求要求 parent owner、禁止同 owner 自调用、支持 allowed owner policy，DAG 波次取 Specialist 与 provider 上限最小值；动态 nested spawn 路由和固定上游完整测试集仍待实现。
-- [ ] 实现持久化 Agent Registry，状态来源为 PostgreSQL Task/RunEvent，不采用进程内 registry 作为事实源。
+- [x] 实现持久化 Agent Registry，状态来源为 PostgreSQL Task/RunEvent，不采用进程内 registry 作为事实源。
+      `AgentRegistryService` 从 `agent_runs`、`agent_tasks` 与有序 `run_events` 重建 Main/Specialist
+      条目，投影稳定 ID、owner、status、attempt 和最近事件；`DirectRunService.getProjection` 将其作为
+      只读 `agents` 返回给 Web。无 Run 事实时服务返回空列表，没有进程内 fallback。
 - [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。
 - [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
       已落地 `agent.task.commands`、transactional outbox、PostgreSQL 原子 Task claim、按 attempt

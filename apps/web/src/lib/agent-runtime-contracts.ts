@@ -33,6 +33,21 @@ export type RunProjection = {
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
+  readonly agents: readonly {
+    readonly registryId: string;
+    readonly kind: 'main' | 'specialist';
+    readonly runId: string;
+    readonly taskId?: string;
+    readonly owner: string;
+    readonly status: string;
+    readonly attempt: number;
+    readonly updatedAt: string;
+    readonly lastEvent?: {
+      readonly sequence: number;
+      readonly eventType: string;
+      readonly payload: Readonly<Record<string, unknown>>;
+    };
+  }[];
   readonly context?: Readonly<Record<string, unknown>>;
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
   readonly pendingDirectives: readonly PendingDirective[];

@@ -213,6 +213,7 @@ export type RunProjection = {
   readonly activePlanRevision?: number;
   readonly parts: readonly RunPart[];
   readonly artifacts: readonly Readonly<Record<string, unknown>>[];
+  readonly agents: readonly AgentRegistryProjection[];
   readonly context?: Readonly<Record<string, unknown>>;
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
   readonly pendingDirectives: readonly {
@@ -225,4 +226,20 @@ export type RunProjection = {
   readonly lastEventId: number;
   readonly createdAt: string;
   readonly completedAt?: string;
+};
+
+export type AgentRegistryProjection = {
+  readonly registryId: string;
+  readonly kind: 'main' | 'specialist';
+  readonly runId: string;
+  readonly taskId?: string;
+  readonly owner: string;
+  readonly status: string;
+  readonly attempt: number;
+  readonly updatedAt: string;
+  readonly lastEvent?: {
+    readonly sequence: number;
+    readonly eventType: string;
+    readonly payload: Readonly<Record<string, unknown>>;
+  };
 };

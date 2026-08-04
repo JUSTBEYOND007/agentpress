@@ -74,6 +74,7 @@ import {
   ConversationCompactionService,
   type ConversationCompactionResult,
 } from './conversation-compaction-service.js';
+import { AgentRegistryService } from './agent-registry.js';
 
 const TERMINAL_RUN_STATES = [
   'cancelled',
@@ -104,12 +105,14 @@ export class DirectRunService {
   private readonly contexts: RunContextService;
   private readonly artifactQueries: ArtifactQueryService;
   private readonly compactions: ConversationCompactionService;
+  private readonly registry: AgentRegistryService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.plannedRuns = new PlannedRunExecutor(options);
     this.artifactQueries = new ArtifactQueryService(options.database);
+    this.registry = new AgentRegistryService(options.database);
     this.compactions = new ConversationCompactionService({
       database: options.database,
       runtimeFactory: options.runtimeFactory,
@@ -1041,6 +1044,7 @@ export class DirectRunService {
       followUpRows,
       modelRows,
       checkpointRows,
+      agentEntries,
     ] = await Promise.all([
       this.listEvents(runId),
       this.options.database
@@ -1136,6 +1140,7 @@ export class DirectRunService {
         .where(eq(checkpoints.runId, runId))
         .orderBy(desc(checkpoints.sequence))
         .limit(1),
+      this.registry.listForRun(runId),
     ]);
     const question = questionRows[0];
     const proposalStatuses = new Map<string, ProposalProjectionStatus>(
@@ -1236,6 +1241,10 @@ export class DirectRunService {
           : []),
       ],
       artifacts: artifactRows,
+      agents: agentEntries.map((entry) => ({
+        ...entry,
+        updatedAt: entry.updatedAt.toISOString(),
+      })),
       ...(contextManifest && typeof contextManifest === 'object'
         ? {
             context: {

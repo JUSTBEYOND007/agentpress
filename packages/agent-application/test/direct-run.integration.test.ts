@@ -1440,6 +1440,12 @@ describeWithDatabase('Direct Run application flow', () => {
       status: 'resolved',
     });
     expect(typeof choices[0]?.claimToken).toBe('string');
+    const projection = await plannedService.getProjection(run.runId);
+    expect(projection?.agents).toHaveLength(6);
+    expect(new Set(projection?.agents.map(({ owner }) => owner))).toEqual(
+      new Set(['main', 'researcher', 'writer', 'editor', 'fact_checker', 'illustrator']),
+    );
+    expect(projection?.agents.slice(1).every(({ status }) => status === 'succeeded')).toBe(true);
   });
 
   it('repairs a failed Specialist protocol twice before accepting task_complete', async () => {
