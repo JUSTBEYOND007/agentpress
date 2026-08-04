@@ -84,6 +84,7 @@ export type SkillDefinition = {
   readonly compatibility?: string;
   readonly resources?: readonly string[];
   readonly disableModelInvocation?: boolean;
+  readonly hidden?: boolean;
 };
 export type PromptRevision = {
   readonly promptId: string;

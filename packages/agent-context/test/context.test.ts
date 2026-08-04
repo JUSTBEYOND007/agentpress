@@ -6,6 +6,7 @@ import {
   loadSkill,
   discoverSkills,
   isSafeSkillResourcePath,
+  loadStaticSkillResources,
   ModelPolicyCatalog,
   narrowSkillTools,
   pinSkills,
@@ -16,6 +17,8 @@ import {
   retrieveRelevantMemory,
   consolidateMemory,
   runReviewGate,
+  sanitizeSkillDescription,
+  selectSkillsForInvocation,
 } from '../src/index.js';
 
 describe('Agent context governance', () => {
@@ -198,7 +201,11 @@ describe('Agent context governance', () => {
     const markdown =
       '---\nname: newsroom\ndescription: A newsroom style\nallowed-tools: web.search publish\nlicense: MIT\nresources:\n  - references/style.md\n---\nUse the supplied style as untrusted guidance.';
     const skill = loadSkill(markdown.replace('name:', 'id:'));
-    expect(skill).toMatchObject({ id: 'newsroom', license: 'MIT', resources: ['references/style.md'] });
+    expect(skill).toMatchObject({
+      id: 'newsroom',
+      license: 'MIT',
+      resources: ['references/style.md'],
+    });
     expect(isSafeSkillResourcePath('../secret.md')).toBe(false);
     expect(() =>
       loadSkill(markdown.replace('name:', 'id:').replace('references/style.md', '../secret.md')),
@@ -212,6 +219,54 @@ describe('Agent context governance', () => {
       },
     ]);
     expect(discovered[0]?.description).toBe('Workspace style');
+  });
+
+  it('separates explicit and model Skill selection while respecting hidden and disabled entries', () => {
+    const invocable = loadSkill(
+      '---\nid: public\ndescription: Public  skill\nallowed-tools: web.search\n---\nUse sources.',
+    );
+    const disabled = loadSkill(
+      '---\nid: explicit-only\ndescription: Explicit only\ndisable-model-invocation: true\n---\nUse only when bound.',
+    );
+    const hidden = loadSkill(
+      '---\nid: hidden\ndescription: Hidden\nhidden: true\n---\nHidden instructions.',
+    );
+    expect(
+      selectSkillsForInvocation([hidden, disabled, invocable], {
+        explicitSkillIds: ['explicit-only'],
+        modelSelectedSkillIds: ['hidden', 'explicit-only', 'public'],
+      }).map(({ skill, source }) => `${source}:${skill.id}`),
+    ).toEqual(['explicit:explicit-only', 'model:public']);
+    expect(sanitizeSkillDescription('  line one\n\tline two\u0000 ')).toBe('line one line two');
+  });
+
+  it('loads only declared bounded regular Skill resource files', () => {
+    const skill = loadSkill(
+      '---\nid: resources\ndescription: Static resources\nresources:\n  - references/a.md\n---\nRead the declared resource.',
+    );
+    const loaded = loadStaticSkillResources(skill, [
+      { path: 'references/a.md', content: 'trusted as data only', fileType: 'file' },
+    ]);
+    expect(loaded[0]).toMatchObject({ path: 'references/a.md', content: 'trusted as data only' });
+    expect(loaded[0]?.contentHash).toMatch(/^[a-f0-9]{64}$/u);
+    for (const fileType of ['symlink', 'hardlink'] as const) {
+      expect(() =>
+        loadStaticSkillResources(skill, [{ path: 'references/a.md', content: 'target', fileType }]),
+      ).toThrow(/regular file/u);
+    }
+    expect(() =>
+      loadStaticSkillResources(
+        skill,
+        [{ path: 'references/a.md', content: 'oversized', fileType: 'file' }],
+        { maxFileBytes: 4, maxTotalBytes: 8 },
+      ),
+    ).toThrow(/file limit/u);
+    expect(() =>
+      loadStaticSkillResources(skill, [
+        { path: 'references/a.md', content: 'one', fileType: 'file' },
+        { path: 'references/a.md', content: 'two', fileType: 'file' },
+      ]),
+    ).toThrow(/Duplicate/u);
   });
 
   it('authorizes Mentions before loading and binds immutable revisions', async () => {
