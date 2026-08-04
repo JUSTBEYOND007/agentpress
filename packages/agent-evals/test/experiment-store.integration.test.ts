@@ -54,6 +54,8 @@ describeWithDatabase('evaluation experiment persistence', () => {
       seed: 'fixed-seed',
     });
     expect(trialIds).toHaveLength(2);
+    expect(await store.startExperiment(created.experimentId)).toBe(true);
+    expect(await store.startExperiment(created.experimentId)).toBe(false);
     expect(await store.claimTrial(trialIds[0] ?? '')).toBe(true);
     expect(await store.claimTrial(trialIds[0] ?? '')).toBe(false);
     expect(
@@ -64,6 +66,16 @@ describeWithDatabase('evaluation experiment persistence', () => {
         processMetrics: { duplicateSideEffects: 0 },
       }),
     ).toBe(true);
+    expect(await store.claimTrial(trialIds[1] ?? '')).toBe(true);
+    expect(
+      await store.settleTrial({
+        trialId: trialIds[1] ?? '',
+        status: 'failed',
+        failure: { code: 'runtime_error' },
+      }),
+    ).toBe(true);
+    const retryId = await store.retryTrial({ trialId: trialIds[1] ?? '', seed: 'fixed-seed' });
+    expect(retryId).toBeDefined();
     const traceId = await store.persistTrace(trialIds[0] ?? '', [
       { type: 'run.started', payload: { apiKey: 'secret', timestamp: 1 } },
       { type: 'run.completed', payload: { timestamp: 2 } },
@@ -93,5 +105,16 @@ describeWithDatabase('evaluation experiment persistence', () => {
       { type: 'run.started', payload: { apiKey: '[REDACTED]', timestamp: 1 } },
       { type: 'run.completed', payload: { timestamp: 2 } },
     ]);
+    expect(await store.cancelExperiment(created.experimentId)).toBe(true);
+    const retry = await connection.db
+      .select({ status: evalTrials.status, attempt: evalTrials.attempt })
+      .from(evalTrials)
+      .where(eq(evalTrials.id, retryId ?? ''));
+    expect(retry).toEqual([{ status: 'cancelled', attempt: 3 }]);
+    const succeeded = await connection.db
+      .select({ status: evalTrials.status })
+      .from(evalTrials)
+      .where(eq(evalTrials.id, trialIds[0] ?? ''));
+    expect(succeeded).toEqual([{ status: 'succeeded' }]);
   });
 });

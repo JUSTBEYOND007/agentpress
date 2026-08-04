@@ -7,7 +7,7 @@ import {
   evalTrials,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import { redactTrace, type EvalTraceEvent } from './trace-metrics.js';
 
@@ -18,6 +18,12 @@ export type EvalArmInput = {
   readonly skillVersions: Readonly<Record<string, string>>;
   readonly toolPolicyVersion: string;
   readonly contextPolicyVersion: string;
+};
+
+export type EvalTrialOutcome = {
+  readonly caseId: string;
+  readonly attempt: number;
+  readonly status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 };
 
 export class ExperimentStore {
@@ -84,6 +90,51 @@ export class ExperimentStore {
     return inserted.map(({ id }) => id);
   }
 
+  public async startExperiment(experimentId: string): Promise<boolean> {
+    const rows = await this.database
+      .update(evalExperiments)
+      .set({ status: 'running', updatedAt: this.now() })
+      .where(and(eq(evalExperiments.id, experimentId), eq(evalExperiments.status, 'draft')))
+      .returning({ id: evalExperiments.id });
+    return rows.length === 1;
+  }
+
+  public async cancelExperiment(experimentId: string): Promise<boolean> {
+    return this.database.transaction(async (transaction) => {
+      const now = this.now();
+      const experiments = await transaction
+        .update(evalExperiments)
+        .set({ status: 'cancelled', completedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(evalExperiments.id, experimentId),
+            inArray(evalExperiments.status, ['draft', 'running']),
+          ),
+        )
+        .returning({ id: evalExperiments.id });
+      if (experiments.length !== 1) return false;
+      const armRows = await transaction
+        .select({ id: evalArms.id })
+        .from(evalArms)
+        .where(eq(evalArms.experimentId, experimentId));
+      if (armRows.length > 0) {
+        await transaction
+          .update(evalTrials)
+          .set({ status: 'cancelled', completedAt: now, updatedAt: now })
+          .where(
+            and(
+              inArray(
+                evalTrials.armId,
+                armRows.map(({ id }) => id),
+              ),
+              inArray(evalTrials.status, ['pending', 'running']),
+            ),
+          );
+      }
+      return true;
+    });
+  }
+
   public async claimTrial(trialId: string, runId?: string): Promise<boolean> {
     const rows = await this.database
       .update(evalTrials)
@@ -116,6 +167,44 @@ export class ExperimentStore {
     return rows.length === 1;
   }
 
+  public async retryTrial(input: {
+    readonly trialId: string;
+    readonly seed: string;
+  }): Promise<string | undefined> {
+    return this.database.transaction(async (transaction) => {
+      const rows = await transaction
+        .select({
+          armId: evalTrials.armId,
+          caseId: evalTrials.caseId,
+          attempt: evalTrials.attempt,
+          status: evalTrials.status,
+        })
+        .from(evalTrials)
+        .where(eq(evalTrials.id, input.trialId))
+        .for('update')
+        .limit(1);
+      const source = rows[0];
+      if (!source || (source.status !== 'failed' && source.status !== 'cancelled'))
+        return undefined;
+      const attempt = source.attempt + 1;
+      if (attempt > 20) throw new RangeError('Evaluation retry exceeds the attempt limit');
+      const id = this.createId();
+      const inserted = await transaction
+        .insert(evalTrials)
+        .values({
+          id,
+          armId: source.armId,
+          caseId: source.caseId,
+          attempt,
+          seed: `${input.seed}:${source.caseId}:${String(attempt)}`,
+          status: 'pending',
+        })
+        .onConflictDoNothing()
+        .returning({ id: evalTrials.id });
+      return inserted[0]?.id;
+    });
+  }
+
   public async persistTrace(trialId: string, events: readonly EvalTraceEvent[]): Promise<string> {
     const redactedTrace = redactTrace(events);
     const traceHash = createHash('sha256').update(JSON.stringify(redactedTrace)).digest('hex');
@@ -131,4 +220,24 @@ export class ExperimentStore {
     if (!id) throw new Error('Evaluation trace could not be persisted');
     return id;
   }
+}
+
+export function summarizePassAtK(
+  trials: readonly EvalTrialOutcome[],
+  k: number,
+): { readonly passed: number; readonly total: number; readonly rate: number } {
+  if (!Number.isSafeInteger(k) || k < 1) throw new RangeError('pass@k requires a positive k');
+  const byCase = new Map<string, EvalTrialOutcome[]>();
+  for (const trial of trials) {
+    const current = byCase.get(trial.caseId) ?? [];
+    current.push(trial);
+    byCase.set(trial.caseId, current);
+  }
+  let passed = 0;
+  for (const outcomes of byCase.values()) {
+    const selected = [...outcomes].sort((left, right) => left.attempt - right.attempt).slice(0, k);
+    if (selected.some(({ status }) => status === 'succeeded')) passed += 1;
+  }
+  const total = byCase.size;
+  return { passed, total, rate: total === 0 ? 0 : passed / total };
 }
