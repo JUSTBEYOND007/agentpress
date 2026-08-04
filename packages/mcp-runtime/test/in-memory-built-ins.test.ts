@@ -39,6 +39,45 @@ describe('in-memory built-in MCP servers', () => {
       },
     ]);
     expect(search).toHaveBeenCalledTimes(1);
+    await expect(gateway.listPrompts('workspace_knowledge')).resolves.toMatchObject({
+      prompts: [{ name: 'search-guidance' }],
+    });
+    const prompt = await gateway.getPrompt('workspace_knowledge', { name: 'search-guidance' });
+    expect(prompt.messages[0]?.content).toMatchObject({ type: 'text' });
+    await expect(gateway.listResources('workspace_knowledge')).resolves.toMatchObject({
+      resources: [
+        expect.objectContaining({
+          uri: 'agentpress://built-in/workspace_knowledge/capabilities/search',
+        }),
+        expect.objectContaining({ uri: 'agentpress://built-in/workspace_knowledge/policy' }),
+      ],
+    });
+    await expect(gateway.listResourceTemplates('workspace_knowledge')).resolves.toMatchObject({
+      resourceTemplates: [
+        expect.objectContaining({
+          uriTemplate: 'agentpress://built-in/workspace_knowledge/capabilities/{name}',
+        }),
+      ],
+    });
+    const policy = await gateway.readResource('workspace_knowledge', {
+      uri: 'agentpress://built-in/workspace_knowledge/policy',
+    });
+    expect(policy.contents[0]).toMatchObject({ mimeType: 'application/json' });
+    await expect(
+      gateway.subscribeResource('workspace_knowledge', {
+        uri: 'agentpress://built-in/workspace_knowledge/policy',
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      gateway.unsubscribeResource('workspace_knowledge', {
+        uri: 'agentpress://built-in/workspace_knowledge/policy',
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      gateway.readResource('workspace_knowledge', {
+        uri: 'agentpress://built-in/workspace_knowledge/capabilities/admin',
+      }),
+    ).rejects.toThrow(/Unknown built-in MCP capability/u);
     await manager.stop('workspace_knowledge');
   });
 });

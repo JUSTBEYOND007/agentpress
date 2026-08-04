@@ -229,7 +229,10 @@ TODO：
 - [ ] 先对照现有 `packages/mcp-runtime` 和已适配的 `pi-mcp-adapter`，形成缺口清单；已有行为不得重写。
 - [x] 评估直接使用官方 MCP TypeScript SDK 的 Streamable HTTP transport；只有产品契约缺口才复制 Oh My Pi 行为。
 - [x] 补齐 POST JSON-RPC、JSON/SSE response、GET SSE listener 和 `Mcp-Session-Id` 契约测试。
-- [ ] 补齐 prompts、resources、resource templates、notifications 和 subscriptions 的受限内置服务器行为。
+- [x] 补齐 prompts、resources、resource templates、notifications 和 subscriptions 的受限内置服务器行为。
+      三个内置 Server 只暴露固定 search guidance、policy 与 search capability 资源；未知资源/订阅 fail closed。
+      Client Gateway 直接复用官方 SDK，并注册 resource/prompt/tool list notification schemas。证据：
+      `packages/mcp-runtime/src/in-memory-built-ins.ts`、`client-gateway.ts` 及对应测试。
 - [ ] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
 - [x] 保持 MCP Tool 稳定排序，避免 Prompt cache 因异步连接顺序失效。
 - [ ] 复用现有 output guard，补 Schema normalization、secret redaction、hostile/oversized output 和 Artifact 外置。
