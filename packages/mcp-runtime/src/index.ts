@@ -4,3 +4,4 @@ export * from './client-gateway.js';
 export * from './output-guard.js';
 export * from './server-manager.js';
 export * from './in-memory-built-ins.js';
+export * from './streamable-http.js';
