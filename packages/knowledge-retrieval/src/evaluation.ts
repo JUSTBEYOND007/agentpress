@@ -1,5 +1,14 @@
 export type RetrievalEvalCase = {
   readonly caseId: string;
+  readonly scenario?:
+    | 'faq_hit'
+    | 'knowledge_recall'
+    | 'conflicting_sources'
+    | 'expired_document'
+    | 'no_answer'
+    | 'cross_workspace';
+  readonly query?: string;
+  readonly workspaceId?: string;
   readonly relevantChunkIds: readonly string[];
   readonly rankedChunkIds: readonly string[];
   readonly expectedNoAnswer?: boolean;
@@ -14,11 +23,9 @@ export type RetrievalMetrics = {
   readonly noAnswerAccuracy: number;
 };
 
-export function evaluateRetrieval(
-  cases: readonly RetrievalEvalCase[],
-  k = 5,
-): RetrievalMetrics {
-  if (!Number.isSafeInteger(k) || k < 1) throw new RangeError('Retrieval evaluation k must be positive');
+export function evaluateRetrieval(cases: readonly RetrievalEvalCase[], k = 5): RetrievalMetrics {
+  if (!Number.isSafeInteger(k) || k < 1)
+    throw new RangeError('Retrieval evaluation k must be positive');
   if (cases.length === 0) {
     return { cases: 0, recallAtK: 0, mrr: 0, ndcg: 0, noAnswerAccuracy: 0 };
   }
@@ -38,8 +45,9 @@ export function evaluateRetrieval(
       (sum, chunkId, index) => sum + (relevant.has(chunkId) ? 1 / Math.log2(index + 2) : 0),
       0,
     );
-    const ideal = Array.from({ length: Math.min(k, relevant.size) }, (_, index) =>
-      1 / Math.log2(index + 2),
+    const ideal = Array.from(
+      { length: Math.min(k, relevant.size) },
+      (_, index) => 1 / Math.log2(index + 2),
     ).reduce((sum, score) => sum + score, 0);
     ndcg += ideal === 0 ? 0 : dcg / ideal;
     if (item.expectedNoAnswer !== undefined && item.returnedNoAnswer !== undefined) {

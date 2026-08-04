@@ -298,7 +298,10 @@ TODO：
 - [x] FAQ 建立精确匹配、语义匹配和置信阈值；低置信结果必须回退知识库检索或标记未知。
 - [x] 保留 source、chunk、revision/hash、retrieval score、rerank score 和 citation mapping。
 - [ ] 文章当前 revision 继续直接读取，不允许异步 RAG 结果覆盖更新的文章事实。
-- [ ] 建立检索离线集：FAQ 命中、知识库召回、冲突来源、过期文档、无答案和跨 workspace 隔离。
+- [x] 建立检索离线集：FAQ 命中、知识库召回、冲突来源、过期文档、无答案和跨 workspace 隔离。
+      固定数据集版本 `2026-08-04.v1` 位于
+      `packages/knowledge-retrieval/test/fixtures/retrieval-eval-fixture.ts`，由 Recall@K、MRR、NDCG
+      与 no-answer accuracy 统一评分；真实 embedding/rerank provider 验收仍由下一项单独跟踪。
       已提供 `evaluateRetrieval` 与 `scoreCitationResolution` 确定性指标和基础 fixture；完整业务离线集仍待补齐。
 - [ ] 使用真实 embedding/rerank provider 验证 Recall@K、MRR/NDCG、引用解析率和无答案精度。
 
