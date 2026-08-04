@@ -7,6 +7,7 @@ import type {
   RuntimeResult,
 } from '@agentpress/agent-runtime';
 import { RUNTIME_CURRENT_TURN_VERSION } from '@agentpress/agent-runtime';
+import { loadSkill } from '@agentpress/agent-context';
 import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {
   agentRuns,
@@ -17,6 +18,7 @@ import {
   appendCheckpoint,
   appendRunEvent,
   type AgentPressDatabase,
+  type DatabaseTransaction,
   conversationBranches,
   conversationCompactions,
   conversationMessages,
@@ -32,6 +34,7 @@ import {
   runQuestions,
   runDirectives,
   runEvents,
+  skillRevisions,
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
@@ -51,6 +54,9 @@ import {
   type RunProjection,
   type RunEventPublisher,
   type RuntimeToolFactory,
+  type SelectedSkillInput,
+  type SkillPreselectionCandidate,
+  type SkillPreselector,
 } from './contracts.js';
 import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
@@ -86,6 +92,8 @@ type DirectRunServiceOptions = {
   readonly maxSpecialistConcurrency?: number;
   /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
   readonly dispatchCommands?: boolean;
+  /** Optional Pi-backed chooser. The host validates its result before pinning context. */
+  readonly skillPreselector?: SkillPreselector;
 };
 
 export class DirectRunService {
@@ -426,6 +434,23 @@ export class DirectRunService {
         );
       }
 
+      const explicitSkills = collectSkillSelections(input);
+      const candidates = this.options.skillPreselector
+        ? await loadSkillPreselectionCandidates(transaction, branch.workspaceId)
+        : [];
+      const modelSkills = this.options.skillPreselector
+        ? validateModelSkillSelections(
+            candidates,
+            await this.options.skillPreselector.select({
+              prompt,
+              explicitSkills,
+              candidates,
+              maxSelections: 8,
+            }),
+          )
+        : [];
+      const selectedSkills = mergeSkillSelections(explicitSkills, modelSkills);
+
       await transaction.execute(
         sql`select id from ${conversationBranches} where id = ${input.branchId} for update`,
       );
@@ -518,7 +543,7 @@ export class DirectRunService {
         userId: input.userId,
         mentionTargetIds: input.mentionTargetIds ?? [],
         attachmentIds: input.attachmentIds ?? [],
-        skills: input.skills ?? [],
+        skills: selectedSkills,
         contextBindings: [
           ...(actionEnvelope.source === 'free_text' && branch.articleId
             ? ([{ type: 'mention', targetId: branch.articleId }] as const)
@@ -537,6 +562,18 @@ export class DirectRunService {
           contextHash: contextPack.contentHash,
         },
       });
+      if (this.options.skillPreselector) {
+        await appendRunEvent(transaction, {
+          id: this.createId(),
+          runId,
+          eventType: 'skill.selection.completed',
+          payload: {
+            explicit: explicitSkills,
+            model: modelSkills,
+            selected: selectedSkills,
+          },
+        });
+      }
       if (this.options.dispatchCommands !== false) {
         await enqueueOutboxMessage(transaction, {
           id: outboxId,
@@ -1756,6 +1793,109 @@ export class DirectRunService {
 
 export function isTerminalRunStatus(status: string): boolean {
   return (TERMINAL_RUN_STATES as readonly string[]).includes(status);
+}
+
+function collectSkillSelections(input: CreateDirectRunInput): readonly SelectedSkillInput[] {
+  return normalizeSkillSelections([
+    ...(input.skills ?? []),
+    ...(input.contextBindings ?? []).flatMap((binding) =>
+      binding.type === 'skill' ? [{ skillId: binding.skillId, version: binding.version }] : [],
+    ),
+  ]);
+}
+
+function mergeSkillSelections(
+  explicit: readonly SelectedSkillInput[],
+  model: readonly SelectedSkillInput[],
+): readonly SelectedSkillInput[] {
+  const selected = new Map(normalizeSkillSelections(explicit).map((item) => [item.skillId, item]));
+  for (const selection of model) {
+    const current = selected.get(selection.skillId);
+    if (current) continue;
+    selected.set(selection.skillId, selection);
+  }
+  if (selected.size > 8) {
+    throw new AgentApplicationError('invalid_context', 'A Run can select at most 8 Skills');
+  }
+  return [...selected.values()].sort((left, right) => left.skillId.localeCompare(right.skillId));
+}
+
+function normalizeSkillSelections(
+  selections: readonly SelectedSkillInput[],
+): readonly SelectedSkillInput[] {
+  const selected = new Map<string, SelectedSkillInput>();
+  for (const selection of selections) {
+    const current = selected.get(selection.skillId);
+    if (current && current.version !== selection.version) {
+      throw new AgentApplicationError(
+        'invalid_context',
+        `Skill ${selection.skillId} cannot use multiple revisions in one Run`,
+      );
+    }
+    selected.set(selection.skillId, selection);
+  }
+  return [...selected.values()];
+}
+
+function validateModelSkillSelections(
+  candidates: readonly SkillPreselectionCandidate[],
+  selections: readonly SelectedSkillInput[],
+): readonly SelectedSkillInput[] {
+  const byId = new Map(candidates.map((candidate) => [candidate.skillId, candidate]));
+  const seen = new Set<string>();
+  for (const selection of selections) {
+    if (seen.has(selection.skillId)) {
+      throw new AgentApplicationError(
+        'invalid_context',
+        `Model selected Skill ${selection.skillId} more than once`,
+      );
+    }
+    seen.add(selection.skillId);
+    const candidate = byId.get(selection.skillId);
+    if (
+      candidate?.version !== selection.version ||
+      candidate.hidden ||
+      candidate.disableModelInvocation
+    ) {
+      throw new AgentApplicationError(
+        'invalid_context',
+        `Model selected unavailable Skill ${selection.skillId}@${selection.version}`,
+      );
+    }
+  }
+  return [...selections];
+}
+
+async function loadSkillPreselectionCandidates(
+  transaction: DatabaseTransaction,
+  workspaceId: string,
+): Promise<readonly SkillPreselectionCandidate[]> {
+  const rows = await transaction
+    .select()
+    .from(skillRevisions)
+    .where(eq(skillRevisions.workspaceId, workspaceId))
+    .orderBy(skillRevisions.skillId, desc(skillRevisions.createdAt));
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    if (!latest.has(row.skillId)) latest.set(row.skillId, row);
+  }
+  return [...latest.values()].map((row) => {
+    const skill = loadSkill(row.content);
+    if (skill.id !== row.skillId || skill.version !== row.version) {
+      throw new AgentApplicationError(
+        'invalid_context',
+        `Stored Skill ${row.skillId}@${row.version} has an invalid identity`,
+      );
+    }
+    return {
+      skillId: row.skillId,
+      version: row.version,
+      description: skill.description,
+      allowedTools: row.allowedTools,
+      hidden: skill.hidden === true,
+      disableModelInvocation: skill.disableModelInvocation === true,
+    };
+  });
 }
 
 function encodeRuntimeMessage(message: RuntimeMessage): readonly unknown[] {

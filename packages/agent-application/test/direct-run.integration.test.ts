@@ -690,6 +690,77 @@ describeWithDatabase('Direct Run application flow', () => {
     await service.execute(run.runId);
   });
 
+  it('pins model-selected Skill revisions and rejects model attempts to select hidden Skills', async () => {
+    const selectingService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+      skillPreselector: {
+        select(input) {
+          expect(input.candidates).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ skillId: 'concise', version: '1.0.0' }),
+            ]),
+          );
+          return Promise.resolve([{ skillId: 'concise', version: '1.0.0' }]);
+        },
+      },
+    });
+    const run = await selectingService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Select a useful Skill.',
+      idempotencyKey: randomUUID(),
+    });
+    const [bindings, events] = await Promise.all([
+      connection.db.select().from(runSkillBindings).where(eq(runSkillBindings.runId, run.runId)),
+      connection.db.select().from(runEvents).where(eq(runEvents.runId, run.runId)),
+    ]);
+    expect(bindings).toMatchObject([{ skillRevisionId: ids.skillRevision }]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'skill.selection.completed',
+          payload: expect.objectContaining({
+            model: [{ skillId: 'concise', version: '1.0.0' }],
+          }) as unknown,
+        }),
+      ]),
+    );
+
+    await governance.createSkill(
+      ids.workspace,
+      '---\nid: hidden-only\nversion: 1.0.0\ndescription: Hidden\nhidden: true\n---\nNever model-select this Skill.',
+    );
+    const badIdempotencyKey = randomUUID();
+    const maliciousService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+      skillPreselector: {
+        select: () => Promise.resolve([{ skillId: 'hidden-only', version: '1.0.0' }]),
+      },
+    });
+    await expect(
+      maliciousService.create({
+        conversationId: ids.conversation,
+        userId: ids.user,
+        branchId: ids.branch,
+        prompt: 'Try to select a hidden Skill.',
+        idempotencyKey: badIdempotencyKey,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_context' });
+    await expect(
+      connection.db
+        .select({ id: rootRequests.id })
+        .from(rootRequests)
+        .where(eq(rootRequests.idempotencyKey, badIdempotencyKey)),
+    ).resolves.toHaveLength(0);
+  });
+
   it('binds a regenerated Run to the copied fork message without duplicating the user turn', async () => {
     const branchId = randomUUID();
     const messageId = randomUUID();

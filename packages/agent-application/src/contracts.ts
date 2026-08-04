@@ -58,6 +58,27 @@ export type RuntimeToolFactory = {
   ): Promise<RuntimeToolResultMessage | undefined>;
 };
 
+export type SkillPreselectionCandidate = {
+  readonly skillId: string;
+  readonly version: string;
+  readonly description: string;
+  readonly allowedTools: readonly string[];
+  readonly hidden: boolean;
+  readonly disableModelInvocation: boolean;
+};
+
+export type SkillPreselectionRequest = {
+  readonly prompt: string;
+  readonly explicitSkills: readonly SelectedSkillInput[];
+  readonly candidates: readonly SkillPreselectionCandidate[];
+  readonly maxSelections?: number;
+  readonly signal?: AbortSignal;
+};
+
+export type SkillPreselector = {
+  select(input: SkillPreselectionRequest): Promise<readonly SelectedSkillInput[]>;
+};
+
 export type SelectedSkillInput = {
   readonly skillId: string;
   readonly version: string;
