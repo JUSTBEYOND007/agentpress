@@ -34,6 +34,9 @@ import {
   taskBriefs,
   taskResults,
   toolCalls,
+  claimAgentTask,
+  enqueueOutboxMessage,
+  releaseAgentTaskLease,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
 import { composePromptBlocks, renderPromptTemplate } from '@agentpress/agent-context';
@@ -45,6 +48,7 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
+import { AGENT_RUN_COMMAND_TOPIC, AGENT_TASK_COMMAND_TOPIC } from './contracts.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { AgentSessionRunner } from './agent-session-runner.js';
 import { ActionProposalService } from './action-proposal-service.js';
@@ -79,6 +83,7 @@ export type PlannedTaskSpec = {
   readonly acceptanceCriteria: readonly string[];
   readonly dependencyIds: readonly string[];
   readonly capabilities: readonly string[];
+  readonly detached: boolean;
 };
 
 type SubmittedPlan = {
@@ -169,6 +174,7 @@ const taskSchema = Type.Object(
     }),
     dependencyKeys: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { maxItems: 12 }),
     capabilities: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { maxItems: 16 }),
+    detached: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -244,6 +250,79 @@ export class PlannedRunExecutor {
 
   public steerActiveMain(runId: string, content: string): boolean {
     return this.sessions.steerActiveMain(runId, content);
+  }
+
+  public async executeDetachedTask(
+    runId: string,
+    taskId: string,
+    signal?: AbortSignal,
+  ): Promise<'succeeded' | 'failed' | 'cancelled' | 'skipped' | 'not_found'> {
+    const row = await this.options.database
+      .select({
+        id: agentTasks.id,
+        owner: agentTasks.owner,
+        objective: agentTasks.objective,
+        criticality: agentTasks.criticality,
+        acceptanceCriteria: agentTasks.acceptanceCriteria,
+        toolPolicy: agentTasks.toolPolicy,
+        context: contextPacks.content,
+      })
+      .from(agentTasks)
+      .leftJoin(contextPacks, eq(contextPacks.taskId, agentTasks.id))
+      .where(and(eq(agentTasks.id, taskId), eq(agentTasks.runId, runId)))
+      .limit(1);
+    const persisted = row[0];
+    if (!persisted || typeof persisted.context !== 'string') return 'not_found';
+    const request = parseSpecialistTaskRequest(persisted.toolPolicy.request);
+    if (!request?.detached) return 'skipped';
+    let envelope: { readonly rootRequest?: RuntimeCurrentTurn };
+    try {
+      envelope = JSON.parse(persisted.context) as { readonly rootRequest?: RuntimeCurrentTurn };
+    } catch {
+      return 'failed';
+    }
+    if (!envelope.rootRequest) {
+      return 'failed';
+    }
+    const claim = await this.options.database.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId,
+        workerId: `task:${String(process.pid)}`,
+        leaseId: this.createId(),
+        leaseToken: this.createId(),
+        leaseMs: request.timeoutMs + 30_000,
+        now: this.now(),
+      }),
+    );
+    if (!claim) return 'skipped';
+    const task: PlannedTaskSpec = {
+      id: persisted.id,
+      clientKey: persisted.id,
+      owner: persisted.owner as SpecialistRole,
+      objective: persisted.objective,
+      criticality: persisted.criticality,
+      acceptanceCriteria: persisted.acceptanceCriteria,
+      dependencyIds: [],
+      capabilities: request.capabilities,
+      detached: true,
+    };
+    try {
+      const result = await this.executeTask(
+        runId,
+        task,
+        envelope.rootRequest,
+        new Map(),
+        signal,
+        true,
+      );
+      return result.status;
+    } finally {
+      await releaseAgentTaskLease(this.options.database, {
+        leaseToken: claim.lease.leaseToken,
+        workerId: claim.lease.workerId,
+        now: this.now(),
+      });
+    }
   }
 
   public async execute(
@@ -675,7 +754,11 @@ export class PlannedRunExecutor {
         throw new Error(`Planned Run ${runId} scheduler made no progress`);
       }
       const wave = await Promise.all(
-        ready.map((task) => this.executeTask(runId, task, rootPrompt, settled, signal)),
+        ready.map((task) =>
+          task.detached
+            ? this.waitForDetachedTask(runId, task, signal)
+            : this.executeTask(runId, task, rootPrompt, settled, signal),
+        ),
       );
       for (const task of wave) {
         pending.delete(task.id);
@@ -940,8 +1023,9 @@ export class PlannedRunExecutor {
     rootPrompt: RuntimeCurrentTurn,
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
+    claimed = false,
   ): Promise<SettledTask> {
-    if (!(await this.updateTaskStatus(runId, task, 'running'))) {
+    if (!claimed && !(await this.updateTaskStatus(runId, task, 'running'))) {
       return {
         ...task,
         status: 'failed',
@@ -1056,6 +1140,52 @@ export class PlannedRunExecutor {
     return taskResult;
   }
 
+  /** Waits on the durable TaskResult produced by a detached worker. */
+  private async waitForDetachedTask(
+    runId: string,
+    task: PlannedTaskSpec,
+    signal?: AbortSignal,
+  ): Promise<SettledTask> {
+    const deadline = Date.now() + 10 * 60_000;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) {
+        return {
+          ...task,
+          status: 'cancelled',
+          artifacts: [],
+          warnings: [],
+          failure: 'run_cancelled',
+        };
+      }
+      const persisted = await this.loadPersistedTaskResults([task]);
+      const succeeded = persisted.get(task.id);
+      if (succeeded) return succeeded;
+      const rows = await this.options.database
+        .select({ status: agentTasks.status })
+        .from(agentTasks)
+        .where(and(eq(agentTasks.id, task.id), eq(agentTasks.runId, runId)))
+        .limit(1);
+      const status = rows[0]?.status;
+      if (status === 'failed' || status === 'cancelled' || status === 'skipped') {
+        return {
+          ...task,
+          status,
+          artifacts: [],
+          warnings: [],
+          failure: `detached_task_${status}`,
+        };
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    }
+    return {
+      ...task,
+      status: 'failed',
+      artifacts: [],
+      warnings: [],
+      failure: 'detached_task_timeout',
+    };
+  }
+
   private async claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
     const persisted = await this.options.database.transaction(async (transaction) => {
       const rows = await transaction
@@ -1149,7 +1279,7 @@ export class PlannedRunExecutor {
           outputSchema: taskCompleteSchema,
           timeoutMs: 120_000,
           maxAttempts: 3,
-          detached: false,
+          detached: task.detached,
         }),
       };
     });
@@ -1214,6 +1344,22 @@ export class PlannedRunExecutor {
         contentHash,
         tokenCount: Math.ceil(content.length / 3),
       });
+      if (request.detached) {
+        await enqueueOutboxMessage(transaction, {
+          id: this.createId(),
+          aggregateType: 'AgentTask',
+          aggregateId: request.taskId,
+          topic: AGENT_TASK_COMMAND_TOPIC,
+          messageKey: `${runId}:${request.taskId}`,
+          payload: {
+            command: 'task.execute',
+            messageId: this.createId(),
+            runId,
+            taskId: request.taskId,
+          },
+          occurredAt: this.now(),
+        });
+      }
     }
   }
 
@@ -1260,6 +1406,7 @@ export class PlannedRunExecutor {
           .filter(({ agent_task_dependencies: dependency }) => dependency.taskId === row.id)
           .map(({ agent_task_dependencies: dependency }) => dependency.dependencyTaskId),
         capabilities,
+        detached: request?.detached ?? false,
       };
     });
   }
@@ -1407,7 +1554,7 @@ export class PlannedRunExecutor {
         reason: 'task_settled',
         state: { taskId: result.id, status: result.status },
       });
-      return appendRunEvent(transaction, {
+      const event = await appendRunEvent(transaction, {
         id: this.createId(),
         runId,
         eventType: `task.${result.status}`,
@@ -1425,6 +1572,20 @@ export class PlannedRunExecutor {
           ...(result.failure ? { failure: result.failure } : {}),
         },
       });
+      await enqueueOutboxMessage(transaction, {
+        id: this.createId(),
+        aggregateType: 'AgentRun',
+        aggregateId: runId,
+        topic: AGENT_RUN_COMMAND_TOPIC,
+        messageKey: runId,
+        payload: {
+          command: 'run.execute',
+          messageId: this.createId(),
+          runId,
+        },
+        occurredAt: this.now(),
+      });
+      return event;
     });
     await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
   }
@@ -1549,6 +1710,7 @@ export function validateSubmittedPlan(
     readonly acceptanceCriteria: readonly string[];
     readonly dependencyKeys: readonly string[];
     readonly capabilities: readonly string[];
+    readonly detached?: boolean;
   }[];
   const keys = new Set(rawTasks.map(({ clientKey }) => clientKey));
   if (keys.size !== rawTasks.length) throw new Error('Plan task clientKey values must be unique');
@@ -1578,6 +1740,7 @@ export function validateSubmittedPlan(
     acceptanceCriteria: [...task.acceptanceCriteria],
     dependencyIds: task.dependencyKeys.map((key) => ids.get(key) ?? ''),
     capabilities: [...task.capabilities],
+    detached: task.detached ?? false,
   }));
   assertAcyclic(tasks);
   return { goal: String(value.goal), tasks };
@@ -1585,7 +1748,11 @@ export function validateSubmittedPlan(
 
 const validatePlan = validateSubmittedPlan;
 
-function assertStrictSchema(schema: Parameters<typeof validateSchemaResult>[0], value: unknown, protocol: string): void {
+function assertStrictSchema(
+  schema: Parameters<typeof validateSchemaResult>[0],
+  value: unknown,
+  protocol: string,
+): void {
   const validation = validateSchemaResult(schema, value, 'strict');
   if (validation.valid) return;
   const detail = validation.failures.map(({ path, message }) => `${path}: ${message}`).join('; ');
@@ -1650,9 +1817,15 @@ export function mainPlanningPrompt(
       content:
         'For a host-confirmed article edit, delegate to editor and request both article.read and article.propose so it can obtain stable block hashes before proposing changes. Use writer for new drafts, not revisions to existing content.\nRequest article.read or article.propose only when the frozen root context contains an article revision. A new standalone draft is an Artifact and does not need article tools.',
     },
-    { id: 'missing-input', content: 'If required business information is missing, call user_request_input.' },
+    {
+      id: 'missing-input',
+      content: 'If required business information is missing, call user_request_input.',
+    },
     { id: 'capabilities', content: `Available capabilities: ${JSON.stringify(capabilities)}.` },
-    { id: 'output-boundary', content: 'Never emit a generic template plan. Never reveal hidden chain of thought.' },
+    {
+      id: 'output-boundary',
+      content: 'Never emit a generic template plan. Never reveal hidden chain of thought.',
+    },
   ]);
 }
 
@@ -1678,6 +1851,7 @@ function confirmedArticleEditPlan(
         ],
         dependencyIds: [],
         capabilities: profile.allowedCapabilities,
+        detached: false,
       },
     ],
   };
@@ -1819,6 +1993,7 @@ function publicTask(task: PlannedTaskSpec) {
     criticality: task.criticality,
     acceptanceCriteria: task.acceptanceCriteria,
     dependencyIds: task.dependencyIds,
+    detached: task.detached,
   };
 }
 

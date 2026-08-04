@@ -3,6 +3,8 @@ import { Type } from '@sinclair/typebox';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
+  AGENT_TASK_COMMAND_TOPIC,
+  parseAgentTaskExecuteCommand,
   AgentApplicationError,
   createSpecialistTaskRequest,
   parseSpecialistTaskRequest,
@@ -13,6 +15,29 @@ import {
 describe('agent application contracts', () => {
   it('uses a stable Kafka command topic', () => {
     expect(AGENT_RUN_COMMAND_TOPIC).toBe('agent.run.commands');
+    expect(AGENT_TASK_COMMAND_TOPIC).toBe('agent.task.commands');
+  });
+
+  it('accepts only complete detached Task commands', () => {
+    expect(
+      parseAgentTaskExecuteCommand({
+        command: 'task.execute',
+        messageId: 'message-1',
+        runId: 'run-1',
+        taskId: 'task-1',
+      }),
+    ).toMatchObject({ taskId: 'task-1' });
+    expect(
+      parseAgentTaskExecuteCommand({ command: 'task.execute', runId: 'run-1' }),
+    ).toBeUndefined();
+    expect(
+      parseAgentTaskExecuteCommand({
+        command: 'run.execute',
+        messageId: 'm',
+        runId: 'r',
+        taskId: 't',
+      }),
+    ).toBeUndefined();
   });
 
   it('exposes typed application errors', () => {

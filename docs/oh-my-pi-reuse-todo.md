@@ -188,6 +188,10 @@ TODO：
 - [ ] 实现持久化 Agent Registry，状态来源为 PostgreSQL Task/RunEvent，不采用进程内 registry 作为事实源。
 - [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。
 - [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
+      已落地 `agent.task.commands`、transactional outbox、PostgreSQL 原子 Task claim、按 attempt
+      持久化 lease、immutable Context Pack 恢复、TaskResult/Checkpoint/RunEvent 同事务结算，以及
+      `run.execute` outbox 唤醒。仍需在真实 PostgreSQL/Kafka 环境跑 worker 丢失、重复 command、
+      cancel 和外部写幂等端到端测试后才可勾选。
 - [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
 - [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
 - [ ] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、

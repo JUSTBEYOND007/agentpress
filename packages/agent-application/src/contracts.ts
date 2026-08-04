@@ -6,6 +6,7 @@ import type {
 } from '@agentpress/agent-runtime';
 
 export const AGENT_RUN_COMMAND_TOPIC = 'agent.run.commands';
+export const AGENT_TASK_COMMAND_TOPIC = 'agent.task.commands';
 export const AGENT_RUN_CANCEL_CHANNEL = 'agentpress:run:cancel';
 export const AGENT_RUN_STEER_CHANNEL = 'agentpress:run:steer';
 
@@ -14,6 +15,27 @@ export type RunSteeringCommand = {
   readonly directiveId: string;
   readonly content: string;
 };
+
+export type AgentTaskExecuteCommand = {
+  readonly command: 'task.execute';
+  readonly messageId: string;
+  readonly runId: string;
+  readonly taskId: string;
+};
+
+export function parseAgentTaskExecuteCommand(value: unknown): AgentTaskExecuteCommand | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.command !== 'task.execute' ||
+    typeof candidate.messageId !== 'string' ||
+    typeof candidate.runId !== 'string' ||
+    typeof candidate.taskId !== 'string'
+  ) {
+    return undefined;
+  }
+  return candidate as AgentTaskExecuteCommand;
+}
 
 export type DurableRunEvent = {
   readonly id: string;

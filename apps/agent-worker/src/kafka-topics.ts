@@ -1,6 +1,7 @@
 import type { Admin } from 'kafkajs';
 
 export const AGENT_RUN_PARTITIONS = 12;
+export const AGENT_TASK_PARTITIONS = 12;
 export const ARTICLE_INDEX_PARTITIONS = 4;
 
 export type KafkaTopicSpec = {

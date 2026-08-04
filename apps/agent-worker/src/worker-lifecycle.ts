@@ -5,7 +5,9 @@ import {
   AGENT_RUN_CANCEL_CHANNEL,
   AGENT_RUN_STEER_CHANNEL,
   AGENT_RUN_COMMAND_TOPIC,
+  AGENT_TASK_COMMAND_TOPIC,
   DirectRunService,
+  parseAgentTaskExecuteCommand,
   type LiveRunEvent,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
@@ -33,6 +35,7 @@ import { Kafka, Partitioners } from 'kafkajs';
 import { runWithKafkaHeartbeat } from './kafka-heartbeat.js';
 import {
   AGENT_RUN_PARTITIONS,
+  AGENT_TASK_PARTITIONS,
   ARTICLE_INDEX_PARTITIONS,
   ensureKafkaTopics,
 } from './kafka-topics.js';
@@ -75,6 +78,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
   });
   private readonly indexConsumer = this.kafka.consumer({ groupId: INDEX_CONSUMER_GROUP });
   private readonly activeRuns = new Map<string, AbortController>();
+  private readonly activeTasks = new Map<string, AbortController>();
   private readonly runLeases = new RedisRunLeaseManager(this.redisPublisher);
   private readonly builtInTools = createBuiltInToolRuntime(
     this.database.db,
@@ -146,6 +150,9 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     this.redisSubscriber.on('message', (channel: string, runId: string) => {
       if (channel === AGENT_RUN_CANCEL_CHANNEL) {
         this.activeRuns.get(runId)?.abort();
+        for (const [key, controller] of this.activeTasks) {
+          if (key.startsWith(`${runId}:`)) controller.abort();
+        }
         return;
       }
       if (channel === AGENT_RUN_STEER_CHANNEL) {
@@ -156,7 +163,10 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       }
     });
     await this.redisSubscriber.subscribe(AGENT_RUN_CANCEL_CHANNEL, AGENT_RUN_STEER_CHANNEL);
-    await this.consumer.subscribe({ topics: [AGENT_RUN_COMMAND_TOPIC], fromBeginning: true });
+    await this.consumer.subscribe({
+      topics: [AGENT_RUN_COMMAND_TOPIC, AGENT_TASK_COMMAND_TOPIC],
+      fromBeginning: true,
+    });
     if (this.articleIndexer) {
       await this.indexConsumer.subscribe({
         topics: [ARTICLE_INDEX_COMMAND_TOPIC],
@@ -223,6 +233,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     try {
       await ensureKafkaTopics(admin, [
         { topic: AGENT_RUN_COMMAND_TOPIC, partitions: AGENT_RUN_PARTITIONS },
+        { topic: AGENT_TASK_COMMAND_TOPIC, partitions: AGENT_TASK_PARTITIONS },
         { topic: ARTICLE_INDEX_COMMAND_TOPIC, partitions: ARTICLE_INDEX_PARTITIONS },
       ]);
     } finally {
@@ -236,6 +247,9 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       clearInterval(this.outboxTimer);
     }
     for (const controller of this.activeRuns.values()) {
+      controller.abort();
+    }
+    for (const controller of this.activeTasks.values()) {
       controller.abort();
     }
     await Promise.allSettled([
@@ -274,6 +288,10 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     offset: number,
     rawPayload: string | undefined,
   ): Promise<void> {
+    if (topic === AGENT_TASK_COMMAND_TOPIC) {
+      await this.handleTaskCommand(topic, partition, offset, rawPayload);
+      return;
+    }
     const command = parseRunCommand(rawPayload);
     if (!command) {
       this.logger.warn({ topic, partition, offset }, 'Discarded invalid Agent Run command');
@@ -312,6 +330,49 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     } finally {
       this.activeRuns.delete(command.runId);
       await lease.release();
+    }
+  }
+
+  private async handleTaskCommand(
+    topic: string,
+    partition: number,
+    offset: number,
+    rawPayload: string | undefined,
+  ): Promise<void> {
+    const command = parseAgentTaskExecuteCommand(parseJson(rawPayload));
+    if (!command) {
+      this.logger.warn({ topic, partition, offset }, 'Discarded invalid Agent Task command');
+      return;
+    }
+    const key = `${command.runId}:${command.taskId}`;
+    const controller = new AbortController();
+    this.activeTasks.set(key, controller);
+    try {
+      const status = await this.runService.executeDetachedTask(
+        command.runId,
+        command.taskId,
+        controller.signal,
+      );
+      await processInboxMessage(
+        this.database.db,
+        {
+          consumerGroup: CONSUMER_GROUP,
+          messageId: command.messageId,
+          topic,
+          partition,
+          offset,
+          payloadHash: createHash('sha256')
+            .update(rawPayload ?? '')
+            .digest('hex'),
+        },
+        () => Promise.resolve(),
+      );
+      this.logger.info(
+        { runId: command.runId, taskId: command.taskId, status },
+        'Agent Task settled',
+      );
+    } finally {
+      this.activeTasks.delete(key);
     }
   }
 
@@ -409,6 +470,15 @@ function parseRunCommand(payload: string | undefined): RunCommand | undefined {
       return undefined;
     }
     return value as RunCommand;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseJson(payload: string | undefined): unknown {
+  if (!payload) return undefined;
+  try {
+    return JSON.parse(payload) as unknown;
   } catch {
     return undefined;
   }

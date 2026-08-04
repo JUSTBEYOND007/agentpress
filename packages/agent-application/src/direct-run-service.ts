@@ -858,6 +858,15 @@ export class DirectRunService {
     return result.recovered;
   }
 
+  /** Executes one persisted detached Specialist Task after a worker claims it. */
+  public async executeDetachedTask(
+    runId: string,
+    taskId: string,
+    signal?: AbortSignal,
+  ): Promise<'succeeded' | 'failed' | 'cancelled' | 'skipped' | 'not_found'> {
+    return this.plannedRuns.executeDetachedTask(runId, taskId, signal);
+  }
+
   public enqueueSteering(runId: string, content: string): Promise<EnqueueRunDirectiveResult> {
     return this.enqueueDirective(runId, 'steering', content);
   }
