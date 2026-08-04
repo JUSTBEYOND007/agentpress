@@ -49,6 +49,14 @@ upstream filesystem/SQLite store: PostgreSQL `evalExperiments`, `evalArms`, `eva
 `evalRunTraces` remain the only source of truth. No upstream source file was copied, so no new
 third-party notice is required for this adapter.
 
+For the Tool protocol boundary, the pinned official Pi source at
+`packages/agent/src/agent-loop.ts` (commit `b4f293684bba718d59cc1157679bcf6157b3a7f5`) explicitly
+converts `stopReason === "length"` ToolCalls into error ToolResults and never executes them;
+the same source documents that `continue()` requires a final `user` or `toolResult` message.
+AgentPress keeps that runtime behavior and adds `validateRuntimeHistory` in
+`packages/agent-runtime/src/pi-runtime-adapter.ts` for PostgreSQL transcript recovery, where
+missing, duplicate, mismatched, or non-object ToolCall arguments fail closed before provider I/O.
+
 ## Primary Pi Business Reference
 
 **Primary reference: [`Narcooo/inkos`](https://github.com/Narcooo/inkos) at release `v1.7.2`, commit `c7851b94ada27f2810b903e96d8fec6f33e5d9bc`.** This is the default upstream to inspect before changing AgentPress conversation-to-writing behavior, long-form writing orchestration, review, recovery, or session restoration. Other repositories in this document remain secondary references for narrower infrastructure concerns.

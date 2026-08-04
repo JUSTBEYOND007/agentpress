@@ -119,6 +119,11 @@ export class PiRuntimeAdapter implements AgentRuntime {
     sink: RuntimeEventSink,
     signal?: AbortSignal,
   ): Promise<RuntimeResult> {
+    const historyFailure = validateRuntimeHistory(request.history);
+    if (historyFailure) {
+      await sink({ type: 'run.failed', error: historyFailure });
+      return { status: 'failed', messages: [], error: historyFailure };
+    }
     const budget = this.identity.contextWindow - this.identity.maxOutputTokens;
     const estimatedInput = estimateRequestTokens(request);
     if (estimatedInput > budget) {
@@ -329,6 +334,65 @@ export class PiRuntimeAdapter implements AgentRuntime {
   }
 }
 
+/**
+ * Validate the durable transcript before handing it to Pi. Pi itself produces
+ * a ToolResult for every live call, but a crashed writer or a malformed
+ * provider replay can leave a persisted assistant ToolCall unmatched. Sending
+ * that history back to a provider is not recoverable by prompt text, so fail
+ * closed with a deterministic protocol error.
+ */
+export function validateRuntimeHistory(
+  history: readonly RuntimeTranscriptMessage[],
+): RuntimeFailure | undefined {
+  const pending = new Map<string, string>();
+  const seenResults = new Set<string>();
+  for (const [index, message] of history.entries()) {
+    if (message.role === 'assistant') {
+      for (const block of message.blocks ?? []) {
+        if (block.type !== 'tool_call') continue;
+        if (!isPlainRecord(block.arguments)) {
+          return invalidHistory(
+            `ToolCall ${block.id} has non-object or partial arguments at ${String(index)}`,
+          );
+        }
+        if (pending.has(block.id) || seenResults.has(block.id)) {
+          return invalidHistory(`ToolCall ${block.id} is duplicated in persisted history`);
+        }
+        pending.set(block.id, block.name);
+      }
+      continue;
+    }
+    if (message.role !== 'tool') continue;
+    if (seenResults.has(message.toolCallId)) {
+      return invalidHistory(`ToolResult ${message.toolCallId} is duplicated in persisted history`);
+    }
+    const expectedName = pending.get(message.toolCallId);
+    if (!expectedName) {
+      return invalidHistory(`ToolResult ${message.toolCallId} has no persisted ToolCall`);
+    }
+    if (expectedName !== message.toolName) {
+      return invalidHistory(
+        `ToolResult ${message.toolCallId} names ${message.toolName}, expected ${expectedName}`,
+      );
+    }
+    pending.delete(message.toolCallId);
+    seenResults.add(message.toolCallId);
+  }
+  if (pending.size > 0) {
+    const [toolCallId] = pending.keys();
+    return invalidHistory(`ToolCall ${toolCallId ?? 'unknown'} has no persisted ToolResult`);
+  }
+  return undefined;
+}
+
+function invalidHistory(message: string): RuntimeFailure {
+  return { code: 'invalid_history', message, retryable: false };
+}
+
+function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function estimateRequestTokens(request: RuntimeRequest): number {
   const serialized = JSON.stringify({
     systemPrompt: request.systemPrompt,
@@ -343,11 +407,14 @@ function estimateRequestTokens(request: RuntimeRequest): number {
   return Math.ceil(Buffer.byteLength(serialized, 'utf8') / 4);
 }
 
-function toPiTool(tool: RuntimeTool, runId: string, provider: ReturnType<typeof providerFromId>): AgentTool {
+function toPiTool(
+  tool: RuntimeTool,
+  runId: string,
+  provider: ReturnType<typeof providerFromId>,
+): AgentTool {
   const adaptation = adaptProviderSchema(tool.parameters, {
     provider,
-    strict:
-      tool.constrainedSampling !== false && tool.constrainedSampling?.strict === 'require',
+    strict: tool.constrainedSampling !== false && tool.constrainedSampling?.strict === 'require',
   });
   return {
     name: tool.name,

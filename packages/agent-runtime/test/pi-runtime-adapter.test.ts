@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 
 import {
@@ -9,6 +9,7 @@ import {
   RUNTIME_CURRENT_TURN_VERSION,
   type RuntimeCurrentTurn,
   type RuntimeEvent,
+  validateRuntimeHistory,
 } from '../src/index.js';
 
 function currentTurn(request: string): RuntimeCurrentTurn {
@@ -257,13 +258,187 @@ describe('PiRuntimeAdapter', () => {
           },
         ],
         currentTurn: currentTurn(''),
-        continuation: true,
       },
       () => undefined,
     );
 
     expect(result.status).toBe('completed');
     expect(result.messages.at(-1)).toMatchObject({ content: '恢复后的最终回答。' });
+  });
+
+  it('fails closed for missing, duplicate, and mismatched persisted ToolResults', async () => {
+    const assistant = {
+      role: 'assistant' as const,
+      content: '',
+      blocks: [
+        {
+          type: 'tool_call' as const,
+          id: 'history-call',
+          name: 'lookup',
+          arguments: { key: 'a' },
+        },
+      ],
+      provider: 'prior-provider',
+      model: 'prior-model',
+      stopReason: 'tool_use' as const,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 0,
+        costUsd: 0,
+      },
+      timestamp: 1,
+    };
+    const toolResult = {
+      role: 'tool' as const,
+      toolCallId: 'history-call',
+      toolName: 'lookup',
+      content: '{}',
+      isError: false,
+      timestamp: 2,
+    };
+    expect(validateRuntimeHistory([assistant])).toMatchObject({ code: 'invalid_history' });
+    expect(validateRuntimeHistory([assistant, toolResult, toolResult])).toMatchObject({
+      code: 'invalid_history',
+    });
+    expect(validateRuntimeHistory([assistant, { ...toolResult, toolName: 'other' }])).toMatchObject(
+      { code: 'invalid_history' },
+    );
+
+    const runtime = PiRuntimeAdapter.forTests({ responses: ['should not be called'] });
+    const result = await runtime.execute(
+      {
+        runId: 'invalid-history',
+        systemPrompt: 'Continue safely.',
+        history: [assistant],
+        currentTurn: currentTurn(''),
+        continuation: true,
+      },
+      () => undefined,
+    );
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'invalid_history' } });
+  });
+
+  it('lets the official Pi loop convert partial JSON into an error ToolResult without execution', async () => {
+    let executions = 0;
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage(
+          [
+            fauxToolCall('lookup', '{"key":"a"' as unknown as Readonly<Record<string, unknown>>, {
+              id: 'partial-call',
+            }),
+          ],
+          { stopReason: 'length' },
+        ),
+        fauxAssistantMessage([fauxText('已重新发起。')]),
+      ],
+    });
+    const completed: RuntimeEvent[] = [];
+    const result = await runtime.execute(
+      {
+        runId: 'partial-json',
+        systemPrompt: 'Retry malformed tool arguments.',
+        history: [],
+        currentTurn: currentTurn('查询'),
+        tools: [
+          {
+            name: 'lookup',
+            label: 'Lookup',
+            description: 'Lookup one key',
+            parameters: Type.Object({ key: Type.String() }),
+            execute: () => {
+              executions += 1;
+              return Promise.resolve({ ok: true });
+            },
+          },
+        ],
+      },
+      (event) => {
+        if (event.type === 'tool.completed') completed.push(event);
+      },
+    );
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(executions).toBe(0);
+    expect(completed[0]).toMatchObject({
+      type: 'tool.completed',
+      result: { toolCallId: 'partial-call', isError: true },
+    });
+  });
+
+  it('preserves provider switching and handles aborted thinking and empty stops', async () => {
+    const switching = await PiRuntimeAdapter.forTests({ responses: ['继续完成。'] }).execute(
+      {
+        runId: 'provider-switch',
+        systemPrompt: 'Continue after provider migration.',
+        history: [
+          {
+            role: 'assistant',
+            content: '旧模型回答',
+            provider: 'old-provider',
+            model: 'old-model',
+            stopReason: 'stop',
+            usage: {
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 2,
+              costUsd: 0,
+            },
+            timestamp: 1,
+          },
+        ],
+        currentTurn: currentTurn('继续'),
+      },
+      () => undefined,
+    );
+    expect(switching).toMatchObject({ status: 'completed' });
+
+    const aborted = await PiRuntimeAdapter.forTests({
+      responses: [fauxAssistantMessage([fauxThinking('未完成思考')], { stopReason: 'aborted' })],
+    }).execute(
+      {
+        runId: 'aborted-thinking',
+        systemPrompt: 'Do not expose incomplete thinking.',
+        history: [],
+        currentTurn: currentTurn('开始'),
+      },
+      () => undefined,
+    );
+    expect(aborted.status).toBe('cancelled');
+
+    const empty = await PiRuntimeAdapter.forTests({
+      responses: [fauxAssistantMessage([], { stopReason: 'stop' })],
+    }).execute(
+      {
+        runId: 'empty-stop',
+        systemPrompt: 'Empty stop is still a provider response.',
+        history: [],
+        currentTurn: currentTurn('开始'),
+      },
+      () => undefined,
+    );
+    expect(empty).toMatchObject({ status: 'completed' });
+
+    const unexpected = await PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage('provider ended with an unknown stop', {
+          stopReason: 'unexpected' as never,
+        }),
+      ],
+    }).execute(
+      {
+        runId: 'unexpected-stop',
+        systemPrompt: 'Preserve the provider response for audit.',
+        history: [],
+        currentTurn: currentTurn('开始'),
+      },
+      () => undefined,
+    );
+    expect(unexpected).toMatchObject({ status: 'completed' });
   });
 
   it('injects steering into the active Pi agent', async () => {

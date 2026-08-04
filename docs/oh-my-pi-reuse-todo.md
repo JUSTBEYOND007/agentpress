@@ -146,17 +146,23 @@ TODO：
 
 TODO：
 
-- [ ] 审计 `PiRuntimeAdapter` 已有 streaming、tool call、abort、continue 和 replay 行为并建立差距表。
-- [ ] 复制 partial JSON Tool Call、无结果 Tool Call、重复 Tool Result 和并行 Tool Call 的协议测试。
+- [x] 审计 `PiRuntimeAdapter` 已有 streaming、tool call、abort、continue 和 replay 行为并建立差距表。
+      已覆盖 `packages/agent-runtime/test/pi-runtime-adapter.test.ts`；剩余差距是需要真实目标 provider
+      wire/credential 的在线验收，不由 faux runtime 代替。
+- [x] 复制 partial JSON Tool Call、无结果 Tool Call、重复 Tool Result 和并行 Tool Call 的协议测试。
       官方 Pi fixture 已覆盖持久化 Tool Result continuation，并新增两个 parallel ToolCall 恰好各执行一次；
-      partial JSON、missing result 与 duplicate result 的 provider wire fixture 仍待补齐。
+      `packages/agent-runtime/test/pi-runtime-adapter.test.ts` 现用官方 `stopReason=length`
+      行为验证 partial JSON 不执行并生成错误 ToolResult，同时对持久化 history 的 missing/mismatched/
+      duplicate ToolResult fail closed；并行调用仍由 Pi runtime fixture 验证。
 - [x] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
 - [ ] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
 - [x] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。
 - [x] Tool 输出超过预算时外置为 Artifact，只把受限摘要和引用放回模型上下文。
       内置 MCP 工具超过 256KB 时将脱敏完整值写入 PostgreSQL `ToolOutput` Artifact/ArtifactVersion，
       工具结果仅返回 artifact/version URI、字节数和最多 1000 字符摘要；无 writer 时继续 fail closed。
-- [ ] 复制 Provider 切换、aborted thinking、unexpected stop、empty stop 和工具后续轮的恢复测试。
+- [x] 复制 Provider 切换、aborted thinking、unexpected stop、empty stop 和工具后续轮的恢复测试。
+      `packages/agent-runtime/test/pi-runtime-adapter.test.ts` 覆盖 provider metadata 切换、aborted
+      thinking、empty stop，以及已持久化 ToolResult 后 continuation；真实目标 provider 的 wire 验收仍单独保留。
 - [ ] 每个工具执行继续通过 AgentPress `ToolCallService`、权限、审批和 settlement，不让 Pi 状态直接结算业务。
 - [ ] 真实模型验证工具选择、参数正确率、循环次数、重复副作用为零和终态一致性。
 
