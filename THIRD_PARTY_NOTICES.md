@@ -20,6 +20,17 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - unpdf — MIT; used as a pinned dependency for bounded server-side PDF text extraction
 - fast-xml-parser 4.5.7 — MIT; used directly to parse bounded Google News RSS responses
 
+### Agent Skills Conformance Reference
+
+- Upstream: `https://github.com/badlogic/pi-skills`
+- Commit: `90bb51cae36515a648515b633a81c0c6efc8c74d`
+- Source: repository `SKILL.md` examples and `README.md` Skill format/discovery conventions
+- Local: `packages/agent-context/src/skill.ts`, `packages/agent-context/test/context.test.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner
+- Changes: no executable source copied; added a small AgentPress-owned conformance diagnostic and
+  warning adapter, retained old `id` compatibility, and added untrusted Skill/resource boundary
+  tests. The upstream examples are used as fixtures/reference only.
+
 OpenTelemetry packages are used directly from their published npm releases; no source files
 are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm-lock.yaml`.
 

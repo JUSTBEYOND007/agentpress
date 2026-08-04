@@ -90,6 +90,17 @@ The executable, test-first adoption backlog for Oh My Pi is maintained in
 current reuse row: every item remains a TODO until dependency reuse or copied behavior has passed the
 license, adapter-boundary, PostgreSQL-authority, contract-test, and real-model gates recorded there.
 
+Skill conformance now has an AgentPress-owned diagnostic boundary in
+`packages/agent-context/src/skill.ts`: `validateSkillConformance` checks the standard `name`, parent
+directory, description/compatibility lengths, frontmatter and instructions, while retaining Oh My
+Pi's compatibility for unknown frontmatter fields and persisted `id` records. The companion
+`discoverSkillsWithWarnings` reports malformed documents and precedence conflicts without hiding
+them. `RunContextService` projects Skill instructions and static resources as
+`trust="untrusted"`; permissions remain owned by the host Tool Registry, Run Skill Binding and
+approval facts. Contract and prompt-injection fixtures are in
+`packages/agent-context/test/context.test.ts`; real-model selection accuracy and disabled-skill
+call-rate remain external evaluation gates.
+
 ### MetaHarness behavior adopted without copying its store
 
 At `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`, MetaHarness declares benchmark-owned metric

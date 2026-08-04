@@ -269,6 +269,7 @@ export class RunContextService {
           skill.version,
           0.9,
           false,
+          false,
         ),
       ),
       ...skillResourceRows.map((resource) =>
@@ -278,6 +279,7 @@ export class RunContextService {
           resource.content,
           resource.contentHash,
           0.85,
+          false,
           false,
         ),
       ),

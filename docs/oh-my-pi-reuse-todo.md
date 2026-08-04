@@ -388,7 +388,7 @@ TODO：
 
 TODO：
 
-- [ ] 先对照现有 `skill_revisions`、`run_skill_bindings` 和 `packages/agent-context/src/skill.ts`，形成缺口清单。
+- [x] 对照现有 `skill_revisions`、`run_skill_bindings`、固定 Oh My Pi/`badlogic/pi-skills` 源码与测试，形成缺口清单：保留 `id` 兼容旧持久化记录，新增 Agent Skills `name`/目录/长度诊断；发现器报告损坏文档与同名冲突；Skill instructions/resource 进入 Context Pack 时统一为 untrusted。
 - [x] 复制 Agent Skills `SKILL.md` frontmatter、标准目录发现、嵌套目录和冲突优先级 fixture。
 - [x] 支持用户显式绑定和模型自主选择两条路径，并将 Run 使用的 Skill revision 固定到 Context Pack。
       模型选择通过官方 Pi Runtime 的 terminating structured tool 完成；宿主校验 exact revision、hidden/disable、重复、跨 workspace 和数量边界，
@@ -397,9 +397,10 @@ TODO：
 - [x] 复制路径穿越、symlink、hardlink、文件类型、大小、重复 ID 和恶意 description 测试。
 - [x] Skill 只能缩小工具 allowlist，不能扩张平台、workspace、Agent 或 Task 权限。
 - [x] Skill instructions 和 resource 必须标记为不可信数据，不得覆盖 system policy、tool schema 或 approval。
-- [ ] 首版不复制 managed/autolearn Skill 自动写入；未来如采用，必须走 proposal、diff、审批、版本和回滚。
-- [ ] 不自动执行 Skill 脚本；若未来增加执行能力，必须通过已注册工具和独立沙箱授权。
+- [x] 首版不复制 managed/autolearn Skill 自动写入；当前只有显式的 PostgreSQL Skill revision/proposal 边界，未来如采用仍必须走 proposal、diff、审批、版本和回滚。
+- [x] 不自动执行 Skill 脚本；Skill 只加载 Markdown 与声明的静态 regular-file resource，不执行脚本或隐式授予工具。
 - [ ] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。
+      已完成离线 conformance/prompt-injection 契约集：`validateSkillConformance`、损坏/冲突发现告警、Skill/resource `trust="untrusted"` 断言；真实模型选择准确率和禁用项调用率仍待在线评估。
 
 首选本地落点：`packages/agent-context/`、`packages/database/`、`packages/agent-evals/`。
 

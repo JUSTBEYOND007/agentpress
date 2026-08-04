@@ -36,6 +36,85 @@ export function loadSkill(markdown: string): SkillDefinition {
   };
 }
 
+export type SkillConformanceIssueCode =
+  | 'frontmatter'
+  | 'missing-name'
+  | 'invalid-name'
+  | 'name-directory-mismatch'
+  | 'missing-description'
+  | 'description-too-long'
+  | 'compatibility-too-long'
+  | 'missing-instructions';
+
+export type SkillConformanceIssue = {
+  readonly code: SkillConformanceIssueCode;
+  readonly message: string;
+};
+
+export type SkillConformanceOptions = {
+  /** Path relative to the skills root, used to verify the standard directory name. */
+  readonly path?: string;
+};
+
+/**
+ * Checks the Agent Skills frontmatter contract without changing the loader's
+ * compatibility behavior for existing persisted `id`-based Skills.
+ * Unknown frontmatter keys remain allowed, matching the maintained Pi loader.
+ */
+export function validateSkillConformance(
+  markdown: string,
+  options: SkillConformanceOptions = {},
+): readonly SkillConformanceIssue[] {
+  const issues: SkillConformanceIssue[] = [];
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/u.exec(markdown);
+  if (!match) return [{ code: 'frontmatter', message: 'Skill requires YAML frontmatter' }];
+
+  let metadata: unknown;
+  try {
+    metadata = parse(match[1] ?? '');
+  } catch {
+    return [{ code: 'frontmatter', message: 'Skill frontmatter is not valid YAML' }];
+  }
+  if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata)) {
+    return [{ code: 'frontmatter', message: 'Skill frontmatter must be a YAML mapping' }];
+  }
+  const value = metadata as Record<string, unknown>;
+  const name = value.name;
+  if (typeof name !== 'string' || name.length === 0) {
+    issues.push({ code: 'missing-name', message: 'Agent Skills requires a name field' });
+  } else {
+    if (name.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name)) {
+      issues.push({
+        code: 'invalid-name',
+        message: 'Skill name must be 1-64 lowercase letters, digits, and single hyphens',
+      });
+    }
+    const parent = options.path?.split('/').at(-2);
+    if (parent && parent !== name) {
+      issues.push({
+        code: 'name-directory-mismatch',
+        message: `Skill name ${name} must match its parent directory ${parent}`,
+      });
+    }
+  }
+  const description = value.description;
+  if (typeof description !== 'string' || description.trim().length === 0) {
+    issues.push({ code: 'missing-description', message: 'Agent Skills requires a description field' });
+  } else if (description.length > 1_024) {
+    issues.push({ code: 'description-too-long', message: 'Skill description exceeds 1024 characters' });
+  }
+  if (typeof value.compatibility === 'string' && value.compatibility.length > 500) {
+    issues.push({
+      code: 'compatibility-too-long',
+      message: 'Skill compatibility exceeds 500 characters',
+    });
+  }
+  if (!(match[2] ?? '').trim()) {
+    issues.push({ code: 'missing-instructions', message: 'Skill instructions are required' });
+  }
+  return issues;
+}
+
 export type SkillDocument = {
   readonly path: string;
   readonly markdown: string;
@@ -43,20 +122,61 @@ export type SkillDocument = {
   readonly explicit?: boolean;
 };
 
+export type SkillDiscoveryWarning = {
+  readonly path: string;
+  readonly message: string;
+};
+
+export type SkillDiscoveryResult = {
+  readonly skills: readonly SkillDefinition[];
+  readonly warnings: readonly SkillDiscoveryWarning[];
+};
+
 /** Discovers already-read SKILL.md documents with deterministic precedence. */
 export function discoverSkills(documents: readonly SkillDocument[]): readonly SkillDefinition[] {
+  return discoverSkillsWithWarnings(documents).skills;
+}
+
+/** Discovers Skills and reports malformed/conflicting documents without failing the batch. */
+export function discoverSkillsWithWarnings(
+  documents: readonly SkillDocument[],
+): SkillDiscoveryResult {
   const selected = new Map<string, { skill: SkillDefinition; document: SkillDocument }>();
+  const warnings: SkillDiscoveryWarning[] = [];
   for (const document of [...documents].sort(compareSkillDocuments)) {
     if (!isSkillMarkdownPath(document.path)) continue;
-    const skill = loadSkill(document.markdown);
+    let skill: SkillDefinition;
+    try {
+      skill = loadSkill(document.markdown);
+    } catch (error) {
+      warnings.push({
+        path: document.path,
+        message: error instanceof Error ? error.message : 'Skill could not be loaded',
+      });
+      continue;
+    }
     const current = selected.get(skill.id);
     if (!current || compareSkillDocuments(document, current.document) < 0) {
+      if (current) {
+        warnings.push({
+          path: document.path,
+          message: `Skill ${skill.id} conflicts with ${current.document.path}; higher precedence selected`,
+        });
+      }
       selected.set(skill.id, { skill, document });
+    } else if (current.document.path !== document.path) {
+      warnings.push({
+        path: document.path,
+        message: `Skill ${skill.id} conflicts with ${current.document.path}; skipped`,
+      });
     }
   }
-  return [...selected.values()]
-    .sort((left, right) => left.skill.id.localeCompare(right.skill.id))
-    .map(({ skill }) => skill);
+  return {
+    skills: [...selected.values()]
+      .sort((left, right) => left.skill.id.localeCompare(right.skill.id))
+      .map(({ skill }) => skill),
+    warnings,
+  };
 }
 
 export function isSafeSkillResourcePath(resource: string): boolean {
