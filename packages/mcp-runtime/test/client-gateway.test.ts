@@ -32,4 +32,28 @@ describe('MCP client gateway', () => {
     expect(close).toHaveBeenCalledTimes(1);
     expect(manager.state('web_research')).toBe('degraded');
   });
+
+  it('sorts discovered tools independently of server response order', async () => {
+    const listTools = vi.fn(() =>
+      Promise.resolve({
+        tools: [
+          { name: 'zeta', inputSchema: { type: 'object' as const } },
+          { name: 'alpha', inputSchema: { type: 'object' as const } },
+        ],
+      }),
+    );
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'workspace_knowledge',
+      version: '1',
+      displayName: 'Knowledge',
+      createClient: () =>
+        Promise.resolve({ listTools, close: () => Promise.resolve() } as unknown as Client),
+    });
+    const gateway = new McpClientGateway(manager);
+    await expect(gateway.listTools('workspace_knowledge')).resolves.toMatchObject([
+      { name: 'alpha' },
+      { name: 'zeta' },
+    ]);
+  });
 });

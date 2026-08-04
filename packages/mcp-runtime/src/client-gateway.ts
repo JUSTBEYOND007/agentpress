@@ -1,5 +1,10 @@
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+
 import type { BuiltInMcpGateway } from './built-in-tools.js';
+import type { BuiltInMcpServerId } from './contracts.js';
 import type { McpServerManager } from './server-manager.js';
+
+type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
 
 export class McpClientGateway implements BuiltInMcpGateway {
   public constructor(private readonly manager: McpServerManager) {}
@@ -22,6 +27,17 @@ export class McpClientGateway implements BuiltInMcpGateway {
         : result;
     } catch (error) {
       if (isConnectionFailure(error)) await this.manager.markDegraded(input.serverId);
+      throw error;
+    }
+  }
+
+  public async listTools(serverId: BuiltInMcpServerId): Promise<readonly ListedMcpTool[]> {
+    const client = await this.manager.getClient(serverId);
+    try {
+      const result = await client.listTools();
+      return [...result.tools].sort((left, right) => left.name.localeCompare(right.name));
+    } catch (error) {
+      if (isConnectionFailure(error)) await this.manager.markDegraded(serverId);
       throw error;
     }
   }

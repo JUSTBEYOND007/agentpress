@@ -64,4 +64,50 @@ describe('MCP Server lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(1);
     expect(manager.state('licensed_media')).toBe('stopped');
   });
+
+  it('opens a reconnect-storm circuit and permits one probe after cooldown', async () => {
+    let now = new Date('2026-08-04T00:00:00.000Z');
+    let attempt = 0;
+    const recovered = fakeClient();
+    const manager = new McpServerManager({
+      reconnectFailureThreshold: 2,
+      reconnectCooldownMs: 1_000,
+      now: () => now,
+    });
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => {
+        attempt += 1;
+        return attempt <= 2 ? Promise.reject(new Error('offline')) : Promise.resolve(recovered);
+      },
+    });
+    await expect(manager.getClient('web_research')).rejects.toThrow('offline');
+    await expect(manager.getClient('web_research')).rejects.toThrow('offline');
+    await expect(manager.getClient('web_research')).rejects.toMatchObject({
+      name: 'McpCircuitOpenError',
+    });
+    expect(attempt).toBe(2);
+    now = new Date('2026-08-04T00:00:01.001Z');
+    await expect(manager.getClient('web_research')).resolves.toBe(recovered);
+    expect(attempt).toBe(3);
+  });
+
+  it('lists registered built-ins in stable order', () => {
+    const manager = new McpServerManager();
+    for (const serverId of ['workspace_knowledge', 'web_research', 'licensed_media'] as const) {
+      manager.register({
+        serverId,
+        version: '1',
+        displayName: serverId,
+        createClient: () => Promise.resolve(fakeClient()),
+      });
+    }
+    expect(manager.listRegistered()).toEqual([
+      'licensed_media',
+      'web_research',
+      'workspace_knowledge',
+    ]);
+  });
 });
