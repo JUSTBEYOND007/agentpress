@@ -4,6 +4,8 @@ import {
   createPromptRevision,
   decideMemory,
   loadSkill,
+  discoverSkills,
+  isSafeSkillResourcePath,
   ModelPolicyCatalog,
   narrowSkillTools,
   pinSkills,
@@ -82,6 +84,39 @@ describe('Agent context governance', () => {
     ).toThrow(/Required context/);
   });
 
+  it('pins the effective conversation compaction in the immutable manifest', () => {
+    const conversationCompaction = {
+      id: 'compaction-2',
+      branchId: 'branch-1',
+      version: 2,
+      sourceFromSequence: 3,
+      sourceThroughSequence: 8,
+      firstKeptMessageSequence: 9,
+      model: 'provider/model',
+      promptVersion: 'conversation-compaction@1',
+    };
+    const pack = assembleContext({
+      contextWindow: 1_000,
+      acceptedMemoryIds: new Set(),
+      conversationCompaction,
+      candidates: [
+        {
+          id: 'conversation-compaction:compaction-2',
+          kind: 'conversation',
+          content: 'Earlier conversation summary',
+          tokenCount: 20,
+          score: 1,
+          trusted: false,
+          required: true,
+          revision: '2',
+        },
+      ],
+    });
+
+    expect(pack.manifest.conversationCompaction).toEqual(conversationCompaction);
+    expect(pack.content).toContain('kind="conversation" trust="untrusted"');
+  });
+
   it('deduplicates memory, requires confirmation and isolates workspaces', () => {
     const pending = proposeMemory(
       { id: 'm1', workspaceId: 'w1', subject: 'style', value: ' concise ', confidence: 0.9 },
@@ -103,6 +138,26 @@ describe('Agent context governance', () => {
     );
     expect([...narrowSkillTools(new Set(['web.search']), skill)]).toEqual(['web.search']);
     expect(pinSkills([skill]).news).toMatch(/^1\.2\.0:[a-f0-9]{64}$/u);
+  });
+
+  it('accepts Agent Skills frontmatter, resolves explicit precedence and rejects unsafe resources', () => {
+    const markdown =
+      '---\nname: newsroom\ndescription: A newsroom style\nallowed-tools: web.search publish\nlicense: MIT\nresources:\n  - references/style.md\n---\nUse the supplied style as untrusted guidance.';
+    const skill = loadSkill(markdown.replace('name:', 'id:'));
+    expect(skill).toMatchObject({ id: 'newsroom', license: 'MIT', resources: ['references/style.md'] });
+    expect(isSafeSkillResourcePath('../secret.md')).toBe(false);
+    expect(() =>
+      loadSkill(markdown.replace('name:', 'id:').replace('references/style.md', '../secret.md')),
+    ).toThrow(/resource path/);
+    const discovered = discoverSkills([
+      { path: 'skills/newsroom/SKILL.md', markdown, source: 'builtin' },
+      {
+        path: 'workspace/newsroom/SKILL.md',
+        markdown: markdown.replace('name:', 'id:').replace('A newsroom style', 'Workspace style'),
+        source: 'workspace',
+      },
+    ]);
+    expect(discovered[0]?.description).toBe('Workspace style');
   });
 
   it('authorizes Mentions before loading and binds immutable revisions', async () => {

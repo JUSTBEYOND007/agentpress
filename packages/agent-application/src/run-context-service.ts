@@ -15,6 +15,7 @@ import {
   articles,
   type AgentPressDatabase,
   type DatabaseTransaction,
+  conversationCompactions,
   memoryCandidates,
   mentionBindings,
   evidenceRecords,
@@ -25,7 +26,7 @@ import {
   skillRevisions,
 } from '@agentpress/database';
 import { hashBlock, type EditorBlock } from '@agentpress/editor-patch';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, lte } from 'drizzle-orm';
 
 import {
   AgentApplicationError,
@@ -56,6 +57,8 @@ export class RunContextService {
     transaction: DatabaseTransaction,
     input: {
       readonly runId: string;
+      readonly branchId: string;
+      readonly rootMessageSequence: number;
       readonly workspaceId: string;
       readonly userId: string;
       readonly mentionTargetIds: readonly string[];
@@ -189,6 +192,20 @@ export class RunContextService {
         ),
       )
       .limit(50);
+    const compactionRows = await transaction
+      .select()
+      .from(conversationCompactions)
+      .where(
+        and(
+          eq(conversationCompactions.branchId, input.branchId),
+          eq(conversationCompactions.status, 'completed'),
+          lt(conversationCompactions.sourceThroughSequence, input.rootMessageSequence),
+          lte(conversationCompactions.firstKeptMessageSequence, input.rootMessageSequence),
+        ),
+      )
+      .orderBy(desc(conversationCompactions.version))
+      .limit(1);
+    const compaction = compactionRows[0];
     const candidates: ContextCandidate[] = [
       contextCandidate(
         `prompt:${this.prompt.promptId}`,
@@ -205,7 +222,7 @@ export class RunContextService {
           skill.instructions,
           skill.version,
           0.9,
-          true,
+          false,
         ),
       ),
       ...mentionRows.map((mention) =>
@@ -241,6 +258,24 @@ export class RunContextService {
           true,
         ),
       ),
+      ...(compaction?.summary && compaction.firstKeptMessageSequence
+        ? [
+            contextCandidate(
+              `conversation-compaction:${compaction.id}`,
+              'conversation',
+              escapeUntrustedContext(
+                JSON.stringify({
+                  summary: compaction.summary,
+                  protectedFactReferences: compaction.preserveData,
+                }),
+              ),
+              String(compaction.version),
+              1,
+              true,
+              false,
+            ),
+          ]
+        : []),
       ...memories.map((memory) =>
         contextCandidate(
           memory.id,
@@ -257,6 +292,20 @@ export class RunContextService {
       candidates,
       acceptedMemoryIds: new Set(memories.map(({ id }) => id)),
       skillVersions: pinSkills(parsedSkills),
+      ...(compaction?.summary && compaction.firstKeptMessageSequence
+        ? {
+            conversationCompaction: {
+              id: compaction.id,
+              branchId: compaction.branchId,
+              version: compaction.version,
+              sourceFromSequence: compaction.sourceFromSequence,
+              sourceThroughSequence: compaction.sourceThroughSequence,
+              firstKeptMessageSequence: compaction.firstKeptMessageSequence,
+              model: compaction.model,
+              promptVersion: compaction.promptVersion,
+            },
+          }
+        : {}),
     });
     const promptRevisionId = await this.persistPromptRevision(transaction);
     const pinnedArticles = new Map<
@@ -379,6 +428,7 @@ function contextCandidate(
   revision: string,
   score: number,
   required: boolean,
+  trusted = true,
 ): ContextCandidate {
   return {
     id,
@@ -387,9 +437,13 @@ function contextCandidate(
     revision,
     tokenCount: Math.max(1, Math.ceil(Buffer.byteLength(content, 'utf8') / 4)),
     score,
-    trusted: true,
+    trusted,
     required,
   };
+}
+
+function escapeUntrustedContext(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 function unique(values: readonly string[]): readonly string[] {

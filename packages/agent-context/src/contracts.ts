@@ -23,6 +23,17 @@ export type ContextManifest = {
   readonly tokenCount: number;
   readonly skillVersions: Readonly<Record<string, string>>;
   readonly retrievalVersion?: string;
+  readonly conversationCompaction?: ConversationCompactionReference;
+};
+export type ConversationCompactionReference = {
+  readonly id: string;
+  readonly branchId: string;
+  readonly version: number;
+  readonly sourceFromSequence: number;
+  readonly sourceThroughSequence: number;
+  readonly firstKeptMessageSequence: number;
+  readonly model: string;
+  readonly promptVersion: string;
 };
 export type ContextPack = {
   readonly content: string;
@@ -54,6 +65,10 @@ export type SkillDefinition = {
   readonly description: string;
   readonly instructions: string;
   readonly allowedTools: readonly string[];
+  readonly license?: string;
+  readonly compatibility?: string;
+  readonly resources?: readonly string[];
+  readonly disableModelInvocation?: boolean;
 };
 export type PromptRevision = {
   readonly promptId: string;
