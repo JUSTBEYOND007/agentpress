@@ -230,6 +230,9 @@ TODO：
       条目，投影稳定 ID、owner、status、attempt 和最近事件；`DirectRunService.getProjection` 将其作为
       只读 `agents` 返回给 Web。无 Run 事实时服务返回空列表，没有进程内 fallback。
 - [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。
+      `task_complete` 已作为结构化 yield 持久化 TaskResult；`AgentTaskWaitService` 只读 PostgreSQL
+      Task/TaskResult，按请求顺序等待任一 exact-attempt 结果并返回 `settled`、`stillRunning`、
+      `timedOut`，支持有界 timeout 与 AbortSignal 取消传播。完整 cancel/recover 相反语义仍待完成。
 - [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
       已落地 `agent.task.commands`、transactional outbox、PostgreSQL 原子 Task claim、按 attempt
       持久化 lease、immutable Context Pack 恢复、TaskResult/Checkpoint/RunEvent 同事务结算，以及

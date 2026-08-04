@@ -19,4 +19,5 @@ export * from './terminal-outcome-policy.js';
 export * from './tool-call-service.js';
 export * from './specialist-task-contract.js';
 export * from './agent-registry.js';
+export * from './agent-task-wait-service.js';
 export * from './skill-preselection.js';

@@ -151,6 +151,16 @@ the queue; recovery requeues an in-flight item and invalidates the old token, an
 closed. PostgreSQL and Direct Run integration tests cover concurrent enqueue, opposite directive
 semantics, Specialist isolation, recovery, cancellation, and actual ToolCall-based settlement.
 
+Oh My Pi's Vibe task lifecycle was verified at the same fixed commit in
+`packages/coding-agent/src/vibe/runtime.ts` with behavior tests in
+`packages/coding-agent/test/vibe/vibe-runtime.test.ts`: `yield` produces a structured Specialist
+result, while `wait` returns the first settled session together with the sessions still running and
+an explicit timeout outcome. AgentPress adapts this as PostgreSQL `TaskResult` settlement and the
+read-only `AgentTaskWaitService`; it preserves requested Task order, waits for any matching attempt,
+returns `settled`/`stillRunning`/`timedOut`, and propagates cancellation. It deliberately rejects the
+upstream process-local session registry and timers. A succeeded or failed Task without a TaskResult
+for the exact current attempt fails closed instead of being inferred from Prompt or transient state.
+
 ## Primary Pi Business Reference
 
 **Primary reference: [`Narcooo/inkos`](https://github.com/Narcooo/inkos) at release `v1.7.2`, commit `c7851b94ada27f2810b903e96d8fec6f33e5d9bc`.** This is the default upstream to inspect before changing AgentPress conversation-to-writing behavior, long-form writing orchestration, review, recovery, or session restoration. Other repositories in this document remain secondary references for narrower infrastructure concerns.

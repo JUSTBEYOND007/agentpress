@@ -53,6 +53,7 @@ import { AGENT_RUN_COMMAND_TOPIC, AGENT_TASK_COMMAND_TOPIC } from './contracts.j
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { AgentSessionRunner } from './agent-session-runner.js';
 import { ActionProposalService } from './action-proposal-service.js';
+import { AgentTaskWaitService } from './agent-task-wait-service.js';
 import {
   createAgentTurnProfile,
   selectMainControlTools,
@@ -233,6 +234,7 @@ export class PlannedRunExecutor {
   private readonly transcripts: AgentTranscriptProjector;
   private readonly sessions: AgentSessionRunner;
   private readonly actionProposals: ActionProposalService;
+  private readonly taskWaits: AgentTaskWaitService;
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
@@ -251,6 +253,7 @@ export class PlannedRunExecutor {
       this.now,
       this.createId,
     );
+    this.taskWaits = new AgentTaskWaitService(options.database);
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
@@ -1182,43 +1185,44 @@ export class PlannedRunExecutor {
     task: PlannedTaskSpec,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
-    const deadline = Date.now() + 10 * 60_000;
-    while (Date.now() < deadline) {
-      if (signal?.aborted) {
-        return {
-          ...task,
-          status: 'cancelled',
-          artifacts: [],
-          warnings: [],
-          failure: 'run_cancelled',
-        };
-      }
-      const persisted = await this.loadPersistedTaskResults([task]);
-      const succeeded = persisted.get(task.id);
-      if (succeeded) return succeeded;
-      const rows = await this.options.database
-        .select({ status: agentTasks.status })
-        .from(agentTasks)
-        .where(and(eq(agentTasks.id, task.id), eq(agentTasks.runId, runId)))
-        .limit(1);
-      const status = rows[0]?.status;
-      if (status === 'failed' || status === 'cancelled' || status === 'skipped') {
-        return {
-          ...task,
-          status,
-          artifacts: [],
-          warnings: [],
-          failure: `detached_task_${status}`,
-        };
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    let waited;
+    try {
+      waited = await this.taskWaits.waitForAny({
+        runId,
+        taskIds: [task.id],
+        timeoutMs: 10 * 60_000,
+        pollIntervalMs: 250,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      if (!signal?.aborted) throw error;
+      return {
+        ...task,
+        status: 'cancelled',
+        artifacts: [],
+        warnings: [],
+        failure: 'run_cancelled',
+      };
     }
+    const result = waited.settled[0];
+    if (!result || waited.timedOut) {
+      return {
+        ...task,
+        status: 'failed',
+        artifacts: [],
+        warnings: [],
+        failure: 'detached_task_timeout',
+      };
+    }
+    const failure = taskResultFailure(result.failure);
     return {
       ...task,
-      status: 'failed',
-      artifacts: [],
-      warnings: [],
-      failure: 'detached_task_timeout',
+      status: result.status,
+      ...('summary' in result ? { summary: result.summary } : {}),
+      artifacts: decodePersistedArtifacts(result.artifacts),
+      ...('summary' in result ? { usage: result.usage as RuntimeUsage } : {}),
+      warnings: result.warnings,
+      ...(failure ? { failure } : {}),
     };
   }
 
@@ -2049,6 +2053,12 @@ function decodePersistedArtifacts(value: readonly unknown[]): readonly Structure
       },
     ];
   });
+}
+
+function taskResultFailure(value: Readonly<Record<string, unknown>> | null): string | undefined {
+  if (!value) return undefined;
+  if (typeof value.message === 'string') return value.message;
+  return typeof value.code === 'string' ? value.code : undefined;
 }
 
 function staleTaskSettlement(task: PlannedTaskSpec): SettledTask {
