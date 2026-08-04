@@ -148,6 +148,8 @@ TODO：
 
 - [ ] 审计 `PiRuntimeAdapter` 已有 streaming、tool call、abort、continue 和 replay 行为并建立差距表。
 - [ ] 复制 partial JSON Tool Call、无结果 Tool Call、重复 Tool Result 和并行 Tool Call 的协议测试。
+      官方 Pi fixture 已覆盖持久化 Tool Result continuation，并新增两个 parallel ToolCall 恰好各执行一次；
+      partial JSON、missing result 与 duplicate result 的 provider wire fixture 仍待补齐。
 - [x] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
 - [ ] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
 - [x] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。

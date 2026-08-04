@@ -166,6 +166,55 @@ describe('PiRuntimeAdapter', () => {
     expect(typeof calls[0]?.context.providerToolCallId).toBe('string');
   });
 
+  it('executes parallel provider ToolCalls exactly once and preserves both results', async () => {
+    const executions: string[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage(
+          [
+            fauxToolCall('lookup', { key: 'a' }, { id: 'parallel-a' }),
+            fauxToolCall('lookup', { key: 'b' }, { id: 'parallel-b' }),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+        fauxAssistantMessage([fauxText('Merged both results.')]),
+      ],
+    });
+    const completed: RuntimeEvent[] = [];
+    const result = await runtime.execute(
+      {
+        runId: 'run-parallel-tools',
+        systemPrompt: 'Use both lookups.',
+        history: [],
+        currentTurn: currentTurn('lookup a and b'),
+        tools: [
+          {
+            name: 'lookup',
+            label: 'Lookup',
+            description: 'Lookup one key',
+            parameters: Type.Object({ key: Type.String() }, { additionalProperties: false }),
+            executionMode: 'parallel',
+            execute: ({ key }) => {
+              executions.push(String(key));
+              return Promise.resolve({ key });
+            },
+          },
+        ],
+      },
+      (event) => {
+        if (event.type === 'tool.completed') completed.push(event);
+      },
+    );
+    expect(result.status).toBe('completed');
+    expect(executions.sort()).toEqual(['a', 'b']);
+    expect(completed).toHaveLength(2);
+    expect(
+      completed.flatMap((event) =>
+        event.type === 'tool.completed' ? [event.result.toolCallId] : [],
+      ),
+    ).toEqual(expect.arrayContaining(['parallel-a', 'parallel-b']));
+  });
+
   it('rebuilds a Pi transcript and continues after a persisted tool result', async () => {
     const runtime = PiRuntimeAdapter.forTests({ responses: ['恢复后的最终回答。'] });
     const result = await runtime.execute(
