@@ -178,7 +178,7 @@ TODO：
 
 TODO：
 
-- [ ] 定义 AgentPress `SpecialistTaskRequest`：identity、assignment、Context Pack、allowed tools、
+- [x] 定义 AgentPress `SpecialistTaskRequest`：identity、assignment、Context Pack、allowed tools、
       output schema、parent task、depth、timeout、budget、detached 和 owner。
 - [ ] 复制 caller/agent/session 三层 output schema 优先级与 strict/permissive 验证行为。
 - [ ] 复制递归深度限制、自调用阻止、spawn policy 和 provider concurrency 测试。
