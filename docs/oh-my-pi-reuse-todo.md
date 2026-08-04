@@ -151,7 +151,9 @@ TODO：
 - [x] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
 - [ ] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
 - [x] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。
-- [ ] Tool 输出超过预算时外置为 Artifact，只把受限摘要和引用放回模型上下文。
+- [x] Tool 输出超过预算时外置为 Artifact，只把受限摘要和引用放回模型上下文。
+      内置 MCP 工具超过 256KB 时将脱敏完整值写入 PostgreSQL `ToolOutput` Artifact/ArtifactVersion，
+      工具结果仅返回 artifact/version URI、字节数和最多 1000 字符摘要；无 writer 时继续 fail closed。
 - [ ] 复制 Provider 切换、aborted thinking、unexpected stop、empty stop 和工具后续轮的恢复测试。
 - [ ] 每个工具执行继续通过 AgentPress `ToolCallService`、权限、审批和 settlement，不让 Pi 状态直接结算业务。
 - [ ] 真实模型验证工具选择、参数正确率、循环次数、重复副作用为零和终态一致性。
@@ -239,6 +241,8 @@ TODO：
 - [ ] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
 - [x] 保持 MCP Tool 稳定排序，避免 Prompt cache 因异步连接顺序失效。
 - [ ] 复用现有 output guard，补 Schema normalization、secret redaction、hostile/oversized output 和 Artifact 外置。
+      Schema、secret redaction、oversized Artifact 外置已完成；仍需 hostile instruction 的上下文归因与
+      真实 Streamable HTTP fixture 后再勾选。
 - [ ] 首版不复制 OAuth/Smithery/stdio/任意 remote config；若内置 Server 未来需要 OAuth，另行安全评审。
 - [ ] 所有 MCP 调用必须先持久化 AgentPress ToolCall，并经过 capability/approval/settlement。
 - [ ] 使用真实 Streamable HTTP fixture 验证重连、取消、server restart 和不重复 ToolCall。

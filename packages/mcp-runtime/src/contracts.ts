@@ -21,6 +21,15 @@ export type GuardedMcpOutput = {
   readonly value: unknown;
   readonly bytes: number;
   readonly redactions: number;
+  readonly artifact?: McpOutputArtifactReference;
+};
+
+export type McpOutputArtifactReference = {
+  readonly artifactId: string;
+  readonly versionId: string;
+  readonly contentHash: string;
+  readonly bytes: number;
+  readonly uri: string;
 };
 
 export type McpToolContract = {

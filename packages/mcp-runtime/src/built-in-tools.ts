@@ -1,8 +1,8 @@
 import type { ToolExecutionContext, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
 
-import type { BuiltInMcpServerId } from './contracts.js';
-import { guardMcpOutput } from './output-guard.js';
+import type { BuiltInMcpServerId, McpOutputArtifactReference } from './contracts.js';
+import { guardMcpOutputWithArtifact } from './output-guard.js';
 
 export type BuiltInMcpGateway = {
   readonly call: (input: {
@@ -11,6 +11,15 @@ export type BuiltInMcpGateway = {
     readonly arguments: Readonly<Record<string, unknown>>;
     readonly context: ToolExecutionContext;
   }) => Promise<unknown>;
+};
+
+export type BuiltInMcpToolOptions = {
+  readonly writeOversizedOutputArtifact?: (input: {
+    readonly value: unknown;
+    readonly bytes: number;
+    readonly context: ToolExecutionContext;
+  }) => Promise<McpOutputArtifactReference>;
+  readonly maxOutputBytes?: number;
 };
 
 const searchInput = Type.Object(
@@ -26,7 +35,11 @@ const guardedOutput = Type.Object({
   redactions: Type.Integer({ minimum: 0 }),
 });
 
-export function registerBuiltInMcpTools(registry: ToolRegistry, gateway: BuiltInMcpGateway): void {
+export function registerBuiltInMcpTools(
+  registry: ToolRegistry,
+  gateway: BuiltInMcpGateway,
+  options: BuiltInMcpToolOptions = {},
+): void {
   const tools = [
     {
       toolId: 'web.search',
@@ -62,13 +75,24 @@ export function registerBuiltInMcpTools(registry: ToolRegistry, gateway: BuiltIn
       timeoutMs: 30_000,
       estimateCost: () => ({ externalRequests: 1 }),
       execute: async (input, context) =>
-        guardMcpOutput(
+        guardMcpOutputWithArtifact(
           await gateway.call({
             serverId: tool.serverId,
             toolName: 'search',
             arguments: input,
             context,
           }),
+          undefined,
+          {
+            ...(options.maxOutputBytes ? { maxBytes: options.maxOutputBytes } : {}),
+            ...(options.writeOversizedOutputArtifact
+              ? {
+                  writeArtifact: (artifact) =>
+                    options.writeOversizedOutputArtifact?.({ ...artifact, context }) ??
+                    Promise.reject(new Error('MCP output artifact writer is unavailable')),
+                }
+              : {}),
+          },
         ),
     });
   }

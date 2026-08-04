@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from 'node:crypto';
+
 import {
   ContextGovernanceService,
   PersistentToolBridge,
@@ -7,6 +9,8 @@ import {
 } from '@agentpress/agent-application';
 import {
   agentRuns,
+  artifacts,
+  artifactVersions,
   type AgentPressDatabase,
   rootRequests,
   workspaceMembers,
@@ -45,7 +49,16 @@ export function createBuiltInToolRuntime(
   const handlers = createHandlers(database);
   for (const definition of createInMemoryBuiltInDefinitions(handlers)) manager.register(definition);
   const registry = new ToolRegistry();
-  registerBuiltInMcpTools(registry, new McpClientGateway(manager));
+  registerBuiltInMcpTools(registry, new McpClientGateway(manager), {
+    writeOversizedOutputArtifact: ({ value, bytes, context }) =>
+      persistToolOutputArtifact(database, {
+        value,
+        bytes,
+        runId: context.runId,
+        ...(context.taskId ? { taskId: context.taskId } : {}),
+        toolCallId: context.toolCallId,
+      }),
+  });
   registerArticleTools(registry, database, new ProposalService(database));
   registerContextTools(registry, new ContextGovernanceService(database));
   const environment = loadWorkerEnvironment();
@@ -117,6 +130,46 @@ export function createBuiltInToolRuntime(
     bridge: new PersistentToolBridge({ database, registry, toolCalls }),
     manager,
     toolCalls,
+  };
+}
+
+async function persistToolOutputArtifact(
+  database: AgentPressDatabase,
+  input: {
+    readonly value: unknown;
+    readonly bytes: number;
+    readonly runId: string;
+    readonly taskId?: string;
+    readonly toolCallId: string;
+  },
+) {
+  const artifactId = randomUUID();
+  const versionId = randomUUID();
+  const content = { toolCallId: input.toolCallId, output: input.value };
+  const contentHash = createHash('sha256').update(JSON.stringify(content)).digest('hex');
+  await database.transaction(async (transaction) => {
+    await transaction.insert(artifacts).values({
+      id: artifactId,
+      runId: input.runId,
+      ...(input.taskId ? { taskId: input.taskId } : {}),
+      type: 'ToolOutput',
+      title: `Tool output ${input.toolCallId}`,
+    });
+    await transaction.insert(artifactVersions).values({
+      id: versionId,
+      artifactId,
+      version: 1,
+      summary: `Oversized tool output (${String(input.bytes)} bytes)`,
+      content,
+      contentHash,
+    });
+  });
+  return {
+    artifactId,
+    versionId,
+    contentHash,
+    bytes: input.bytes,
+    uri: `artifact://${artifactId}/versions/1`,
   };
 }
 

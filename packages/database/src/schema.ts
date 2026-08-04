@@ -908,7 +908,7 @@ export const artifacts = pgTable(
     index('artifacts_run_idx').on(table.runId, table.createdAt),
     check(
       'artifacts_type_check',
-      sql`${table.type} in ('ResearchBrief', 'Outline', 'ArticleDraft', 'EditProposal', 'ClaimReview', 'ImagePlan', 'AssetProposal')`,
+      sql`${table.type} in ('ResearchBrief', 'Outline', 'ArticleDraft', 'EditProposal', 'ClaimReview', 'ImagePlan', 'AssetProposal', 'ToolOutput')`,
     ),
   ],
 );
