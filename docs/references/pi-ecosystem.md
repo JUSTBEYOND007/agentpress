@@ -13,9 +13,12 @@ Verified on 2026-07-29. AgentPress follows a copy-first policy: use a maintained
 7. Upgrade one source at a time. Re-run its contract suite, Agent Runtime state-machine suite, recovery tests, and affected eval scenarios before changing the pin.
 
 Schema boundary decision: AgentPress keeps TypeBox as the single domain-contract authority. The
-`packages/agent-runtime/src/schema-compatibility.ts` adapter creates a provider wire copy, records
-dereference/normalization/degradation events, and validates decoded results without coercion. Zod
-remains limited to the official MCP SDK adapter in `packages/mcp-runtime`; it is not exposed through
+`packages/agent-runtime/src/schema-compatibility.ts` adapter creates a provider wire copy and
+records dereference/normalization/degradation events. Decoded Specialist, Plan, Tool, MCP, Memory
+Candidate, and Judge values share the no-coercion validator in `packages/schema-runtime`, which
+directly uses pinned `typebox@1.1.38`, accepts both current Pi schemas and AgentPress's legacy
+TypeBox-built domain schemas, and rejects unknown formats with structured paths. Zod remains
+limited to the official MCP SDK adapter in `packages/mcp-runtime`; it is not exposed through
 AgentPress contracts.
 
 8. Security-sensitive code such as URL validation, MCP lifecycle management, and edit application requires local review even when copied unchanged.

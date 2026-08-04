@@ -22,6 +22,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/schema-runtime": "workspace:*",
     "@sinclair/typebox": "catalog:"
   }
 }

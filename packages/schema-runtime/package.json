@@ -1,5 +1,5 @@
 {
-  "name": "@agentpress/agent-runtime",
+  "name": "@agentpress/schema-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,16 +16,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agentpress/contracts": "workspace:*",
-    "@agentpress/schema-runtime": "workspace:*",
-    "@earendil-works/pi-agent-core": "catalog:",
-    "@earendil-works/pi-ai": "catalog:",
     "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@sinclair/typebox": "catalog:"
   }
 }

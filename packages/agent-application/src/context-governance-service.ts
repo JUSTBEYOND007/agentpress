@@ -201,7 +201,7 @@ export class ContextGovernanceService {
       )
       .orderBy(desc(memoryCandidates.updatedAt))
       .limit(1);
-    return proposeMemoryCandidate(this.database, {
+    const candidate = await proposeMemoryCandidate(this.database, {
       id: this.createId(),
       workspaceId: identity.workspaceId,
       userId: identity.userId,
@@ -211,8 +211,32 @@ export class ContextGovernanceService {
       confidenceBps: Math.round(confidence * 10_000),
       ...(activeRows[0] ? { supersedesId: activeRows[0].id } : {}),
     });
+    return {
+      id: candidate.id,
+      status: candidate.status,
+      subject: candidate.subject,
+      value: candidate.value,
+      confidenceBps: candidate.confidenceBps,
+      ...(candidate.supersedesId ? { supersedesId: candidate.supersedesId } : {}),
+    };
   }
 }
+
+const memoryCandidateOutputSchema = Type.Object(
+  {
+    id: Type.String({ format: 'uuid' }),
+    status: Type.Union(
+      ['pending', 'accepted', 'rejected', 'superseded', 'deleted'].map((status) =>
+        Type.Literal(status),
+      ),
+    ),
+    subject: Type.String({ minLength: 1, maxLength: 200 }),
+    value: Type.String({ minLength: 1, maxLength: 10_000 }),
+    confidenceBps: Type.Integer({ minimum: 0, maximum: 10_000 }),
+    supersedesId: Type.Optional(Type.String({ format: 'uuid' })),
+  },
+  { additionalProperties: false },
+);
 
 export function registerContextTools(
   registry: ToolRegistry,
@@ -223,7 +247,7 @@ export function registerContextTools(
     version: '1.0.0',
     owner: 'agentpress.context',
     description:
-      'Propose a durable user memory candidate. The user must explicitly accept it before retrieval.',
+      'Propose a durable user memory candidate. New candidates require explicit acceptance; idempotent repeats may return an existing status.',
     capabilities: ['memory.propose'],
     inputSchema: Type.Object(
       {
@@ -233,9 +257,10 @@ export function registerContextTools(
       },
       { additionalProperties: false },
     ),
-    outputSchema: Type.Any(),
+    outputSchema: memoryCandidateOutputSchema,
     risk: 'draft_write',
-    sideEffect: 'Creates a pending memory candidate; it is not recalled until the user accepts it',
+    sideEffect:
+      'Creates a pending memory candidate or returns an existing identical candidate without changing its status',
     idempotency: 'provider_key',
     timeoutMs: 5_000,
     estimateCost: () => ({}),

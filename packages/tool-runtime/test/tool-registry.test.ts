@@ -42,6 +42,25 @@ describe('ToolRegistry', () => {
     ).rejects.toBeInstanceOf(ToolRuntimeError);
   });
 
+  it('rejects schema-invalid output without coercion and preserves the failure path', async () => {
+    const registry = new ToolRegistry();
+    const definition = tool('workspace.invalid-output', 'workspace.read');
+    const invalidOutput = { result: 7 };
+    registry.register({ ...definition, execute: () => Promise.resolve(invalidOutput as never) });
+
+    await expect(
+      registry.execute(
+        registry.get(definition.toolId, definition.version),
+        { query: 'agent' },
+        { runId: 'run', toolCallId: 'call' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'invalid_output',
+      details: { errors: [expect.objectContaining({ path: '/result' })] },
+    });
+    expect(invalidOutput).toEqual({ result: 7 });
+  });
+
   it('selects only the policy intersection and caps tool definitions', () => {
     const registry = new ToolRegistry();
     registry.register(tool('workspace.search', 'workspace.read'));

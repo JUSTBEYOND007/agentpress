@@ -1,5 +1,5 @@
+import { validateSchemaResult } from '@agentpress/schema-runtime';
 import type { TSchema } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
 
 import type {
   CapabilityPolicy,
@@ -119,14 +119,11 @@ function validateSchema(
   code: 'invalid_input' | 'invalid_output',
   definition: RegisteredTool,
 ): void {
-  if (Value.Check(schema, value)) {
-    return;
-  }
-  const errors = [...Value.Errors(schema, value)].slice(0, 8).map(({ path, message }) => ({
-    path,
-    message,
-  }));
-  throw new ToolRuntimeError(code, `${definition.toolId} ${code.replace('_', ' ')}`, { errors });
+  const validation = validateSchemaResult(schema, value, 'strict');
+  if (validation.valid) return;
+  throw new ToolRuntimeError(code, `${definition.toolId} ${code.replace('_', ' ')}`, {
+    errors: validation.failures,
+  });
 }
 
 function intersectPolicy(policy: CapabilityPolicy): ReadonlySet<string> {

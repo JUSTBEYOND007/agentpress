@@ -27,7 +27,7 @@ describe('MCP output guard', () => {
   it('rejects schema mismatch after redaction', () => {
     expect(() =>
       guardMcpOutput({ count: 'wrong' }, { outputSchema: Type.Object({ count: Type.Number() }) }),
-    ).toThrow(/schema/);
+    ).toThrow(/schema: \/count:/);
   });
 
   it('externalizes oversized output and returns only a bounded summary and reference', async () => {

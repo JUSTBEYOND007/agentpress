@@ -123,8 +123,12 @@ TODO：
       证据：`packages/agent-runtime/test/schema-compatibility.test.ts`，覆盖 closed object、union、nullable、literal、tuple 和递归 `$defs`。
 - [x] 定义 `strict` 与 `permissive` 两种结果策略；严格模式失败必须成为结构化失败，不得静默使用原文本。
       strict 返回带路径的失败；permissive 返回显式 `degraded` 和 failures，不做 coercion 或静默修复。`plan_submit`、`task_complete` 与 LLM Judge 已在宿主边界使用 strict 校验。
-- [ ] 给 Specialist `TaskResult`、Execution Plan、Tool 参数/结果、MCP 输出、Memory Candidate 和 LLM Judge
+- [x] 给 Specialist `TaskResult`、Execution Plan、Tool 参数/结果、MCP 输出、Memory Candidate 和 LLM Judge
       输出统一接入该验证层。
+      `packages/schema-runtime` 直接复用 `typebox@1.1.38` 的无 coercion 校验器，同时接受 Pi 当前
+      TypeBox 与 AgentPress 领域 TypeBox Schema；Plan、TaskResult 和 Judge 通过 Agent Runtime
+      re-export 接入，Tool/MCP 直接复用同一层。`memory.propose` 已用明确 Candidate 输出 Schema
+      替代 `Type.Any()`；未知 format、无效 Tool/MCP/Memory 输出均 fail closed 并保留字段路径。
 - [x] 记录每次 Schema 降级及原因，避免 provider fail-open 在观测层不可见。
 - [ ] 真实目标模型验收 Schema 有效率、修复重试次数和 provider 间一致性。
 

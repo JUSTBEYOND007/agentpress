@@ -1,4 +1,4 @@
-import { Value } from '@sinclair/typebox/value';
+import { validateSchemaResult } from '@agentpress/schema-runtime';
 
 import type { GuardedMcpOutput, McpOutputArtifactReference, McpToolContract } from './contracts.js';
 
@@ -15,9 +15,7 @@ export function guardMcpOutput(
   if (bytes > maxBytes) {
     throw new Error(`MCP output exceeds ${String(maxBytes)} bytes`);
   }
-  if (contract?.outputSchema && !Value.Check(contract.outputSchema, redacted)) {
-    throw new Error('MCP output does not satisfy the declared schema');
-  }
+  assertMcpOutputSchema(contract?.outputSchema, redacted);
   return {
     source: 'mcp',
     trust: 'untrusted',
@@ -45,9 +43,7 @@ export async function guardMcpOutputWithArtifact(
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new RangeError('MCP output byte limit must be positive');
   }
-  if (contract?.outputSchema && !Value.Check(contract.outputSchema, redacted)) {
-    throw new Error('MCP output does not satisfy the declared schema');
-  }
+  assertMcpOutputSchema(contract?.outputSchema, redacted);
   const redactions = countRedactions(value);
   if (bytes <= maxBytes) {
     return { source: 'mcp', trust: 'untrusted', value: redacted, bytes, redactions };
@@ -70,6 +66,17 @@ export async function guardMcpOutputWithArtifact(
     redactions,
     artifact,
   };
+}
+
+function assertMcpOutputSchema(
+  schema: McpToolContract['outputSchema'] | undefined,
+  value: unknown,
+): void {
+  if (!schema) return;
+  const validation = validateSchemaResult(schema, value, 'strict');
+  if (validation.valid) return;
+  const detail = validation.failures.map(({ path, message }) => `${path}: ${message}`).join('; ');
+  throw new Error(`MCP output does not satisfy the declared schema: ${detail}`);
 }
 
 function summarizeOversizedValue(value: unknown): string {

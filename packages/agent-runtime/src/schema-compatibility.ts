@@ -1,9 +1,14 @@
-import { Value } from 'typebox/value';
 import type { TSchema } from 'typebox';
 
-export type SchemaProvider = 'openai' | 'anthropic' | 'google' | 'ollama' | 'mcp' | 'generic';
-export type SchemaValidationMode = 'strict' | 'permissive';
+export {
+  validateSchemaResult,
+  type JsonSchemaContract,
+  type SchemaValidationFailure,
+  type SchemaValidationMode,
+  type SchemaValidationResult,
+} from '@agentpress/schema-runtime';
 
+export type SchemaProvider = 'openai' | 'anthropic' | 'google' | 'ollama' | 'mcp' | 'generic';
 export type SchemaAdaptation = {
   readonly schema: TSchema;
   readonly provider: SchemaProvider;
@@ -21,24 +26,6 @@ export type SchemaDegradation = {
   readonly path: string;
   readonly detail: string;
 };
-
-export type SchemaValidationFailure = {
-  readonly path: string;
-  readonly message: string;
-};
-
-export type SchemaValidationResult =
-  | {
-      readonly valid: true;
-      readonly value: unknown;
-      readonly degraded?: true;
-      readonly failures?: readonly SchemaValidationFailure[];
-    }
-  | {
-      readonly valid: false;
-      readonly failures: readonly SchemaValidationFailure[];
-      readonly mode: SchemaValidationMode;
-    };
 
 /**
  * Normalizes a TypeBox schema at the provider boundary. The input remains the
@@ -81,21 +68,6 @@ export function adaptProviderSchema(
     );
   }
   return { schema: normalized, provider, strict, degradations };
-}
-
-/** Validates a decoded tool/result payload without coercing or silently repairing it. */
-export function validateSchemaResult(
-  schema: TSchema,
-  value: unknown,
-  mode: SchemaValidationMode = 'strict',
-): SchemaValidationResult {
-  if (Value.Check(schema, value)) return { valid: true, value };
-  const failures = [...Value.Errors(schema, value)].slice(0, 16).map((error) => ({
-    path: 'path' in error && typeof error.path === 'string' ? error.path : '/',
-    message: error.message,
-  }));
-  if (mode === 'permissive') return { valid: true, value, degraded: true, failures };
-  return { valid: false, failures, mode };
 }
 
 export function providerFromId(provider: string): SchemaProvider {

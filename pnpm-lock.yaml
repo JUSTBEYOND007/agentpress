@@ -505,6 +505,9 @@ importers:
       '@agentpress/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@agentpress/schema-runtime':
+        specifier: workspace:*
+        version: link:../schema-runtime
       '@earendil-works/pi-agent-core':
         specifier: 'catalog:'
         version: 0.82.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.1)(zod@4.4.3)
@@ -629,6 +632,9 @@ importers:
 
   packages/mcp-runtime:
     dependencies:
+      '@agentpress/schema-runtime':
+        specifier: workspace:*
+        version: link:../schema-runtime
       '@agentpress/tool-runtime':
         specifier: workspace:*
         version: link:../tool-runtime
@@ -738,8 +744,21 @@ importers:
         specifier: 4.5.7
         version: 4.5.7
 
+  packages/schema-runtime:
+    dependencies:
+      typebox:
+        specifier: 1.1.38
+        version: 1.1.38
+    devDependencies:
+      '@sinclair/typebox':
+        specifier: 'catalog:'
+        version: 0.34.41
+
   packages/tool-runtime:
     dependencies:
+      '@agentpress/schema-runtime':
+        specifier: workspace:*
+        version: link:../schema-runtime
       '@sinclair/typebox':
         specifier: 'catalog:'
         version: 0.34.41
