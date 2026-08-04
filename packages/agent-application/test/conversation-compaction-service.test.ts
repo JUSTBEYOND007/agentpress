@@ -141,6 +141,44 @@ describe('ConversationCompactionService', () => {
       },
     });
   });
+
+  it('records user cancellation without replacing the raw timeline with a summary', async () => {
+    const appended: AppendConversationCompactionInput[] = [];
+    const controller = new AbortController();
+    controller.abort();
+    const service = new ConversationCompactionService({
+      persistence: fakePersistence(appended),
+      generator: {
+        generate: ({ signal }) =>
+          Promise.reject(
+            new ConversationSummaryGenerationError(
+              signal?.aborted ? 'cancelled' : 'provider_failure',
+              'Conversation compaction was cancelled',
+              true,
+              'test/summary',
+            ),
+          ),
+      },
+      contextWindow: 1_000,
+      keepRecentTokens: 2,
+      reserveTokens: 100,
+      createId: () => 'cancelled-compaction',
+    });
+
+    await expect(
+      service.compact({
+        branchId: 'branch-1',
+        reason: 'manual',
+        force: true,
+        signal: controller.signal,
+      }),
+    ).resolves.toEqual({ status: 'failed', compactionId: 'cancelled-compaction', version: 1 });
+    expect(appended[0]).toMatchObject({
+      failure: { code: 'cancelled', retryable: true },
+      preserveData: { evidenceIds: ['evidence-1'], unsettledToolCallIds: ['tool-1'] },
+    });
+    expect(appended[0]).not.toHaveProperty('summary');
+  });
 });
 
 function fakePersistence(

@@ -68,13 +68,15 @@ TODO：
 - [x] 将压缩记录作为 append-only 事实保存，不覆盖旧消息；上下文投影使用“有效 Summary + 最近原始消息”。
 - [ ] 复制并适配 Oh My Pi 的 `CompactionEntry`、branch summary、keep boundary 行为测试。
 - [ ] 实现 token budget 驱动的自动压缩、手动压缩和 mid-turn 压缩，保留明确的 reserve provenance。
-- [ ] 复制 tool protection 行为：未结算 Tool Call、审批、Evidence、Article Revision、EditProposal、
+- [x] 复制 tool protection 行为：未结算 Tool Call、审批、Evidence、Article Revision、EditProposal、
       Memory Candidate、Task Result 和成本事实不得被普通 Summary 消除或改写。
 - [x] 复制增量 Summary 行为：新 Summary 必须在旧 Summary 基础上更新，并记录继承来源。
 - [x] 为 Conversation Branch 独立生成 branch summary，不污染兄弟分支（当前已完成 branch-scoped
       存储与读取隔离，尚缺 fork 时的继承/重建策略）。
-- [ ] 将读取/修改过的文章、Evidence、Artifact、Skill 版本和 Tool Call 列表写入压缩 preserve data。
-- [ ] 压缩失败、超时、空输出或 Schema 失败时保留原始 timeline，并产生结构化可恢复错误。
+- [x] 将读取/修改过的文章、Evidence、Artifact、Skill 版本和 Tool Call 列表写入压缩 preserve data。
+      `collectConversationCompactionPreserveData` 只保存 PostgreSQL 事实引用，并覆盖 Run、ToolCall、审批、Evidence、Artifact/Version、TaskResult、Proposal/Batch、Article Revision、Memory、Skill、Model 与成本关联。
+- [x] 压缩失败、超时、空输出或 Schema 失败时保留原始 timeline，并产生结构化可恢复错误。
+      失败尝试 append-only 保存，`getEffectiveConversationCompaction` 只投影最近成功版本；timeout、cancelled、schema/provider failure 均不制造 Summary。
 - [ ] 复制 context-window overflow、截断输出、remote compaction 失败和 fallback 的相反场景测试。
 - [ ] 建立 AgentPress Summary 测试集，至少覆盖事实保留、用户意图、未完成动作、引用、分支隔离和陈旧状态。
 - [ ] 使用真实 Pi runtime/目标模型验证多轮压缩前后任务完成率和事实保留率，而非只断言 Prompt 文本。

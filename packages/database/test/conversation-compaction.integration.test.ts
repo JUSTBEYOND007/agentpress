@@ -2,23 +2,34 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   appendConversationCompaction,
   agentRuns,
+  actionProposals,
   appUsers,
   approvals,
+  artifacts,
+  artifactVersions,
+  articleRevisions,
+  articles,
   collectConversationCompactionPreserveData,
   connectDatabase,
   conversationBranches,
   conversationMessages,
   conversations,
   evidenceRecords,
+  editProposalBatches,
+  editProposals,
   getEffectiveConversationCompaction,
   memoryCandidates,
   modelSelections,
+  mentionBindings,
   rootRequests,
+  runSkillBindings,
+  skillRevisions,
   toolCalls,
   workspaces,
 } from '../src/index.js';
@@ -42,6 +53,15 @@ describeWithDatabase('Conversation compaction persistence', () => {
     evidence: randomUUID(),
     memory: randomUUID(),
     modelSelection: randomUUID(),
+    article: randomUUID(),
+    articleRevision: randomUUID(),
+    artifact: randomUUID(),
+    artifactVersion: randomUUID(),
+    skillRevision: randomUUID(),
+    mention: randomUUID(),
+    editProposal: randomUUID(),
+    editProposalBatch: randomUUID(),
+    actionProposal: randomUUID(),
   };
 
   beforeAll(async () => {
@@ -57,6 +77,25 @@ describeWithDatabase('Conversation compaction persistence', () => {
     await connection.db
       .insert(conversations)
       .values({ id: ids.conversation, workspaceId: ids.workspace, title: 'Compaction' });
+    await connection.db.insert(articles).values({
+      id: ids.article,
+      workspaceId: ids.workspace,
+      title: 'Protected article',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: ids.articleRevision,
+      articleId: ids.article,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document: { type: 'doc', content: [] },
+      documentHash: 'sha256:article-revision',
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: ids.articleRevision })
+      .where(eq(articles.id, ids.article));
     await connection.db.insert(conversationBranches).values([
       { id: ids.branchA, conversationId: ids.conversation },
       { id: ids.branchB, conversationId: ids.conversation, parentBranchId: ids.branchA },
@@ -136,6 +175,79 @@ describeWithDatabase('Conversation compaction persistence', () => {
       purpose: 'main',
       policySnapshot: { provider: 'test' },
       selectedModel: 'test/model',
+    });
+    const skillMarkdown =
+      '---\nid: protected-skill\nversion: 1.0.0\ndescription: Protected Skill\n---\nUse protected context.';
+    await connection.db.insert(skillRevisions).values({
+      id: ids.skillRevision,
+      workspaceId: ids.workspace,
+      skillId: 'protected-skill',
+      version: '1.0.0',
+      content: skillMarkdown,
+      contentHash: 'sha256:protected-skill',
+      allowedTools: [],
+    });
+    await connection.db.insert(runSkillBindings).values({
+      runId: ids.run,
+      skillRevisionId: ids.skillRevision,
+      contentHash: 'sha256:protected-skill',
+      allowedTools: [],
+    });
+    await connection.db.insert(mentionBindings).values({
+      id: ids.mention,
+      runId: ids.run,
+      targetId: ids.article,
+      targetKind: 'article',
+      revision: ids.articleRevision,
+      contentHash: 'sha256:article-revision',
+      authorizedUserId: ids.user,
+    });
+    await connection.db.insert(artifacts).values({
+      id: ids.artifact,
+      runId: ids.run,
+      type: 'ResearchBrief',
+      title: 'Protected artifact',
+      currentVersion: 1,
+    });
+    await connection.db.insert(artifactVersions).values({
+      id: ids.artifactVersion,
+      artifactId: ids.artifact,
+      version: 1,
+      summary: 'Protected version',
+      content: { markdown: 'Fact' },
+      contentHash: 'sha256:artifact-version',
+    });
+    await connection.db.insert(editProposals).values({
+      id: ids.editProposal,
+      articleId: ids.article,
+      runId: ids.run,
+      baseRevisionId: ids.articleRevision,
+      operations: [],
+      reviewMode: 'document',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    await connection.db.insert(editProposalBatches).values({
+      id: ids.editProposalBatch,
+      proposalId: ids.editProposal,
+      runId: ids.run,
+      sourceToolCallId: ids.tool,
+      batchNumber: 1,
+      operations: [],
+      diffs: [],
+      beforeHash: 'sha256:before',
+      afterHash: 'sha256:after',
+    });
+    await connection.db.insert(actionProposals).values({
+      id: ids.actionProposal,
+      sourceRunId: ids.run,
+      articleId: ids.article,
+      baseRevisionId: ids.articleRevision,
+      requestedByUserId: ids.user,
+      instruction: 'Revise the article',
+      summary: 'Pending protected action',
+      selectedBlocks: [],
+      grantedCapabilities: ['article.propose'],
+      expiresAt: new Date(Date.now() + 60_000),
     });
   });
 
@@ -244,6 +356,15 @@ describeWithDatabase('Conversation compaction persistence', () => {
       pendingApprovalIds: [ids.approval],
       evidenceIds: [ids.evidence],
       memoryCandidateIds: [ids.memory],
+      artifactIds: [ids.artifact],
+      artifactVersionIds: [ids.artifactVersion],
+      editProposalIds: [ids.editProposal],
+      pendingEditProposalIds: [ids.editProposal],
+      editProposalBatchIds: [ids.editProposalBatch],
+      actionProposalIds: [ids.actionProposal],
+      pendingActionProposalIds: [ids.actionProposal],
+      articleRevisionIds: [ids.articleRevision],
+      skillRevisionIds: [ids.skillRevision],
       modelSelectionIds: [ids.modelSelection],
       costRunIds: [ids.run],
     });

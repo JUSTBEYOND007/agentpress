@@ -22,7 +22,7 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test drizzle.config.ts",
     "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
-    "test:integration": "vitest run test/postgres.integration.test.ts",
+    "test:integration": "vitest run test/*.integration.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
