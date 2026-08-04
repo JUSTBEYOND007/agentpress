@@ -27,6 +27,15 @@ records a versioned snapshot of template and variable-schema versions plus order
 the Run Context Pack continues to pin that immutable revision. Snapshot hashes detect composition
 drift but do not grant capabilities, drive runtime state, or count as model-behavior evidence.
 
+Eval dashboard boundary decision: the product API never exposes global eval identities. An
+experiment may be attached to `eval_experiments.workspace_id`; report, Trial Trace, and regression
+queries require both authenticated workspace membership and a matching persisted workspace owner.
+Legacy or CLI experiments without an owner remain available to offline evaluation code but fail
+closed at the product API. The web dashboard consumes `ExperimentStore` reports directly, so result
+and process metrics, costs, failure categories, arm comparisons, and trends are not recomputed in
+the browser. Trace remains diagnostic-only and is loaded separately from its redacted PostgreSQL
+fact.
+
 Specialist lifecycle decision: Oh My Pi's in-memory `AgentLifecycleManager` binds every park/revive
 and late finalizer to the exact `AgentRef` that started it. AgentPress adapts that stale-owner
 invariant at the durable boundary instead of copying sessions or timers: Task settlement is fenced

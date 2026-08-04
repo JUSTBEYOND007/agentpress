@@ -33,6 +33,7 @@ export const DEFAULT_EVAL_METRICS: readonly EvalMetricDefinition[] = [
 
 export type EvalExperimentRecord = {
   readonly id: string;
+  readonly workspaceId?: string | null;
   readonly name: string;
   readonly datasetVersion: string;
   readonly status: string;

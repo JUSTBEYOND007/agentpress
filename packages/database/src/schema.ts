@@ -1785,6 +1785,7 @@ export const evalExperiments = pgTable(
   'eval_experiments',
   {
     id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 200 }).notNull(),
     datasetVersion: varchar('dataset_version', { length: 160 }).notNull(),
     status: varchar('status', { length: 24 }).notNull().default('draft'),
@@ -1794,6 +1795,7 @@ export const evalExperiments = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true, precision: 3 }),
   },
   (table) => [
+    index('eval_experiments_workspace_created_idx').on(table.workspaceId, table.createdAt),
     check(
       'eval_experiments_status_check',
       sql`${table.status} in ('draft', 'running', 'completed', 'cancelled', 'failed')`,

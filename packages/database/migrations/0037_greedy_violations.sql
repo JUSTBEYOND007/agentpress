@@ -1,0 +1,3 @@
+ALTER TABLE "eval_experiments" ADD COLUMN "workspace_id" uuid;--> statement-breakpoint
+ALTER TABLE "eval_experiments" ADD CONSTRAINT "eval_experiments_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "eval_experiments_workspace_created_idx" ON "eval_experiments" USING btree ("workspace_id","created_at");

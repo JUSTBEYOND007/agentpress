@@ -7,6 +7,7 @@ import {
   evalExperiments,
   evalRunTraces,
   evalTrials,
+  workspaces,
 } from '@agentpress/database';
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -33,7 +34,14 @@ describeWithDatabase('evaluation experiment persistence', () => {
   it('persists versioned arms, atomic trials, metrics, and a redacted trace', async () => {
     const store = new ExperimentStore(connection.db);
     const experimentName = `routing-${randomUUID()}`;
+    const workspaceId = randomUUID();
+    const foreignWorkspaceId = randomUUID();
+    await connection.db.insert(workspaces).values([
+      { id: workspaceId, name: 'Eval workspace' },
+      { id: foreignWorkspaceId, name: 'Foreign workspace' },
+    ]);
     const created = await store.createExperiment({
+      workspaceId,
       name: experimentName,
       datasetVersion: 'routing@1',
       config: { sandbox: 'isolated-schema' },
@@ -144,7 +152,24 @@ describeWithDatabase('evaluation experiment persistence', () => {
       ],
     });
     await expect(
+      store.getWorkspaceExperimentReport(workspaceId, created.experimentId),
+    ).resolves.toMatchObject({ id: created.experimentId });
+    await expect(store.listWorkspaceExperiments(workspaceId)).resolves.toEqual([
+      expect.objectContaining({ id: created.experimentId, name: experimentName }),
+    ]);
+    await expect(store.listWorkspaceExperiments(foreignWorkspaceId)).resolves.toEqual([]);
+    await expect(
+      store.getWorkspaceExperimentReport(foreignWorkspaceId, created.experimentId),
+    ).resolves.toBeUndefined();
+    await expect(
+      store.getWorkspaceTrialTrace(workspaceId, trialIds[0] ?? ''),
+    ).resolves.toMatchObject({ traceHash: traces[0]?.traceHash });
+    await expect(
+      store.getWorkspaceTrialTrace(foreignWorkspaceId, trialIds[0] ?? ''),
+    ).resolves.toBeUndefined();
+    await expect(
       store.listRegressionTrend({
+        workspaceId,
         experimentName,
         arm: 'baseline',
         metricKey: 'succeeded',
@@ -156,6 +181,14 @@ describeWithDatabase('evaluation experiment persistence', () => {
         value: 0.5,
       }),
     ]);
+    await expect(
+      store.listRegressionTrend({
+        workspaceId: foreignWorkspaceId,
+        experimentName,
+        arm: 'baseline',
+        metricKey: 'succeeded',
+      }),
+    ).resolves.toEqual([]);
     expect(await store.cancelExperiment(created.experimentId)).toBe(true);
     const retry = await connection.db
       .select({ status: evalTrials.status, attempt: evalTrials.attempt })

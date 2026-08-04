@@ -251,6 +251,9 @@ importers:
       '@agentpress/agent-application':
         specifier: workspace:*
         version: link:../../packages/agent-application
+      '@agentpress/agent-evals':
+        specifier: workspace:*
+        version: link:../../packages/agent-evals
       '@agentpress/config':
         specifier: workspace:*
         version: link:../../packages/config

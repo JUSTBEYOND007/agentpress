@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agentpress/agent-evals": "workspace:*",
     "@agentpress/agent-application": "workspace:*",
     "@agentpress/config": "workspace:*",
     "@agentpress/contracts": "workspace:*",

@@ -1,0 +1,359 @@
+.eval-dashboard {
+  position: relative;
+  min-width: 0;
+  padding: 40px clamp(24px, 5vw, 72px) 80px;
+  color: #252622;
+}
+
+.eval-heading,
+.eval-heading-controls,
+.eval-section-title,
+.eval-section-title > div,
+.eval-comparison header,
+.eval-trace-drawer header {
+  display: flex;
+  align-items: center;
+}
+
+.eval-heading {
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.eval-heading p {
+  margin: 0 0 4px;
+  color: #8a8b86;
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.eval-heading h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.eval-heading-controls {
+  gap: 6px;
+}
+
+.eval-heading select,
+.eval-section-title select {
+  max-width: min(360px, 45vw);
+  height: 34px;
+  border: 1px solid #d8d8d4;
+  border-radius: 5px;
+  background: #fff;
+  padding: 0 30px 0 10px;
+  color: #3d3e3a;
+}
+
+.eval-heading-controls button,
+.eval-trace-button,
+.eval-trace-drawer button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 5px;
+  background: transparent;
+  color: #686964;
+  cursor: pointer;
+}
+
+.eval-heading-controls button:hover,
+.eval-trace-button:hover,
+.eval-trace-drawer button:hover {
+  background: #efefed;
+  color: #252622;
+}
+
+.eval-summary-band {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid #e8e8e5;
+  border-bottom: 1px solid #e8e8e5;
+}
+
+.eval-summary-band > div {
+  min-width: 0;
+  padding: 16px 18px 16px 0;
+}
+
+.eval-summary-band span,
+.eval-summary-band strong {
+  display: block;
+}
+
+.eval-summary-band span {
+  margin-bottom: 5px;
+  color: #8b8c87;
+  font-size: 12px;
+}
+
+.eval-summary-band strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 24px 0 4px;
+  border-bottom: 1px solid #e8e8e5;
+}
+
+.eval-tabs button {
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 9px 12px;
+  color: #73746f;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.eval-tabs button[aria-selected='true'] {
+  border-bottom-color: #252622;
+  color: #252622;
+  font-weight: 600;
+}
+
+.eval-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 32px;
+}
+
+.eval-section {
+  min-width: 0;
+  padding: 26px 0 8px;
+  border-bottom: 1px solid #ececea;
+}
+
+.eval-section-title {
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 34px;
+  margin-bottom: 10px;
+}
+
+.eval-section-title > div {
+  gap: 7px;
+}
+
+.eval-section h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.eval-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.eval-table th,
+.eval-table td {
+  overflow: hidden;
+  border-bottom: 1px solid #f0f0ee;
+  padding: 9px 8px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-table th {
+  color: #858681;
+  font-weight: 550;
+}
+
+.eval-table th:first-child,
+.eval-table td:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.eval-status {
+  display: inline-block;
+  color: #696a65;
+  font-weight: 600;
+}
+
+.eval-status-success {
+  color: #24764f;
+}
+.eval-status-danger {
+  color: #b24842;
+}
+
+.eval-comparison + .eval-comparison {
+  margin-top: 14px;
+}
+
+.eval-comparison header {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.eval-comparison header span,
+.eval-comparison header small {
+  color: #858681;
+}
+
+.eval-comparison header small {
+  margin-left: auto;
+}
+
+.eval-comparison > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.eval-delta {
+  color: #73746f;
+  font-size: 12px;
+}
+
+.eval-delta-improved strong {
+  color: #24764f;
+}
+.eval-delta-regressed strong {
+  color: #b24842;
+}
+
+.eval-trend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #e8e8e5;
+  background: #e8e8e5;
+}
+
+.eval-trend > div {
+  min-width: 0;
+  background: #fff;
+  padding: 11px;
+}
+
+.eval-trend span,
+.eval-trend strong,
+.eval-trend small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-trend span,
+.eval-trend small {
+  color: #898a85;
+  font-size: 11px;
+}
+
+.eval-trend strong {
+  margin: 5px 0 3px;
+  font-size: 15px;
+}
+
+.eval-trials-section {
+  padding-top: 18px;
+}
+
+.eval-empty,
+.eval-error {
+  padding: 28px 0;
+  color: #858681;
+  font-size: 13px;
+}
+
+.eval-error {
+  color: #b24842;
+}
+
+.eval-trace-drawer {
+  position: fixed;
+  z-index: 30;
+  top: 52px;
+  right: 0;
+  bottom: 0;
+  width: min(560px, calc(100vw - 280px));
+  border-left: 1px solid #dededb;
+  background: #fff;
+  box-shadow: -12px 0 28px rgb(20 20 18 / 8%);
+}
+
+.eval-trace-drawer header {
+  justify-content: space-between;
+  height: 48px;
+  border-bottom: 1px solid #ececea;
+  padding: 0 12px 0 18px;
+}
+
+.eval-trace-drawer header > div {
+  display: flex;
+  gap: 8px;
+}
+
+.eval-trace-drawer code {
+  color: #888984;
+  font-size: 11px;
+}
+
+.eval-trace-drawer pre {
+  height: calc(100% - 48px);
+  margin: 0;
+  overflow: auto;
+  padding: 18px;
+  color: #343531;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1200px) {
+  .eval-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .eval-dashboard {
+    padding: 28px 18px 64px;
+  }
+  .eval-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .eval-heading-controls {
+    width: 100%;
+  }
+  .eval-heading select {
+    min-width: 0;
+    flex: 1;
+    max-width: none;
+  }
+  .eval-summary-band {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .eval-trace-drawer {
+    top: 52px;
+    width: 100vw;
+  }
+}

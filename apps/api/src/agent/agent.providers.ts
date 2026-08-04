@@ -5,6 +5,7 @@ import {
   DirectRunService,
   ToolCallService,
 } from '@agentpress/agent-application';
+import { ExperimentStore } from '@agentpress/agent-evals';
 import { loadApiEnvironment } from '@agentpress/config';
 import { connectDatabase } from '@agentpress/database';
 import type { DatabaseConnection } from '@agentpress/database';
@@ -74,6 +75,11 @@ export const agentProviders: Provider[] = [
   {
     provide: AuthorizationService,
     useFactory: (connection: DatabaseConnection) => new AuthorizationService(connection.db),
+    inject: [DATABASE_CONNECTION],
+  },
+  {
+    provide: ExperimentStore,
+    useFactory: (connection: DatabaseConnection) => new ExperimentStore(connection.db),
     inject: [DATABASE_CONNECTION],
   },
   {

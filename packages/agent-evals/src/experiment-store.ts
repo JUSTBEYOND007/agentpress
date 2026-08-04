@@ -43,6 +43,15 @@ export type EvalTrialClaim = {
   readonly leaseExpiresAt: Date;
 };
 
+export type EvalExperimentListItem = {
+  readonly id: string;
+  readonly name: string;
+  readonly datasetVersion: string;
+  readonly status: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+};
+
 export class ExperimentStore {
   public constructor(
     private readonly database: AgentPressDatabase,
@@ -51,6 +60,7 @@ export class ExperimentStore {
   ) {}
 
   public async createExperiment(input: {
+    readonly workspaceId?: string;
     readonly name: string;
     readonly datasetVersion: string;
     readonly config: Readonly<Record<string, unknown>>;
@@ -66,6 +76,7 @@ export class ExperimentStore {
     await this.database.transaction(async (transaction) => {
       await transaction.insert(evalExperiments).values({
         id: experimentId,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
         name: input.name,
         datasetVersion: input.datasetVersion,
         status: 'draft',
@@ -410,6 +421,42 @@ export class ExperimentStore {
     return buildEvalExperimentReport({ experiment, arms, trials, traces });
   }
 
+  public async getWorkspaceExperimentReport(
+    workspaceId: string,
+    experimentId: string,
+  ): Promise<EvalExperimentReport | undefined> {
+    const owned = await this.database
+      .select({ id: evalExperiments.id })
+      .from(evalExperiments)
+      .where(
+        and(eq(evalExperiments.id, experimentId), eq(evalExperiments.workspaceId, workspaceId)),
+      )
+      .limit(1);
+    return owned[0] ? this.getExperimentReport(experimentId) : undefined;
+  }
+
+  public async listWorkspaceExperiments(
+    workspaceId: string,
+    limit = 50,
+  ): Promise<readonly EvalExperimentListItem[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Evaluation experiment list limit must be between 1 and 100');
+    }
+    return this.database
+      .select({
+        id: evalExperiments.id,
+        name: evalExperiments.name,
+        datasetVersion: evalExperiments.datasetVersion,
+        status: evalExperiments.status,
+        createdAt: evalExperiments.createdAt,
+        updatedAt: evalExperiments.updatedAt,
+      })
+      .from(evalExperiments)
+      .where(eq(evalExperiments.workspaceId, workspaceId))
+      .orderBy(desc(evalExperiments.createdAt))
+      .limit(limit);
+  }
+
   public async getTrialTrace(trialId: string): Promise<
     | {
         readonly traceHash: string;
@@ -428,6 +475,26 @@ export class ExperimentStore {
     const row = rows[0];
     if (!row) return undefined;
     return { traceHash: row.traceHash, events: row.events as readonly EvalTraceEvent[] };
+  }
+
+  public async getWorkspaceTrialTrace(
+    workspaceId: string,
+    trialId: string,
+  ): Promise<
+    | {
+        readonly traceHash: string;
+        readonly events: readonly EvalTraceEvent[];
+      }
+    | undefined
+  > {
+    const owned = await this.database
+      .select({ id: evalTrials.id })
+      .from(evalTrials)
+      .innerJoin(evalArms, eq(evalArms.id, evalTrials.armId))
+      .innerJoin(evalExperiments, eq(evalExperiments.id, evalArms.experimentId))
+      .where(and(eq(evalTrials.id, trialId), eq(evalExperiments.workspaceId, workspaceId)))
+      .limit(1);
+    return owned[0] ? this.getTrialTrace(trialId) : undefined;
   }
 
   /** Resolves sandbox resources from persisted trial ownership facts. */
@@ -458,6 +525,7 @@ export class ExperimentStore {
   }
 
   public async listRegressionTrend(input: {
+    readonly workspaceId?: string;
     readonly experimentName: string;
     readonly arm: string;
     readonly metricKey: string;
@@ -473,7 +541,14 @@ export class ExperimentStore {
     const rows = await this.database
       .select({ id: evalExperiments.id })
       .from(evalExperiments)
-      .where(eq(evalExperiments.name, input.experimentName))
+      .where(
+        input.workspaceId
+          ? and(
+              eq(evalExperiments.name, input.experimentName),
+              eq(evalExperiments.workspaceId, input.workspaceId),
+            )
+          : eq(evalExperiments.name, input.experimentName),
+      )
       .orderBy(desc(evalExperiments.createdAt))
       .limit(limit);
     const reports = (

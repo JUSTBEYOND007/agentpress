@@ -8,14 +8,10 @@ import {
   FileText,
   Folder,
   FolderPlus,
-  History,
   MoreHorizontal,
   PanelRight,
   Plus,
-  Search,
   Settings2,
-  Sparkles,
-  Trash2,
   RotateCcw,
   X,
 } from 'lucide-react';
@@ -23,6 +19,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent 
 
 import { AgentWorkbench } from '../components/agent-workbench';
 import { ArticleCanvas } from '../components/article-canvas';
+import { EvalDashboard } from '../components/eval-dashboard';
+import { WorkspacePrimaryNav, type WorkspaceView } from '../components/workspace-primary-nav';
 import { useArticleReview } from '../components/article-review';
 import type { ArticleSelectionView } from '../components/article-selection';
 import { AuthProvider } from '../components/auth-provider';
@@ -64,8 +62,6 @@ type ArticlePublication = {
   readonly publishedAt: string;
 };
 
-type View = 'workspace' | 'search' | 'recent' | 'trash';
-
 export default function AuthenticatedWorkspacePage(): React.JSX.Element {
   return (
     <AuthProvider>
@@ -80,7 +76,7 @@ function WorkspacePage(): React.JSX.Element {
   const [trashArticles, setTrashArticles] = useState<readonly WorkspaceArticle[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [activeArticleId, setActiveArticleId] = useState<string>();
-  const [view, setView] = useState<View>('workspace');
+  const [view, setView] = useState<WorkspaceView>('workspace');
   const [agentOpen, setAgentOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [newTitle, setNewTitle] = useState('');
@@ -281,7 +277,7 @@ function WorkspacePage(): React.JSX.Element {
     setSearchQuery('');
   }
 
-  function openView(nextView: View): void {
+  function openView(nextView: WorkspaceView): void {
     setView(nextView);
     setSettingsOpen(false);
     setMenuOpen(false);
@@ -358,44 +354,13 @@ function WorkspacePage(): React.JSX.Element {
           <ChevronDown aria-hidden="true" size={15} />
         </div>
 
-        <nav className="primary-nav">
-          <button
-            className={view === 'workspace' ? 'nav-item is-active' : 'nav-item'}
-            onClick={() => {
-              openView('workspace');
-            }}
-            type="button"
-          >
-            <Sparkles aria-hidden="true" size={17} /> 工作台
-          </button>
-          <button
-            className={view === 'search' ? 'nav-item is-active' : 'nav-item'}
-            onClick={() => {
-              openView('search');
-            }}
-            type="button"
-          >
-            <Search aria-hidden="true" size={17} /> 搜索
-          </button>
-          <button
-            className={view === 'recent' ? 'nav-item is-active' : 'nav-item'}
-            onClick={() => {
-              openView('recent');
-            }}
-            type="button"
-          >
-            <History aria-hidden="true" size={17} /> 最近
-          </button>
-          <button
-            className={view === 'trash' ? 'nav-item is-active' : 'nav-item'}
-            onClick={() => {
-              openView('trash');
-            }}
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={17} /> 回收站
-          </button>
-        </nav>
+        <WorkspacePrimaryNav
+          onOpen={(nextView) => {
+            openView(nextView);
+            if (nextView === 'evals') setAgentOpen(false);
+          }}
+          view={view}
+        />
 
         <section className="sidebar-section">
           <div className="section-heading">
@@ -456,9 +421,11 @@ function WorkspacePage(): React.JSX.Element {
                 ? '搜索'
                 : view === 'recent'
                   ? '最近'
-                  : view === 'trash'
-                    ? '回收站'
-                    : '写作素材'}
+                  : view === 'evals'
+                    ? 'Agent Eval'
+                    : view === 'trash'
+                      ? '回收站'
+                      : '写作素材'}
             </span>
             {activeArticle && view === 'workspace' ? (
               <>
@@ -550,7 +517,9 @@ function WorkspacePage(): React.JSX.Element {
           ) : null}
         </header>
 
-        {view === 'workspace' && activeArticle ? (
+        {view === 'evals' && workspaceId ? (
+          <EvalDashboard workspaceId={workspaceId} />
+        ) : view === 'workspace' && activeArticle ? (
           <ArticleCanvas
             key={`${activeArticle.id}:${activeArticle.revisionId}`}
             articleId={activeArticle.id}
@@ -584,23 +553,26 @@ function WorkspacePage(): React.JSX.Element {
               />
             ) : null}
             <div className="workspace-results">
-              {(view === 'trash' ? trashArticles : listedArticles).map((article) => (
-                <button
-                  key={article.id}
-                  onClick={() => {
-                    if (view === 'trash')
-                      void restoreArticle(article.id).catch((reason: unknown) => {
-                        setError(reason instanceof Error ? reason.message : '恢复失败');
-                      });
-                    else selectArticle(article.id);
-                  }}
-                  type="button"
-                >
-                  {view === 'trash' ? <RotateCcw size={17} /> : <FileText size={17} />}
-                  <span>{article.title}</span>
-                </button>
-              ))}
-              {(view === 'trash' ? trashArticles : listedArticles).length === 0 ? (
+              {(view === 'trash' ? trashArticles : view === 'evals' ? [] : listedArticles).map(
+                (article) => (
+                  <button
+                    key={article.id}
+                    onClick={() => {
+                      if (view === 'trash')
+                        void restoreArticle(article.id).catch((reason: unknown) => {
+                          setError(reason instanceof Error ? reason.message : '恢复失败');
+                        });
+                      else selectArticle(article.id);
+                    }}
+                    type="button"
+                  >
+                    {view === 'trash' ? <RotateCcw size={17} /> : <FileText size={17} />}
+                    <span>{article.title}</span>
+                  </button>
+                ),
+              )}
+              {(view === 'trash' ? trashArticles : view === 'evals' ? [] : listedArticles)
+                .length === 0 ? (
                 <p className="workspace-empty">没有匹配的文章</p>
               ) : null}
             </div>

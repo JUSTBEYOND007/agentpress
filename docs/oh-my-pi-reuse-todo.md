@@ -478,7 +478,13 @@ TODO：
       `buildEvalExperimentReport` 输出 `tracePolicy=diagnostic_only`；正式结果/过程聚合只读取 PostgreSQL
       Trial 的 `resultMetrics/processMetrics`，trace 仅投影为脱敏可用标记/hash。回归测试证明相同 Trial
       有无 trace 时正式指标完全一致。
-- [ ] Dashboard 至少展示结果/过程双层指标、Trace、失败分类、成本、模型差异和回归趋势。
+- [x] Dashboard 至少展示结果/过程双层指标、Trace、失败分类、成本、模型差异和回归趋势。
+      `EvalController` 仅在 workspace member 授权后返回 workspace-scoped 实验列表、聚合报告、
+      Trial Trace 和回归趋势；`EvalDashboard` 直接复用 `ExperimentStore` 的正式聚合结果，展示
+      结果/过程指标矩阵、成本、失败分类、arm 配置与指标差异、趋势和脱敏 Trace 抽屉。
+      `eval_experiments.workspace_id` 是产品读取边界；无归属的历史/CLI 实验不会从 API 暴露。
+      PostgreSQL 集成测试覆盖跨 workspace 报告、Trace 与趋势均 fail closed，Playwright 已验证
+      1440px 桌面、Trial/Trace 交互和 390px 移动视口无横向溢出。
 - [x] PR 使用 deterministic/faux provider 验证状态机；真实 Pi/目标模型评估按成本控制手动或定时运行。
       根脚本 `pnpm eval:pr` 串行运行 domain、tool-runtime、agent-runtime、agent-application、database
       与 agent-evals 的离线状态机契约。评估报告显式区分 `deterministic_pr/faux` 和
