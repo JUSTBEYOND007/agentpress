@@ -487,6 +487,12 @@ importers:
       '@agentpress/runtime-tools':
         specifier: workspace:*
         version: link:../runtime-tools
+      '@earendil-works/pi-ai':
+        specifier: 'catalog:'
+        version: 0.82.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.1)(zod@4.4.3)
+      '@sinclair/typebox':
+        specifier: 'catalog:'
+        version: 0.34.41
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)

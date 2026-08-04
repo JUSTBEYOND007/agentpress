@@ -19,11 +19,14 @@
     "@agentpress/agent-runtime": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/runtime-tools": "workspace:*",
+    "@earendil-works/pi-ai": "catalog:",
+    "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "eval:online": "tsx src/online-cli.ts",
+    "eval:compaction": "tsx src/compaction-online-cli.ts",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
