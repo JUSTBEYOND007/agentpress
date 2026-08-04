@@ -220,10 +220,10 @@ TODO：
 
 - [ ] 先对照现有 `packages/mcp-runtime` 和已适配的 `pi-mcp-adapter`，形成缺口清单；已有行为不得重写。
 - [x] 评估直接使用官方 MCP TypeScript SDK 的 Streamable HTTP transport；只有产品契约缺口才复制 Oh My Pi 行为。
-- [ ] 补齐 POST JSON-RPC、JSON/SSE response、GET SSE listener 和 `Mcp-Session-Id` 契约测试。
+- [x] 补齐 POST JSON-RPC、JSON/SSE response、GET SSE listener 和 `Mcp-Session-Id` 契约测试。
 - [ ] 补齐 prompts、resources、resource templates、notifications 和 subscriptions 的受限内置服务器行为。
 - [ ] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
-- [ ] 保持 MCP Tool 稳定排序，避免 Prompt cache 因异步连接顺序失效。
+- [x] 保持 MCP Tool 稳定排序，避免 Prompt cache 因异步连接顺序失效。
 - [ ] 复用现有 output guard，补 Schema normalization、secret redaction、hostile/oversized output 和 Artifact 外置。
 - [ ] 首版不复制 OAuth/Smithery/stdio/任意 remote config；若内置 Server 未来需要 OAuth，另行安全评审。
 - [ ] 所有 MCP 调用必须先持久化 AgentPress ToolCall，并经过 capability/approval/settlement。
