@@ -8,7 +8,7 @@ import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 import * as z from 'zod/v4';
 import { describe, expect, it } from 'vitest';
 
-import { createStreamableHttpClient } from '../src/index.js';
+import { createStreamableHttpClient, McpClientGateway, McpServerManager } from '../src/index.js';
 
 describe('MCP Streamable HTTP real fixture', () => {
   it.each([
@@ -100,9 +100,43 @@ describe('MCP Streamable HTTP real fixture', () => {
       await fixture.close();
     }
   });
+
+  it('reconnects with a fresh client after a server restarts on the same endpoint', async () => {
+    const first = await startFixture(false);
+    const port = Number(new URL(first.url).port);
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: first.url }),
+    });
+    const gateway = new McpClientGateway(manager);
+    await expect(gateway.listTools('web_research')).resolves.toMatchObject([
+      { name: 'echo' },
+      { name: 'slow' },
+    ]);
+    await manager.markDegraded('web_research');
+    await first.close();
+    const restarted = await startFixture(false, port);
+    try {
+      await expect(gateway.listTools('web_research')).rejects.toBeDefined();
+      await expect(gateway.listTools('web_research')).resolves.toMatchObject([
+        { name: 'echo' },
+        { name: 'slow' },
+      ]);
+      expect(manager.state('web_research')).toBe('ready');
+      await manager.stop('web_research');
+    } finally {
+      await restarted.close();
+    }
+  });
 });
 
-async function startFixture(enableJsonResponse: boolean): Promise<{
+async function startFixture(
+  enableJsonResponse: boolean,
+  port = 0,
+): Promise<{
   readonly url: string;
   readonly transport: StreamableHTTPServerTransport;
   readonly requests: { readonly method: string; readonly session?: string }[];
@@ -154,7 +188,7 @@ async function startFixture(enableJsonResponse: boolean): Promise<{
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', () => {
       resolve();
     });
   });
