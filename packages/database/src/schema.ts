@@ -1592,6 +1592,94 @@ export const knowledgeChunks = pgTable(
   ],
 );
 
+export const evalExperiments = pgTable(
+  'eval_experiments',
+  {
+    id: uuid('id').primaryKey(),
+    name: varchar('name', { length: 200 }).notNull(),
+    datasetVersion: varchar('dataset_version', { length: 160 }).notNull(),
+    status: varchar('status', { length: 24 }).notNull().default('draft'),
+    config: jsonb('config').$type<Readonly<Record<string, unknown>>>().notNull(),
+    createdAt,
+    updatedAt,
+    completedAt: timestamp('completed_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    check(
+      'eval_experiments_status_check',
+      sql`${table.status} in ('draft', 'running', 'completed', 'cancelled', 'failed')`,
+    ),
+  ],
+);
+
+export const evalArms = pgTable(
+  'eval_arms',
+  {
+    id: uuid('id').primaryKey(),
+    experimentId: uuid('experiment_id')
+      .notNull()
+      .references(() => evalExperiments.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 160 }).notNull(),
+    model: varchar('model', { length: 200 }).notNull(),
+    promptVersion: varchar('prompt_version', { length: 160 }).notNull(),
+    skillVersions: jsonb('skill_versions').$type<Readonly<Record<string, string>>>().notNull(),
+    toolPolicyVersion: varchar('tool_policy_version', { length: 160 }).notNull(),
+    contextPolicyVersion: varchar('context_policy_version', { length: 160 }).notNull(),
+    createdAt,
+  },
+  (table) => [unique('eval_arms_experiment_name_unique').on(table.experimentId, table.name)],
+);
+
+export const evalTrials = pgTable(
+  'eval_trials',
+  {
+    id: uuid('id').primaryKey(),
+    armId: uuid('arm_id')
+      .notNull()
+      .references(() => evalArms.id, { onDelete: 'cascade' }),
+    caseId: varchar('case_id', { length: 200 }).notNull(),
+    attempt: integer('attempt').notNull(),
+    seed: varchar('seed', { length: 160 }).notNull(),
+    status: varchar('status', { length: 24 }).notNull().default('pending'),
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    resultMetrics: jsonb('result_metrics')
+      .$type<Readonly<Record<string, unknown>>>()
+      .notNull()
+      .default({}),
+    processMetrics: jsonb('process_metrics')
+      .$type<Readonly<Record<string, unknown>>>()
+      .notNull()
+      .default({}),
+    failure: jsonb('failure').$type<Readonly<Record<string, unknown>>>(),
+    createdAt,
+    updatedAt,
+    completedAt: timestamp('completed_at', { withTimezone: true, precision: 3 }),
+  },
+  (table) => [
+    unique('eval_trials_arm_case_attempt_unique').on(table.armId, table.caseId, table.attempt),
+    index('eval_trials_status_idx').on(table.status, table.updatedAt),
+    check('eval_trials_attempt_check', sql`${table.attempt} > 0`),
+    check(
+      'eval_trials_status_check',
+      sql`${table.status} in ('pending', 'running', 'succeeded', 'failed', 'cancelled')`,
+    ),
+  ],
+);
+
+export const evalRunTraces = pgTable(
+  'eval_run_traces',
+  {
+    id: uuid('id').primaryKey(),
+    trialId: uuid('trial_id')
+      .notNull()
+      .references(() => evalTrials.id, { onDelete: 'cascade' }),
+    redactedTrace: jsonb('redacted_trace').$type<readonly unknown[]>().notNull(),
+    traceHash: varchar('trace_hash', { length: 80 }).notNull(),
+    createdAt,
+  },
+  (table) => [unique('eval_run_traces_trial_unique').on(table.trialId)],
+);
+
 export const outboxMessages = pgTable(
   'outbox_messages',
   {

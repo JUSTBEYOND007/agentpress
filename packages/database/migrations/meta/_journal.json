@@ -183,6 +183,13 @@
       "when": 1785820246300,
       "tag": "0025_memory_candidate_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785821800000,
+      "tag": "0026_eval_experiment_model",
+      "breakpoints": true
     }
   ]
 }
