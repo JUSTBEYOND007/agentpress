@@ -82,6 +82,43 @@ describe('provider schema compatibility', () => {
     if (!result.valid) expect(result.failures.length).toBeGreaterThan(0);
   });
 
+  it('covers unions, nullable optionals, const/enum, tuples and closed objects', () => {
+    const schema = Type.Object(
+      {
+        mode: Type.Union([Type.Literal('draft'), Type.Literal('published')]),
+        marker: Type.Literal('agentpress'),
+        maybe: Type.Union([Type.String(), Type.Null()]),
+        pair: Type.Tuple([Type.String(), Type.Integer()]),
+      },
+      { additionalProperties: false },
+    );
+    const adapted = adaptProviderSchema(schema, { provider: 'openai', strict: true });
+    expect(adapted.schema).toHaveProperty('additionalProperties', false);
+    expect(
+      validateSchemaResult(
+        schema,
+        {
+          mode: 'draft',
+          marker: 'agentpress',
+          maybe: null,
+          pair: ['x', 1],
+        },
+        'strict',
+      ),
+    ).toMatchObject({ valid: true });
+    const invalid = validateSchemaResult(
+      schema,
+      {
+        mode: 'other',
+        marker: 'wrong',
+        maybe: 1,
+        pair: ['x'],
+      },
+      'strict',
+    );
+    expect(invalid).toMatchObject({ valid: false, mode: 'strict' });
+  });
+
   it('returns an explicit degraded result in permissive mode without coercion', () => {
     const schema = Type.Object({ count: Type.Integer() }, { additionalProperties: false });
     const value = { count: '3' };

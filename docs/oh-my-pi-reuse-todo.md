@@ -109,7 +109,8 @@ TODO：
       -> wire schema -> result validation。
       Zod 仅保留在官方 MCP SDK 必须使用它的边界适配器中，不扩展为第二套领域契约。
 - [ ] 复制 OpenAI strict、Anthropic、Google、Ollama、MCP 等方言的兼容 fixture 和失败用例。
-- [ ] 覆盖 `$ref`、`oneOf/anyOf`、nullable optional、`additionalProperties`、`const/enum`、tuple 和递归 Schema。
+- [x] 覆盖 `$ref`、`oneOf/anyOf`、nullable optional、`additionalProperties`、`const/enum`、tuple 和递归 Schema。
+      证据：`packages/agent-runtime/test/schema-compatibility.test.ts`，覆盖 closed object、union、nullable、literal、tuple 和递归 `$defs`。
 - [x] 定义 `strict` 与 `permissive` 两种结果策略；严格模式失败必须成为结构化失败，不得静默使用原文本。
       strict 返回带路径的失败；permissive 返回显式 `degraded` 和 failures，不做 coercion 或静默修复。`plan_submit`、`task_complete` 与 LLM Judge 已在宿主边界使用 strict 校验。
 - [ ] 给 Specialist `TaskResult`、Execution Plan、Tool 参数/结果、MCP 输出、Memory Candidate 和 LLM Judge
