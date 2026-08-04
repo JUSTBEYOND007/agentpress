@@ -238,8 +238,28 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       userId: ids.user,
       decision: 'accepted',
     });
+    const expired = await proposeMemoryCandidate(connection.db, {
+      id: randomUUID(),
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      subject: 'expired_fact',
+      value: 'historical',
+      valueHash: 'sha256:historical',
+      confidenceBps: 7000,
+      validUntil: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await decideMemoryCandidate(connection.db, {
+      id: expired.id,
+      workspaceId: ids.workspace,
+      userId: ids.user,
+      decision: 'accepted',
+    });
     expect(
-      await listAcceptedMemory(connection.db, { workspaceId: ids.workspace, userId: ids.user }),
+      await listAcceptedMemory(connection.db, {
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        now: new Date('2026-08-04T00:00:00.000Z'),
+      }),
     ).toHaveLength(1);
     expect(
       await listAcceptedMemory(connection.db, { workspaceId: randomUUID(), userId: ids.user }),

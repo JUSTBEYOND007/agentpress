@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lte, or } from 'drizzle-orm';
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { memoryCandidates } from './schema.js';
 
@@ -103,8 +103,14 @@ export async function decideMemoryCandidate(
 
 export function listAcceptedMemory(
   database: AgentPressDatabase,
-  input: { readonly workspaceId: string; readonly userId: string; readonly limit?: number },
+  input: {
+    readonly workspaceId: string;
+    readonly userId: string;
+    readonly limit?: number;
+    readonly now?: Date;
+  },
 ): Promise<(typeof memoryCandidates.$inferSelect)[]> {
+  const now = input.now ?? new Date();
   return database
     .select()
     .from(memoryCandidates)
@@ -113,6 +119,8 @@ export function listAcceptedMemory(
         eq(memoryCandidates.workspaceId, input.workspaceId),
         eq(memoryCandidates.userId, input.userId),
         eq(memoryCandidates.status, 'accepted'),
+        or(lte(memoryCandidates.validFrom, now), isNull(memoryCandidates.validFrom)),
+        or(gt(memoryCandidates.validUntil, now), isNull(memoryCandidates.validUntil)),
       ),
     )
     .orderBy(desc(memoryCandidates.updatedAt))
