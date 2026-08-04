@@ -221,7 +221,9 @@ TODO：
       固定上游 `f446b8a` 的 caller-presence > agent > session 与 mode 继承行为已适配到
       `specialist-task-contract.ts`；caller 两种模式均预检，继承 schema 仅 strict fail closed，
       Planned Specialist 将 source/mode 固定进 `toolPolicy`。对应契约测试覆盖无 schema 场景。
-- [ ] 复制递归深度限制、自调用阻止、spawn policy 和 provider concurrency 测试。
+- [x] 复制递归深度限制、自调用阻止、spawn policy 和 provider concurrency 测试。
+      `packages/agent-application/test/contracts.test.ts` 覆盖最大深度、自调用拒绝、父级 allowlist、
+      合法嵌套和 provider ceiling；固定策略仍由 `specialist-task-contract.ts` 在 host 侧执行。
       已先接入 AgentPress host-side 基础策略：嵌套请求要求 parent owner、禁止同 owner 自调用、支持 allowed owner policy，DAG 波次取 Specialist 与 provider 上限最小值；动态 nested spawn 路由和固定上游完整测试集仍待实现。
 - [ ] 实现持久化 Agent Registry，状态来源为 PostgreSQL Task/RunEvent，不采用进程内 registry 作为事实源。
 - [ ] 支持有界并行 Specialist、依赖 DAG、yield、等待、取消、失败和 degraded Task Result。

@@ -227,6 +227,26 @@ describe('agent application contracts', () => {
         allowedOwners: ['writer'],
       }),
     ).toThrow(/spawn policy/u);
+    expect(
+      createSpecialistTaskRequest({
+        ...request,
+        taskId: 'task-2',
+        depth: 1,
+        parentTaskId: 'task-1',
+        parentOwner: 'main',
+        owner: 'writer',
+        allowedOwners: ['writer'],
+      }),
+    ).toMatchObject({ owner: 'writer', depth: 1, parentOwner: 'main' });
+    expect(() =>
+      createSpecialistTaskRequest({
+        ...request,
+        depth: 3,
+        parentTaskId: 'task-1',
+        parentOwner: 'main',
+      }),
+    ).toThrow(/depth/u);
+    expect(specialistConcurrencyLimit(8, 1)).toBe(1);
   });
 
   it('strips Main action capabilities from the Specialist model-visible turn', () => {
