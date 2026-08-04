@@ -1,4 +1,5 @@
 export * from './hybrid-search.js';
+export * from './faq.js';
 export * from './postgres-hybrid-search.js';
 export * from './ark-embedding-provider.js';
 export * from './ark-rerank-provider.js';
