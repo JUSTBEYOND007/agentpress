@@ -452,7 +452,11 @@ TODO：
       `packages/agent-evals/src/judge-calibration.ts` 提供人工金标准确率/MAE、重复 Judge 一致率/方差和安全/确定性冲突报告；Judge 输出由宿主再次做结构化校验。
 - [ ] Oh My Pi `trace-report` 仅用于生成叙事故障分析，不作为正式 Judge 分数；正式评分必须可复现和可审计。
 - [ ] Dashboard 至少展示结果/过程双层指标、Trace、失败分类、成本、模型差异和回归趋势。
-- [ ] PR 使用 deterministic/faux provider 验证状态机；真实 Pi/目标模型评估按成本控制手动或定时运行。
+- [x] PR 使用 deterministic/faux provider 验证状态机；真实 Pi/目标模型评估按成本控制手动或定时运行。
+      根脚本 `pnpm eval:pr` 串行运行 domain、tool-runtime、agent-runtime、agent-application、database
+      与 agent-evals 的离线状态机契约。评估报告显式区分 `deterministic_pr/faux` 和
+      `target_model`：faux 报告固定 `qualifiesAsTargetModelEvidence=false`，禁止伪装真实 provider，
+      且出现外部模型成本即 gate 失败。真实模型仍只由独立 `pnpm eval:online` 手动/定时入口运行。
 
 首选本地落点：`packages/agent-evals/`、`packages/observability/`、`packages/database/`。
 

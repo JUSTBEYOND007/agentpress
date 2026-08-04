@@ -44,8 +44,10 @@ export type OnlineEvalLimits = {
 export type OnlineEvalReport = {
   readonly schemaVersion: 2;
   readonly promptVersion: typeof ONLINE_EVAL_PROMPT_VERSION;
+  readonly executionMode: 'deterministic_pr' | 'target_model';
+  readonly qualifiesAsTargetModelEvidence: boolean;
   readonly model: string;
-  readonly provider: 'volcengine-ark' | 'openai-compatible';
+  readonly provider: 'faux' | 'volcengine-ark' | 'openai-compatible';
   readonly startedAt: string;
   readonly completedAt: string;
   readonly limits: OnlineEvalLimits;
@@ -62,6 +64,7 @@ export type OnlineEvalReport = {
 export type RunOnlineEvalsOptions = {
   readonly orchestrator: OrchestratorEvalHarness;
   readonly model: string;
+  readonly executionMode?: OnlineEvalReport['executionMode'];
   readonly provider?: OnlineEvalReport['provider'];
   readonly scenarios: readonly EvalScenario[];
   readonly limits: OnlineEvalLimits;
@@ -79,6 +82,7 @@ const emptyUsage: RuntimeUsage = {
 
 export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<OnlineEvalReport> {
   validateLimits(options.limits);
+  const execution = resolveExecutionMode(options.executionMode, options.provider);
   const now = options.now ?? (() => new Date());
   const startedAt = now().toISOString();
   const selected = options.scenarios.slice(0, options.limits.maxScenarios);
@@ -95,6 +99,9 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
       const started = performance.now();
       try {
         const result = await options.orchestrator.runScenario(scenario);
+        if (execution.mode === 'deterministic_pr' && result.usage.costUsd !== 0) {
+          throw new Error('Deterministic PR eval cannot report external model cost');
+        }
         const observation = evaluatePersistedRun(scenario, result.observation);
         items.push({
           scenarioId: scenario.id,
@@ -143,8 +150,10 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
   return {
     schemaVersion: 2,
     promptVersion: ONLINE_EVAL_PROMPT_VERSION,
+    executionMode: execution.mode,
+    qualifiesAsTargetModelEvidence: execution.mode === 'target_model',
     model: options.model,
-    provider: options.provider ?? 'volcengine-ark',
+    provider: execution.provider,
     startedAt,
     completedAt: now().toISOString(),
     limits: options.limits,
@@ -153,6 +162,23 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
     gatesPassed,
     items,
   };
+}
+
+function resolveExecutionMode(
+  mode: OnlineEvalReport['executionMode'] = 'target_model',
+  provider?: OnlineEvalReport['provider'],
+): {
+  readonly mode: OnlineEvalReport['executionMode'];
+  readonly provider: OnlineEvalReport['provider'];
+} {
+  if (mode === 'deterministic_pr') {
+    if (provider && provider !== 'faux') {
+      throw new Error('Deterministic PR eval requires the faux provider');
+    }
+    return { mode, provider: 'faux' };
+  }
+  if (provider === 'faux') throw new Error('Target-model eval cannot use the faux provider');
+  return { mode, provider: provider ?? 'volcengine-ark' };
 }
 
 function validateLimits(limits: OnlineEvalLimits): void {
