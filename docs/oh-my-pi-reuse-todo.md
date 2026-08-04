@@ -434,6 +434,9 @@ TODO：
 - [x] 将 Experiment -> Arm -> Trial -> RunTrace 模型适配到 `packages/agent-evals`，记录模型、Prompt、Skill、
       Tool 和 Context policy 版本。
 - [ ] 复用 Harbor 的容器化任务思想，建立隔离数据库/schema、对象存储前缀、Kafka topic/group 和网络策略。
+      已完成 AgentPress-owned `createEvalSandboxDescriptor`：schema、object prefix、topic/group
+      均由 experiment/arm/trial 不可变身份派生，网络默认 deny-by-default 且只接受受限 allowlist；
+      真实 Harbor/Docker 容器、隔离数据库/schema 和网络 namespace 仍待基础设施环境验收。
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
 - [ ] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
 - [x] 结果指标覆盖任务成功、Schema 有效率、引用正确性、文章质量、编辑最小性和无答案准确率。
