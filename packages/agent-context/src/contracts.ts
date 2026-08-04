@@ -64,6 +64,7 @@ export type MemoryCandidate = {
   readonly validFrom?: string;
   readonly validUntil?: string;
   readonly sourceEvidenceIds?: readonly string[];
+  readonly sourceMemoryIds?: readonly string[];
 };
 export type MentionTarget = {
   readonly id: string;

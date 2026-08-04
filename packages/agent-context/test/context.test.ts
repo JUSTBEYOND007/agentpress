@@ -11,6 +11,7 @@ import {
   narrowSkillTools,
   pinSkills,
   proposeMemory,
+  rankRelevantMemory,
   replayTrace,
   resolveMention,
   retrieveAcceptedMemory,
@@ -186,7 +187,62 @@ describe('Agent context governance', () => {
       [current],
     );
     expect(replacement.supersedesId).toBe(current.id);
+    expect(replacement.sourceMemoryIds).toEqual([current.id]);
     expect(current.status).toBe('accepted');
+  });
+
+  it('returns auditable hybrid scores and applies temporal decay from the persisted update time', () => {
+    const base = decideMemory(
+      proposeMemory(
+        {
+          id: 'm-temporal-base',
+          workspaceId: 'w1',
+          subject: 'publication cadence',
+          value: 'Publish weekly',
+          confidence: 0.8,
+          importance: 0.8,
+        },
+        [],
+      ),
+      'accepted',
+    );
+    const hits = rankRelevantMemory(
+      'w1',
+      'publication cadence',
+      [
+        { ...base, id: 'm-old', updatedAt: '2025-01-01T00:00:00Z' },
+        { ...base, id: 'm-fresh', updatedAt: '2026-02-01T00:00:00Z' },
+      ],
+      { now: new Date('2026-02-02T00:00:00Z') },
+    );
+    expect(hits.map(({ candidate }) => candidate.id)).toEqual(['m-fresh', 'm-old']);
+    expect(hits[0]?.score).toBeGreaterThan(hits[1]?.score ?? 0);
+  });
+
+  it('uses MMR to prefer a relevant but non-duplicate memory', () => {
+    const candidate = (
+      id: string,
+      subject: string,
+      value: string,
+    ): ReturnType<typeof decideMemory> =>
+      decideMemory(
+        proposeMemory(
+          { id, workspaceId: 'w1', subject, value, confidence: 0.8, importance: 0.8 },
+          [],
+        ),
+        'accepted',
+      );
+    const hits = rankRelevantMemory(
+      'w1',
+      'publication cadence writing preference',
+      [
+        candidate('m-a', 'publication cadence', 'Publish weekly'),
+        candidate('m-b', 'publication cadence', 'Publish monthly'),
+        candidate('m-c', 'writing preference', 'Use concise prose'),
+      ],
+      { limit: 2, mmrLambda: 0.5 },
+    );
+    expect(hits.map(({ candidate: hit }) => hit.id)).toEqual(['m-a', 'm-c']);
   });
 
   it('fails closed for rejected, expired, cross-user, and instruction-like memory', () => {

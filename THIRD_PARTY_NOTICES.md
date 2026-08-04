@@ -55,6 +55,16 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
 - Changes: retained conservative connection-error classification, single tool-call retry, reconnect coalescing and storm circuit behavior; removed OAuth, Smithery, stdio, arbitrary server configuration and TUI lifecycle; integrated abort with AgentPress Tool Registry and compare-and-evict client generations.
 - Verification: non-retriable errors, retry failure, abort-before-reconnect, concurrent stale-client failures, bounded reconnect probe, circuit cooldown and real Streamable HTTP restart with one successful server invocation.
 
+### Oh My Pi Mnemopi Recall Behavior
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`
+- Source: `packages/mnemopi/src/core/beam/recall.ts`, `packages/mnemopi/src/core/polyphonic-recall.ts`, `packages/mnemopi/src/core/veracity-consolidation.ts`, `packages/mnemopi/test/weibull-mmr-intent.test.ts`, `packages/mnemopi/test/beam-consolidate-unit.test.ts`
+- Local: `packages/agent-context/src/memory.ts`, `packages/agent-context/test/context.test.ts`, `packages/agent-application/src/run-context-service.ts`, `packages/agent-application/src/context-governance-service.ts`, `packages/database/src/memory-store.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: retained temporal/importance ranking, MMR diversity and immutable consolidation provenance; replaced SQLite/episodic/graph stores with workspace/user-scoped PostgreSQL candidates and explicit pending/accepted decisions; rejected keyword intent and automatic extraction writes.
+- Verification: accepted-only retrieval, validity windows, user/workspace isolation, temporal ranking, diversity, pending consolidation, delayed supersession, tombstone provenance clearing and immutable Run Context binding.
+
 ### Oh My Pi Hashline Anchoring
 
 - Upstream: `https://github.com/can1357/oh-my-pi`

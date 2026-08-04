@@ -19,7 +19,7 @@ import {
 } from '@agentpress/database';
 import type { ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { AgentApplicationError } from './contracts.js';
 
@@ -162,6 +162,8 @@ export class ContextGovernanceService {
         validFrom: candidate.validFrom?.toISOString() ?? null,
         validUntil: candidate.validUntil?.toISOString() ?? null,
         sourceEvidenceIds: candidate.sourceEvidenceIds,
+        sourceMemoryIds: candidate.sourceMemoryIds,
+        supersedesId: candidate.supersedesId,
         createdAt: candidate.createdAt.toISOString(),
         updatedAt: candidate.updatedAt.toISOString(),
       })),
@@ -219,6 +221,86 @@ export class ContextGovernanceService {
       confidenceBps: candidate.confidenceBps,
       ...(candidate.supersedesId ? { supersedesId: candidate.supersedesId } : {}),
     };
+  }
+
+  public async proposeMemoryConsolidation(
+    workspaceId: string,
+    userId: string,
+    input: {
+      readonly sourceCandidateIds: readonly string[];
+      readonly subject: string;
+      readonly value: string;
+      readonly confidence: number;
+    },
+  ) {
+    const sourceIds = [...new Set(input.sourceCandidateIds)];
+    if (sourceIds.length < 2 || sourceIds.length > 20)
+      throw new AgentApplicationError(
+        'invalid_context',
+        'Memory consolidation requires between 2 and 20 unique sources',
+      );
+    const subject = input.subject.trim();
+    const value = input.value.trim();
+    if (!subject || !value)
+      throw new AgentApplicationError('invalid_context', 'Memory subject and value are required');
+    if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)
+      throw new AgentApplicationError(
+        'invalid_context',
+        'Memory confidence must be between 0 and 1',
+      );
+
+    return this.database.transaction(async (transaction) => {
+      const sources = await transaction
+        .select()
+        .from(memoryCandidates)
+        .where(
+          and(
+            eq(memoryCandidates.workspaceId, workspaceId),
+            eq(memoryCandidates.userId, userId),
+            eq(memoryCandidates.status, 'accepted'),
+            inArray(memoryCandidates.id, sourceIds),
+          ),
+        )
+        .for('update');
+      if (sources.length !== sourceIds.length)
+        throw new AgentApplicationError(
+          'invalid_context',
+          'Every consolidation source must be an accepted memory owned by the current user',
+        );
+      const latest = [...sources].sort(
+        (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
+      )[0];
+      if (!latest)
+        throw new AgentApplicationError('invalid_context', 'Memory consolidation has no sources');
+      const sourceEvidenceIds = [...new Set(sources.flatMap((source) => source.sourceEvidenceIds))];
+      const kinds = new Set(sources.map(({ kind }) => kind));
+      const candidate = await proposeMemoryCandidate(transaction, {
+        id: this.createId(),
+        workspaceId,
+        userId,
+        subject,
+        value,
+        valueHash: createHash('sha256').update(value).digest('hex'),
+        confidenceBps: Math.round(input.confidence * 10_000),
+        kind: kinds.size === 1 ? latest.kind : 'fact',
+        importanceBps: Math.max(...sources.map(({ importanceBps }) => importanceBps)),
+        sourceEvidenceIds,
+        sourceMemoryIds: sourceIds,
+        supersedesId: latest.id,
+      });
+      return {
+        id: candidate.id,
+        status: candidate.status,
+        subject: candidate.subject,
+        value: candidate.value,
+        confidenceBps: candidate.confidenceBps,
+        kind: candidate.kind,
+        importanceBps: candidate.importanceBps,
+        sourceEvidenceIds: candidate.sourceEvidenceIds,
+        sourceMemoryIds: candidate.sourceMemoryIds,
+        supersedesId: candidate.supersedesId,
+      };
+    });
   }
 }
 

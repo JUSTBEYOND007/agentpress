@@ -35,6 +35,14 @@ it remains inside one PostgreSQL-backed AgentPress ToolCall, retries only the th
 built-ins, preserves cancellation, and records a single settlement. OAuth, Smithery, stdio and
 user-configured remote servers remain excluded.
 
+Memory recall adapts Oh My Pi/Mnemopi's temporal, importance, diversity, validity and consolidation
+behavior without copying its SQLite/episodic stores. AgentPress ranks only PostgreSQL accepted rows
+after workspace/user/validity filtering, pins the selected IDs and retrieval version into the Run
+Context Pack, and treats all memory text as untrusted. Consolidation produces a visible pending row
+with immutable `source_memory_ids`; source rows become superseded only after user acceptance.
+Mnemopi's English regex query-intent, episodic graph, entity/triple store and automatic memory writes
+are rejected because they duplicate the fact model or bypass AgentPress approval boundaries.
+
 8. Security-sensitive code such as URL validation, MCP lifecycle management, and edit application requires local review even when copied unchanged.
 
 Compaction boundary decision: `packages/agent-context` directly imports the pure `shouldCompact`

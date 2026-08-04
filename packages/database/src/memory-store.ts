@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { and, desc, eq, gt, isNull, lte, ne, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lte, ne, or } from 'drizzle-orm';
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { memoryCandidates } from './schema.js';
 
@@ -31,11 +31,12 @@ export type ProposeMemoryInput = {
   readonly validFrom?: Date;
   readonly validUntil?: Date;
   readonly sourceEvidenceIds?: readonly string[];
+  readonly sourceMemoryIds?: readonly string[];
   readonly supersedesId?: string;
 };
 
 export async function proposeMemoryCandidate(
-  database: AgentPressDatabase,
+  database: AgentPressDatabase | DatabaseTransaction,
   input: ProposeMemoryInput,
 ): Promise<typeof memoryCandidates.$inferSelect> {
   const inserted = await database
@@ -88,8 +89,14 @@ export async function decideMemoryCandidate(
       .limit(1);
     const candidate = rows[0];
     if (!candidate) return undefined;
-    if (input.decision === 'accepted' && candidate.supersedesId)
-      await supersedeMemory(transaction, candidate.supersedesId, input.workspaceId, input.userId);
+    if (input.decision === 'accepted') {
+      const supersededIds = [
+        ...(candidate.supersedesId ? [candidate.supersedesId] : []),
+        ...candidate.sourceMemoryIds,
+      ].filter((id, index, ids) => id !== candidate.id && ids.indexOf(id) === index);
+      if (supersededIds.length > 0)
+        await supersedeMemory(transaction, supersededIds, input.workspaceId, input.userId);
+    }
     const updated = await transaction
       .update(memoryCandidates)
       .set({
@@ -153,6 +160,7 @@ export async function deleteMemoryCandidate(
       sourceRunId: null,
       sourceToolCallId: null,
       sourceEvidenceIds: [],
+      sourceMemoryIds: [],
       supersedesId: null,
       status: 'deleted',
       decidedAt: deletedAt,
@@ -189,7 +197,7 @@ export function exportMemoryCandidates(
 
 async function supersedeMemory(
   transaction: DatabaseTransaction,
-  id: string,
+  ids: readonly string[],
   workspaceId: string,
   userId: string,
 ): Promise<void> {
@@ -198,7 +206,7 @@ async function supersedeMemory(
     .set({ status: 'superseded', updatedAt: new Date() })
     .where(
       and(
-        eq(memoryCandidates.id, id),
+        inArray(memoryCandidates.id, ids),
         eq(memoryCandidates.workspaceId, workspaceId),
         eq(memoryCandidates.userId, userId),
         eq(memoryCandidates.status, 'accepted'),

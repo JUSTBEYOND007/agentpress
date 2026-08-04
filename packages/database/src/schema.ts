@@ -226,6 +226,7 @@ export const memoryCandidates = pgTable(
       .$type<readonly string[]>()
       .notNull()
       .default([]),
+    sourceMemoryIds: jsonb('source_memory_ids').$type<readonly string[]>().notNull().default([]),
     status: memoryCandidateStatusEnum('status').notNull().default('pending'),
     supersedesId: uuid('supersedes_id').references((): AnyPgColumn => memoryCandidates.id, {
       onDelete: 'set null',

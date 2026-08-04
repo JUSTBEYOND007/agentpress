@@ -79,6 +79,44 @@ export class ContextController {
     }
   }
 
+  @Post('workspaces/:workspaceId/memories/consolidations')
+  public async consolidateMemories(
+    @Param('workspaceId') workspaceId: string,
+    @Body()
+    body: {
+      readonly sourceCandidateIds?: unknown;
+      readonly subject?: unknown;
+      readonly value?: unknown;
+      readonly confidence?: unknown;
+    },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertWorkspaceMember(workspaceId, user.id);
+    if (
+      !Array.isArray(body.sourceCandidateIds) ||
+      body.sourceCandidateIds.some((id) => typeof id !== 'string') ||
+      typeof body.subject !== 'string' ||
+      typeof body.value !== 'string' ||
+      typeof body.confidence !== 'number'
+    ) {
+      throw new BadRequestException(
+        'sourceCandidateIds, subject, value and numeric confidence are required',
+      );
+    }
+    try {
+      return await this.contexts.proposeMemoryConsolidation(workspaceId, user.id, {
+        sourceCandidateIds: body.sourceCandidateIds as string[],
+        subject: body.subject,
+        value: body.value,
+        confidence: body.confidence,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid memory consolidation',
+      );
+    }
+  }
+
   @Post('workspaces/:workspaceId/memories/:candidateId/decision')
   public async decideMemory(
     @Param('workspaceId') workspaceId: string,

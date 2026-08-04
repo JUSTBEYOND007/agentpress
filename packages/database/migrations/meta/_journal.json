@@ -232,6 +232,13 @@
       "when": 1785837725045,
       "tag": "0032_agent_session_compactions",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785842525709,
+      "tag": "0033_memory_consolidation_sources",
+      "breakpoints": true
     }
   ]
 }

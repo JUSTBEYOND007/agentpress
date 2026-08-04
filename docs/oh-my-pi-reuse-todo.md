@@ -316,20 +316,30 @@ TODO：
 
 TODO：
 
-- [ ] 先对照 `packages/agent-context/src/memory.ts`、`memory_candidates` 和 PostgreSQL 检索实现，记录缺口。
+- [x] 先对照 `packages/agent-context/src/memory.ts`、`memory_candidates` 和 PostgreSQL 检索实现，记录缺口。
+      审计发现纯逻辑 `retrieveRelevantMemory` 未接入生产 Context Pack，真实查询此前无 query/validity/ranking，
+      只截取 50 条 accepted rows；consolidation 也没有完整来源 ID。现已接入当前请求驱动的生产排序，
+      PostgreSQL 先执行 workspace/user/status/validity 边界，并新增 `source_memory_ids` 事实链。
 - [x] 短期 Memory 采用 Conversation Summary、最近消息、当前 Run facts 和 Task Results，不另建并行事实源。
       `packages/agent-context/src/context-assembler.ts` 只接收 Context Candidate/已接受 Memory，
       Summary/Run facts/Task Results 由上游 Context Pack 装配，不建立第二事实源。
 - [x] 定义长期 Memory 类型：fact、preference、decision、commitment、goal、event、instruction、learning、
       error、artifact，并映射到现有 Memory Candidate 状态机。
-- [x] 复制并适配 vector + FTS + temporal decay + importance 的混合召回与排序测试。
-- [ ] 评估 MMR、query intent、episodic graph、entity/triple 和 consolidation 的独立纯逻辑复用价值。
+- [x] 复制并适配 lexical relevance + confidence + temporal decay + importance + MMR 的混合召回与排序测试。
+      `rankRelevantMemory` 返回可审计 score，生产 Context Pack 固定前 8 条并记录
+      `accepted-memory.hybrid-v1`；semantic vector 不在没有真实 embedding 生命周期时伪造完成。
+- [x] 评估 MMR、query intent、episodic graph、entity/triple 和 consolidation 的独立纯逻辑复用价值。
+      采用 MMR 的多样性重排与 consolidation 的不可变来源链；拒绝 Mnemopi 英文关键词 query-intent，
+      因为它对中文/多语言不可靠且不应成为权威分类。episodic graph/entity/triple 会复制 PostgreSQL
+      Memory/Evidence 事实模型并引入自动提取写入，当前无独立采用价值。
 - [x] Memory extraction 只能生成用户可见 Candidate；接受后才可检索，Specialist 不能直接写长期 Memory。
 - [x] 不复制关键词模式作为权威分类；用结构化模型输出加确定性 Schema 校验，并保留人工覆盖。
       Memory Candidate 通过结构化字段和 PostgreSQL 状态决策，检索不使用关键词分类授权。
 - [x] 增加 workspace/user 隔离、source Evidence、confidence、validity、supersedes、删除和导出契约。
       删除写入 `deleted` tombstone 并清除 subject/value/source/evidence，导出默认排除 tombstone；API 只允许当前 workspace 成员操作自己的 Memory。
 - [x] Consolidation 不得覆盖原始候选或 provenance；新事实通过 supersedes 链替代旧事实。
+      用户显式选择 2-20 条自己的 accepted memory 后，只创建带 `source_memory_ids`、Evidence 并集和
+      `supersedes_id` 的 pending candidate；再次接受后来源才转为 superseded，拒绝时来源保持 accepted。
 - [x] 建立相反语义测试：拒绝的记忆不召回、跨 workspace 不召回、过期事实不作为当前事实、指令不变权限。
       `packages/agent-context/test/context.test.ts` 覆盖 rejected、跨 user、过期和 instruction-like
       memory；Context Pack 将记忆固定标记为 untrusted 且不产生 capability。

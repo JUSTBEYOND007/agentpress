@@ -839,6 +839,113 @@ describeWithDatabase('Direct Run application flow', () => {
     await service.execute(run.runId);
   });
 
+  it('retrieves only relevant, current and accepted user memory into the persisted Context Pack', async () => {
+    const relevantId = randomUUID();
+    const expiredId = randomUUID();
+    const pendingId = randomUUID();
+    await connection.db.insert(memoryCandidates).values([
+      {
+        id: relevantId,
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        subject: 'publication cadence',
+        value: 'Publish every Friday',
+        valueHash: createHash('sha256').update('Publish every Friday').digest('hex'),
+        confidenceBps: 8500,
+        importanceBps: 9000,
+        status: 'accepted',
+      },
+      {
+        id: expiredId,
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        subject: 'publication cadence expired',
+        value: 'Publish every Monday',
+        valueHash: createHash('sha256').update('Publish every Monday').digest('hex'),
+        confidenceBps: 10_000,
+        importanceBps: 10_000,
+        validUntil: new Date('2020-01-01T00:00:00.000Z'),
+        status: 'accepted',
+      },
+      {
+        id: pendingId,
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        subject: 'publication cadence pending',
+        value: 'Publish every day',
+        valueHash: createHash('sha256').update('Publish every day').digest('hex'),
+        confidenceBps: 10_000,
+        importanceBps: 10_000,
+        status: 'pending',
+      },
+    ]);
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'publication cadence',
+      idempotencyKey: randomUUID(),
+    });
+    const packs = await connection.db
+      .select({ content: runContextPacks.content, manifest: runContextPacks.manifest })
+      .from(runContextPacks)
+      .where(eq(runContextPacks.runId, run.runId));
+    expect(packs[0]?.content).toContain(`id="${relevantId}" kind="memory" trust="untrusted"`);
+    expect(packs[0]?.content).not.toContain(expiredId);
+    expect(packs[0]?.content).not.toContain(pendingId);
+    expect(packs[0]?.manifest).toMatchObject({
+      retrievalVersion: 'accepted-memory.hybrid-v1',
+    });
+  });
+
+  it('creates consolidation as a pending candidate and supersedes sources only after acceptance', async () => {
+    const sourceIds: string[] = [randomUUID(), randomUUID()];
+    await connection.db.insert(memoryCandidates).values(
+      sourceIds.map((id, index) => ({
+        id,
+        workspaceId: ids.workspace,
+        userId: ids.user,
+        subject: 'editor preference',
+        value: index === 0 ? 'Use short paragraphs' : 'Include supporting evidence',
+        valueHash: createHash('sha256')
+          .update(`consolidation-source-${String(index)}`)
+          .digest('hex'),
+        confidenceBps: 8000 + index * 500,
+        importanceBps: 7000 + index * 1000,
+        sourceEvidenceIds: [`evidence-${String(index)}`],
+        status: 'accepted' as const,
+      })),
+    );
+    const consolidated = await governance.proposeMemoryConsolidation(ids.workspace, ids.user, {
+      sourceCandidateIds: sourceIds,
+      subject: 'editor preference',
+      value: 'Use short evidence-backed paragraphs',
+      confidence: 0.95,
+    });
+    expect(consolidated).toMatchObject({
+      status: 'pending',
+      sourceMemoryIds: sourceIds,
+      sourceEvidenceIds: ['evidence-0', 'evidence-1'],
+      importanceBps: 8000,
+    });
+    const before = await connection.db
+      .select({ status: memoryCandidates.status })
+      .from(memoryCandidates)
+      .where(inArray(memoryCandidates.id, sourceIds));
+    expect(before.map(({ status }) => status)).toEqual(['accepted', 'accepted']);
+
+    await governance.decideMemory(ids.workspace, ids.user, consolidated.id, 'accepted');
+    const after = await connection.db
+      .select({ id: memoryCandidates.id, status: memoryCandidates.status })
+      .from(memoryCandidates)
+      .where(inArray(memoryCandidates.id, [...sourceIds, consolidated.id]));
+    expect(after.find(({ id }) => id === consolidated.id)?.status).toBe('accepted');
+    expect(after.filter(({ id }) => sourceIds.includes(id)).map(({ status }) => status)).toEqual([
+      'superseded',
+      'superseded',
+    ]);
+  });
+
   it('pins model-selected Skill revisions and rejects model attempts to select hidden Skills', async () => {
     const selectingService = new DirectRunService({
       database: connection.db,

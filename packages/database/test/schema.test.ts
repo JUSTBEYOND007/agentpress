@@ -10,6 +10,7 @@ import {
   DATABASE_AGENT_TASK_STATES,
   DATABASE_TOOL_CALL_STATES,
   inboxMessages,
+  memoryCandidates,
   outboxMessages,
   runEvents,
   runToolChoices,
@@ -34,6 +35,12 @@ describe('database schema', () => {
   it('defines durable specialist task ownership', () => {
     expect(getTableConfig(agentTaskLeases).name).toBe('agent_task_leases');
     expect(getTableConfig(agentTaskLeases).columns.map(({ name }) => name)).toContain('id');
+  });
+
+  it('keeps memory consolidation provenance in PostgreSQL', () => {
+    expect(getTableConfig(memoryCandidates).columns.map(({ name }) => name)).toContain(
+      'source_memory_ids',
+    );
   });
 
   it('keeps PostgreSQL state enums aligned with the domain', () => {

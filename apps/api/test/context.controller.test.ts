@@ -36,4 +36,35 @@ describe('ContextController', () => {
       controller.decideMemory('workspace', 'memory', { decision: 'maybe' }, user),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('creates a user-visible pending consolidation proposal from explicit sources', async () => {
+    const proposeMemoryConsolidation = vi.fn(() =>
+      Promise.resolve({ id: 'candidate', status: 'pending' }),
+    );
+    const authorization = {
+      assertWorkspaceMember: vi.fn(() => Promise.resolve()),
+    } as unknown as AuthorizationService;
+    const controller = new ContextController(
+      { proposeMemoryConsolidation } as unknown as ContextGovernanceService,
+      authorization,
+    );
+    await expect(
+      controller.consolidateMemories(
+        'workspace',
+        {
+          sourceCandidateIds: ['source-a', 'source-b'],
+          subject: 'style',
+          value: 'Use concise evidence-backed prose',
+          confidence: 0.9,
+        },
+        user,
+      ),
+    ).resolves.toEqual({ id: 'candidate', status: 'pending' });
+    expect(proposeMemoryConsolidation).toHaveBeenCalledWith('workspace', user.id, {
+      sourceCandidateIds: ['source-a', 'source-b'],
+      subject: 'style',
+      value: 'Use concise evidence-backed prose',
+      confidence: 0.9,
+    });
+  });
 });

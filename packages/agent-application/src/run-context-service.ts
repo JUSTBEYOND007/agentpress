@@ -5,6 +5,7 @@ import {
   createPromptRevision,
   loadSkill,
   pinSkills,
+  rankRelevantMemory,
   type ContextCandidate,
   type ContextPack,
   type SkillDefinition,
@@ -27,7 +28,7 @@ import {
   skillRevisions,
 } from '@agentpress/database';
 import { hashBlock, type EditorBlock } from '@agentpress/editor-patch';
-import { and, desc, eq, inArray, lt, lte } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 
 import {
   AgentApplicationError,
@@ -60,6 +61,7 @@ export class RunContextService {
       readonly runId: string;
       readonly branchId: string;
       readonly rootMessageSequence: number;
+      readonly query: string;
       readonly workspaceId: string;
       readonly userId: string;
       readonly mentionTargetIds: readonly string[];
@@ -199,7 +201,8 @@ export class RunContextService {
                 selectedSkillRows.map(({ id }) => id),
               ),
             );
-    const memories = await transaction
+    const now = new Date();
+    const acceptedMemoryRows = await transaction
       .select()
       .from(memoryCandidates)
       .where(
@@ -207,9 +210,34 @@ export class RunContextService {
           eq(memoryCandidates.workspaceId, input.workspaceId),
           eq(memoryCandidates.userId, input.userId),
           eq(memoryCandidates.status, 'accepted'),
+          or(lte(memoryCandidates.validFrom, now), isNull(memoryCandidates.validFrom)),
+          or(gt(memoryCandidates.validUntil, now), isNull(memoryCandidates.validUntil)),
         ),
       )
-      .limit(50);
+      .orderBy(desc(memoryCandidates.updatedAt))
+      .limit(500);
+    const memoryHits = rankRelevantMemory(
+      input.workspaceId,
+      input.query,
+      acceptedMemoryRows.map((memory) => ({
+        id: memory.id,
+        workspaceId: memory.workspaceId,
+        userId: memory.userId,
+        subject: memory.subject,
+        value: memory.value,
+        valueHash: memory.valueHash,
+        status: memory.status,
+        confidence: memory.confidenceBps / 10_000,
+        kind: memory.kind,
+        importance: memory.importanceBps / 10_000,
+        ...(memory.validFrom ? { validFrom: memory.validFrom.toISOString() } : {}),
+        ...(memory.validUntil ? { validUntil: memory.validUntil.toISOString() } : {}),
+        sourceEvidenceIds: memory.sourceEvidenceIds,
+        ...(memory.supersedesId ? { supersedesId: memory.supersedesId } : {}),
+        updatedAt: memory.updatedAt.toISOString(),
+      })),
+      { userId: input.userId, now, limit: 8 },
+    );
     const compactionRows = await transaction
       .select()
       .from(conversationCompactions)
@@ -304,13 +332,13 @@ export class RunContextService {
             ),
           ]
         : []),
-      ...memories.map((memory) =>
+      ...memoryHits.map(({ candidate: memory, score }) =>
         contextCandidate(
           memory.id,
           'memory',
           `${memory.subject}: ${memory.value}`,
           memory.valueHash,
-          memory.confidenceBps / 10_000,
+          score,
           false,
         ),
       ),
@@ -318,8 +346,9 @@ export class RunContextService {
     const pack = assembleContext({
       contextWindow: this.contextWindow,
       candidates,
-      acceptedMemoryIds: new Set(memories.map(({ id }) => id)),
+      acceptedMemoryIds: new Set(memoryHits.map(({ candidate }) => candidate.id)),
       skillVersions: pinSkills(parsedSkills),
+      retrievalVersion: 'accepted-memory.hybrid-v1',
       ...(compaction?.summary && compaction.firstKeptMessageSequence
         ? {
             conversationCompaction: {

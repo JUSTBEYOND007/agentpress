@@ -540,6 +540,7 @@ export class DirectRunService {
         runId,
         branchId: input.branchId,
         rootMessageSequence: existingRoot?.sequence ?? messageSequence,
+        query: prompt,
         workspaceId: branch.workspaceId,
         userId: input.userId,
         mentionTargetIds: input.mentionTargetIds ?? [],
