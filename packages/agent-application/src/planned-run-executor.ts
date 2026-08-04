@@ -1466,6 +1466,7 @@ export class PlannedRunExecutor {
       .select({
         taskId: taskResults.taskId,
         status: taskResults.status,
+        summary: taskResults.summary,
         artifacts: taskResults.artifacts,
         usage: taskResults.usage,
         warnings: taskResults.warnings,
@@ -1482,13 +1483,14 @@ export class PlannedRunExecutor {
     const byId = new Map(tasks.map((task) => [task.id, task]));
     const settled = new Map<string, SettledTask>();
     for (const row of rows) {
-      if (settled.has(row.taskId) || row.status !== 'succeeded') continue;
+      if (settled.has(row.taskId) || (row.status !== 'succeeded' && row.status !== 'failed'))
+        continue;
       const task = byId.get(row.taskId);
       if (!task) continue;
       settled.set(row.taskId, {
         ...task,
-        status: 'succeeded',
-        summary: extractPersistedSummary(row.artifacts),
+        status: row.status,
+        summary: row.summary,
         artifacts: decodePersistedArtifacts(row.artifacts),
         usage: row.usage as RuntimeUsage,
         warnings: row.warnings,
@@ -1587,6 +1589,7 @@ export class PlannedRunExecutor {
           taskId: result.id,
           attempt: expectedAttempt,
           status: result.status,
+          summary: result.summary ?? result.failure ?? `${result.owner} task ${result.status}`,
           artifacts: persistedArtifacts,
           evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
           usage: result.usage ?? {},
@@ -2046,11 +2049,6 @@ function decodePersistedArtifacts(value: readonly unknown[]): readonly Structure
       },
     ];
   });
-}
-
-function extractPersistedSummary(value: readonly unknown[]): string {
-  const artifacts = decodePersistedArtifacts(value);
-  return artifacts.map(({ summary }) => summary).join('\n') || 'Previously completed task result';
 }
 
 function staleTaskSettlement(task: PlannedTaskSpec): SettledTask {

@@ -1995,6 +1995,96 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(rows[0]?.status).toBe('completed_with_degradation');
   });
 
+  it('delivers the complete failed TaskResult from a detached worker', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const delegate = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Try an optional detached illustration',
+          tasks: [
+            {
+              ...plannedTask('illustrate-detached', 'illustrator', [], 'optional'),
+              detached: true,
+            },
+          ],
+        }),
+        toolResponse('task_complete', {
+          status: 'failed',
+          summary: 'Detached image provider unavailable',
+          artifacts: [],
+          warnings: ['The article can be delivered without an image'],
+          failure: 'image_provider_unavailable',
+        }),
+        runCompleteResponse('无配图降级交付'),
+      ],
+    });
+    const observedTurns: string[] = [];
+    const runtime: AgentRuntime = {
+      execute(request, sink, signal) {
+        observedTurns.push(request.currentTurn.request);
+        return delegate.execute(request, sink, signal);
+      },
+    };
+    const detachedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await detachedService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '尝试为文章生成配图，失败时降级交付',
+      idempotencyKey: randomUUID(),
+    });
+
+    const execution = detachedService.execute(run.runId);
+    let detachedTaskId: string | undefined;
+    for (let attempt = 0; attempt < 100 && !detachedTaskId; attempt += 1) {
+      const rows = await connection.db
+        .select({ id: agentTasks.id })
+        .from(agentTasks)
+        .where(eq(agentTasks.runId, run.runId));
+      detachedTaskId = rows[0]?.id;
+      if (!detachedTaskId) await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    expect(detachedTaskId).toBeDefined();
+    await expect(
+      detachedService.executeDetachedTask(run.runId, detachedTaskId ?? ''),
+    ).resolves.toBe('failed');
+    await expect(execution).resolves.toMatchObject({ status: 'completed_with_degradation' });
+
+    const results = await connection.db
+      .select({
+        status: taskResults.status,
+        summary: taskResults.summary,
+        warnings: taskResults.warnings,
+        failure: taskResults.failure,
+      })
+      .from(taskResults)
+      .where(eq(taskResults.taskId, detachedTaskId ?? ''));
+    expect(results).toEqual([
+      {
+        status: 'failed',
+        summary: 'Detached image provider unavailable',
+        warnings: ['The article can be delivered without an image'],
+        failure: {
+          code: 'image_provider_unavailable',
+          message: 'image_provider_unavailable',
+        },
+      },
+    ]);
+    const synthesisTurn = observedTurns.find((turn) => turn.includes('validatedTaskResults'));
+    expect(synthesisTurn).toContain('Detached image provider unavailable');
+    expect(synthesisTurn).toContain('The article can be delivered without an image');
+    expect(synthesisTurn).toContain('image_provider_unavailable');
+  });
+
   it('promotes Follow-ups in FIFO order across chained Runs', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({

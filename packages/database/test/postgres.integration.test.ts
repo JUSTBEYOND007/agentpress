@@ -308,6 +308,7 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       taskId: ids.task,
       attempt: 2,
       status: 'succeeded',
+      summary: 'Second attempt completed',
       artifacts: [],
       evidence: [],
       usage: {},

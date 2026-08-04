@@ -1118,6 +1118,7 @@ export const taskResults = pgTable(
       .references(() => agentTasks.id, { onDelete: 'cascade' }),
     attempt: integer('attempt').notNull(),
     status: varchar('status', { length: 32 }).notNull(),
+    summary: text('summary').notNull(),
     artifacts: jsonb('artifacts').$type<readonly unknown[]>().notNull(),
     evidence: jsonb('evidence').$type<readonly unknown[]>().notNull(),
     usage: jsonb('usage').$type<Readonly<Record<string, number>>>().notNull(),

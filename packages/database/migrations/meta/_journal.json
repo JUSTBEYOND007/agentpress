@@ -246,6 +246,13 @@
       "when": 1785849726834,
       "tag": "0034_complex_blazing_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785852183221,
+      "tag": "0035_nasty_groot",
+      "breakpoints": true
     }
   ]
 }

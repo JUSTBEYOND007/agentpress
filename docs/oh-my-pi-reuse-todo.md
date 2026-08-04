@@ -233,8 +233,10 @@ TODO：
 - [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
       已落地 `agent.task.commands`、transactional outbox、PostgreSQL 原子 Task claim、按 attempt
       持久化 lease、immutable Context Pack 恢复、TaskResult/Checkpoint/RunEvent 同事务结算，以及
-      `run.execute` outbox 唤醒。仍需在真实 PostgreSQL/Kafka 环境跑 worker 丢失、重复 command、
-      cancel 和外部写幂等端到端测试后才可勾选。
+      `run.execute` outbox 唤醒。`task_results.summary` 现在与 status/artifacts/usage/warnings/failure
+      一起持久化；detached wait 会读取最新已决 attempt 的完整成功或失败结果并投递给 Main 综合，
+      已通过隔离 PostgreSQL worker/Main 集成用例。仍需在真实 PostgreSQL/Kafka 环境跑 worker 丢失、
+      重复 command、cancel 和外部写幂等端到端测试后才可勾选。
 - [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
       已将 Oh My Pi `agent-lifecycle.ts` 的 stale-ref finalizer 保护适配为 PostgreSQL attempt fence：
       `settleAgentTaskAttempt` 只有在 Task 仍为 `running` 且 attempt 完全匹配时才允许结算；取消、lease
