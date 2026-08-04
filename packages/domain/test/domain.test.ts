@@ -202,4 +202,27 @@ describe('AgentTask attempt budget', () => {
       expect.objectContaining({ code: 'invariant_violation' }),
     );
   });
+
+  it('allows Run cancellation to terminate an in-flight Task exactly once', () => {
+    const pending = createAgentTask({
+      id: asAgentTaskId('task-cancel'),
+      runId: asAgentRunId('run-1'),
+      planRevisionId: asPlanRevisionId('revision-1'),
+      objective: 'Research',
+      criticality: 'required',
+      owner: 'researcher',
+      acceptanceCriteria: ['Has evidence'],
+      dependencyIds: [],
+      maxAttempts: 2,
+      now,
+    });
+    const ready = transitionAgentTask(pending, 'ready', now);
+    const running = transitionAgentTask(ready, 'running', now);
+    const cancelled = transitionAgentTask(running, 'cancelled', now);
+
+    expect(cancelled).toMatchObject({ status: 'cancelled', attempt: 1, completedAt: now });
+    expect(() => transitionAgentTask(cancelled, 'succeeded', now)).toThrow(
+      expect.objectContaining({ code: 'terminal_state' }),
+    );
+  });
 });

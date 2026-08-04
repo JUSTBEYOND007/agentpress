@@ -28,9 +28,9 @@ const TERMINAL_STATES: ReadonlySet<AgentTaskStatus> = new Set([
 const TRANSITIONS: Readonly<Record<AgentTaskStatus, readonly AgentTaskStatus[]>> = {
   pending: ['ready', 'skipped', 'cancelled'],
   ready: ['running', 'skipped', 'cancelled'],
-  running: ['succeeded', 'failed', 'waiting_for_approval', 'interrupted'],
+  running: ['succeeded', 'failed', 'waiting_for_approval', 'interrupted', 'cancelled'],
   waiting_for_approval: ['running', 'failed', 'cancelled'],
-  interrupted: ['ready', 'failed'],
+  interrupted: ['ready', 'failed', 'cancelled'],
   succeeded: [],
   failed: [],
   skipped: [],

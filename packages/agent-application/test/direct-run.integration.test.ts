@@ -1609,6 +1609,26 @@ describeWithDatabase('Direct Run application flow', () => {
       .where(eq(agentTasks.runId, run.runId));
     expect(tasks).toHaveLength(1);
     expect(tasks.every(({ status }) => status === 'cancelled')).toBe(true);
+    const [cancelledResults, cancelledArtifacts, cancellationEvents] = await Promise.all([
+      connection.db
+        .select({ id: taskResults.id })
+        .from(taskResults)
+        .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+        .where(eq(agentTasks.runId, run.runId)),
+      connection.db
+        .select({ id: artifacts.id })
+        .from(artifacts)
+        .where(eq(artifacts.runId, run.runId)),
+      connection.db
+        .select({ eventType: runEvents.eventType })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+    ]);
+    expect(cancelledResults).toEqual([]);
+    expect(cancelledArtifacts).toEqual([]);
+    expect(
+      cancellationEvents.filter(({ eventType }) => eventType === 'task.cancelled'),
+    ).toHaveLength(1);
   });
 
   it('recovers a Planned Run without fabricating a replacement revision', async () => {

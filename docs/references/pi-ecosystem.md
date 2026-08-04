@@ -160,6 +160,10 @@ read-only `AgentTaskWaitService`; it preserves requested Task order, waits for a
 returns `settled`/`stillRunning`/`timedOut`, and propagates cancellation. It deliberately rejects the
 upstream process-local session registry and timers. A succeeded or failed Task without a TaskResult
 for the exact current attempt fails closed instead of being inferred from Prompt or transient state.
+Run cancellation is similarly adapted as a PostgreSQL transaction: `cancelAgentRunTasks` changes
+all non-terminal Tasks and releases active leases before the Run can settle, so a late worker cannot
+turn a cancelled Task into a success. The adapter keeps retry/recover and external side-effect
+idempotency as separate gates until their real worker tests are present.
 
 ## Primary Pi Business Reference
 

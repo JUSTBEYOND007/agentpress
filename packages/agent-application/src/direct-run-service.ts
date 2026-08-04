@@ -17,6 +17,7 @@ import {
   artifactVersions,
   appendCheckpoint,
   appendRunEvent,
+  cancelAgentRunTasks,
   type AgentPressDatabase,
   type DatabaseTransaction,
   conversationBranches,
@@ -695,13 +696,19 @@ export class DirectRunService {
         .limit(1);
       const current = rows[0];
       if (!current) {
-        return { outcome: 'not_found' as const, runId };
+        return { result: { outcome: 'not_found' as const, runId }, events: [] };
       }
       if (TERMINAL_RUN_STATES.includes(current.status as (typeof TERMINAL_RUN_STATES)[number])) {
-        return { outcome: 'already_terminal' as const, runId, status: current.status };
+        return {
+          result: { outcome: 'already_terminal' as const, runId, status: current.status },
+          events: [],
+        };
       }
       if (current.status === 'cancelling') {
-        return { outcome: 'accepted' as const, runId, status: 'cancelling' as const };
+        return {
+          result: { outcome: 'accepted' as const, runId, status: 'cancelling' as const },
+          events: [],
+        };
       }
 
       const updated = await transaction
@@ -727,7 +734,26 @@ export class DirectRunService {
         )
         .returning({ id: agentRuns.id });
       if (updated.length === 0) {
-        return { outcome: 'already_terminal' as const, runId, status: current.status };
+        return {
+          result: { outcome: 'already_terminal' as const, runId, status: current.status },
+          events: [],
+        };
+      }
+      const now = this.now();
+      const cancelledTasks = await cancelAgentRunTasks(transaction, { runId, now });
+      const taskEvents: DurableRunEvent[] = [];
+      for (const task of cancelledTasks) {
+        const taskEvent = await appendRunEvent(transaction, {
+          id: this.createId(),
+          runId,
+          eventType: 'task.cancelled',
+          payload: {
+            taskId: task.taskId,
+            attempt: task.attempt,
+            reason: 'run_cancelled',
+          },
+        });
+        taskEvents.push(toDurableEvent(taskEvent));
       }
       const event = await appendRunEvent(transaction, {
         id: this.createId(),
@@ -736,17 +762,15 @@ export class DirectRunService {
         payload: {},
       });
       return {
-        outcome: 'accepted' as const,
-        runId,
-        status: 'cancelling' as const,
-        event: toDurableEvent(event),
+        result: { outcome: 'accepted' as const, runId, status: 'cancelling' as const },
+        events: [...taskEvents, toDurableEvent(event)],
       };
     });
 
-    if ('event' in settled) {
-      await this.options.publisher.publish({ durable: true, event: settled.event });
+    for (const event of settled.events) {
+      await this.options.publisher.publish({ durable: true, event });
     }
-    return settled;
+    return settled.result;
   }
 
   public async prepareRecovery(runId: string): Promise<boolean> {
@@ -1673,6 +1697,20 @@ export class DirectRunService {
       }
 
       if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
+        const cancelledTasks = await cancelAgentRunTasks(transaction, { runId, now });
+        for (const task of cancelledTasks) {
+          const taskEvent = await appendRunEvent(transaction, {
+            id: this.createId(),
+            runId,
+            eventType: 'task.cancelled',
+            payload: {
+              taskId: task.taskId,
+              attempt: task.attempt,
+              reason: 'run_cancelled',
+            },
+          });
+          events.push(toDurableEvent(taskEvent));
+        }
         await transaction
           .update(runToolChoices)
           .set({

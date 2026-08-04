@@ -11,6 +11,7 @@ import {
   agentTasks,
   claimAgentTask,
   appendRunEvent,
+  cancelAgentRunTasks,
   appUsers,
   claimOutboxMessages,
   connectDatabase,
@@ -335,6 +336,65 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
         .from(agentTaskLeases)
         .where(eq(agentTaskLeases.taskId, ids.task)),
     ).toHaveLength(2);
+  });
+
+  it('cancels a claimed Task, releases its lease, and fences a late worker result', async () => {
+    const taskId = randomUUID();
+    await connection.db.insert(agentTasks).values({
+      id: taskId,
+      runId: ids.run,
+      planRevisionId: ids.revision,
+      objective: 'cancelled lease task',
+      criticality: 'required',
+      owner: 'writer',
+      acceptanceCriteria: ['does not settle after cancellation'],
+      outputSchema: { type: 'object' },
+      toolPolicy: { capabilities: [] },
+      budget: {},
+      status: 'pending',
+      maxAttempts: 3,
+    });
+    const claim = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId,
+        workerId: 'cancelled-task-worker',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 10_000,
+      }),
+    );
+    expect(claim?.attempt).toBe(1);
+
+    const cancelled = await connection.db.transaction((transaction) =>
+      cancelAgentRunTasks(transaction, {
+        runId: ids.run,
+        now: new Date('2026-08-04T00:00:00.000Z'),
+      }),
+    );
+    expect(cancelled).toContainEqual({ taskId, attempt: 1 });
+    await expect(
+      connection.db.transaction((transaction) =>
+        settleAgentTaskAttempt(transaction, {
+          taskId,
+          attempt: 1,
+          status: 'succeeded',
+        }),
+      ),
+    ).resolves.toBe(false);
+    const [taskRows, leaseRows, resultRows] = await Promise.all([
+      connection.db
+        .select({ status: agentTasks.status })
+        .from(agentTasks)
+        .where(eq(agentTasks.id, taskId)),
+      connection.db
+        .select({ releasedAt: agentTaskLeases.releasedAt })
+        .from(agentTaskLeases)
+        .where(eq(agentTaskLeases.taskId, taskId)),
+      connection.db.select().from(taskResults).where(eq(taskResults.taskId, taskId)),
+    ]);
+    expect(taskRows).toEqual([{ status: 'cancelled' }]);
+    expect(leaseRows[0]?.releasedAt).toEqual(new Date('2026-08-04T00:00:00.000Z'));
+    expect(resultRows).toEqual([]);
   });
 
   it('persists and recovers forced tool choices without crossing directive semantics', async () => {

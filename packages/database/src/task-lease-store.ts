@@ -20,6 +20,51 @@ export type TaskClaim = {
   readonly lease: TaskLease;
 };
 
+/** Cancels every non-terminal Task in a Run and fences its active worker leases. */
+export async function cancelAgentRunTasks(
+  transaction: DatabaseTransaction,
+  input: { readonly runId: string; readonly now?: Date },
+): Promise<readonly { readonly taskId: string; readonly attempt: number }[]> {
+  const now = input.now ?? new Date();
+  const cancelled = await transaction
+    .update(agentTasks)
+    .set({
+      status: 'cancelled',
+      completedAt: now,
+      updatedAt: now,
+      version: sql`${agentTasks.version} + 1`,
+    })
+    .where(
+      and(
+        eq(agentTasks.runId, input.runId),
+        inArray(agentTasks.status, [
+          'pending',
+          'ready',
+          'running',
+          'waiting_for_approval',
+          'interrupted',
+        ]),
+      ),
+    )
+    .returning({ taskId: agentTasks.id, attempt: agentTasks.attempt });
+  if (cancelled.length > 0) {
+    await transaction
+      .update(agentTaskLeases)
+      .set({ releasedAt: now })
+      .where(
+        and(
+          eq(agentTaskLeases.runId, input.runId),
+          inArray(
+            agentTaskLeases.taskId,
+            cancelled.map(({ taskId }) => taskId),
+          ),
+          isNull(agentTaskLeases.releasedAt),
+        ),
+      );
+  }
+  return cancelled;
+}
+
 /**
  * Commits one worker attempt only while that exact attempt still owns the
  * running Task state. Recovery, retry, and cancellation therefore fence stale workers.
