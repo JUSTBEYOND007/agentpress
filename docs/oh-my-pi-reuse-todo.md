@@ -118,7 +118,10 @@ TODO：
 - [x] 建立统一 Schema 管线：TypeBox（权威契约）-> JSON Schema -> dereference -> normalize -> provider adaptation
       -> wire schema -> result validation。
       Zod 仅保留在官方 MCP SDK 必须使用它的边界适配器中，不扩展为第二套领域契约。
-- [ ] 复制 OpenAI strict、Anthropic、Google、Ollama、MCP 等方言的兼容 fixture 和失败用例。
+- [x] 建立 OpenAI strict、Anthropic、Google、Ollama、MCP 等方言的兼容 fixture 和失败用例。
+      `packages/agent-runtime/test/provider-schema-fixtures.test.ts` 基于固定 Oh My Pi
+      `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` 与官方 Pi `b4f293684bba718d59cc1157679bcf6157b3a7f5`
+      的行为测试起点，适配逻辑保留在 AgentPress provider boundary，不引入第二套领域 Schema。
 - [x] 覆盖 `$ref`、`oneOf/anyOf`、nullable optional、`additionalProperties`、`const/enum`、tuple 和递归 Schema。
       证据：`packages/agent-runtime/test/schema-compatibility.test.ts`，覆盖 closed object、union、nullable、literal、tuple 和递归 `$defs`。
 - [x] 定义 `strict` 与 `permissive` 两种结果策略；严格模式失败必须成为结构化失败，不得静默使用原文本。

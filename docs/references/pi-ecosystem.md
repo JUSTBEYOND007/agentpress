@@ -21,6 +21,13 @@ TypeBox-built domain schemas, and rejects unknown formats with structured paths.
 limited to the official MCP SDK adapter in `packages/mcp-runtime`; it is not exposed through
 AgentPress contracts.
 
+Provider dialect behavior is covered by `packages/agent-runtime/test/provider-schema-fixtures.test.ts`,
+adapted from Oh My Pi's schema strict-mode/provider tests at immutable commit
+`f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`. AgentPress keeps only boundary transformations needed
+for its TypeBox contracts; the full Oh My Pi schema subsystem was not vendored because the pinned
+Pi runtime already owns generic schema conversion and AgentPress also needs PostgreSQL-backed
+facts and degradation audit events.
+
 8. Security-sensitive code such as URL validation, MCP lifecycle management, and edit application requires local review even when copied unchanged.
 
 Compaction boundary decision: `packages/agent-context` directly imports the pure `shouldCompact`
