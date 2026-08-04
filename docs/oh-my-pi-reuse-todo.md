@@ -468,7 +468,10 @@ TODO：
 - [ ] 复用 Harbor 的容器化任务思想，建立隔离数据库/schema、对象存储前缀、Kafka topic/group 和网络策略。
       已完成 AgentPress-owned `createEvalSandboxDescriptor`：schema、object prefix、topic/group
       均由 experiment/arm/trial 不可变身份派生，网络默认 deny-by-default 且只接受受限 allowlist；
-      真实 Harbor/Docker 容器、隔离数据库/schema 和网络 namespace 仍待基础设施环境验收。
+      `createDockerEvalSandboxPlan` 只接受 digest 固定镜像，强制 network namespace=`none`、只读根文件系统、
+      非 root、drop ALL capabilities、no-new-privileges、无宿主挂载和 CPU/内存/PID/timeout/tmpfs 上限。
+      非空 egress allowlist 在没有已审计 proxy 时 fail closed，不退化为开放网络。真实 Docker daemon 当前
+      无法启动，容器执行、隔离资源 provision/cleanup 和网络 namespace 仍待基础设施环境验收。
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
       `ExperimentStore` 已支持固定 seed/attempts、pass@k、cancel、失败重跑和 pending resume；新增
       Eval Trial claim token/worker lease、`FOR UPDATE SKIP LOCKED` 并发领取与过期 worker fence。
