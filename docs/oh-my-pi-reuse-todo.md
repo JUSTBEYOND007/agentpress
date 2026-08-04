@@ -352,7 +352,8 @@ TODO：
 - [x] 过程指标覆盖路由、委派、工具选择、参数、审批、重试、循环、恢复、重复副作用、token、成本和延迟。
 - [ ] 复制 benchmark-native metric definition、统一 trace normalization 和 arm comparison 行为。
 - [x] 增加独立 LLM Judge：固定 rubric、结构化输出、blind comparison、位置随机化和 judge 模型/版本记录。
-- [ ] 增加 Judge 校准集、人工金标、与确定性指标的冲突报告，以及多次 Judge 方差阈值。
+- [x] 增加 Judge 校准集、人工金标、与确定性指标的冲突报告，以及多次 Judge 方差阈值。
+      `packages/agent-evals/src/judge-calibration.ts` 提供人工金标准确率/MAE、重复 Judge 一致率/方差和安全/确定性冲突报告；Judge 输出由宿主再次做结构化校验。
 - [ ] Oh My Pi `trace-report` 仅用于生成叙事故障分析，不作为正式 Judge 分数；正式评分必须可复现和可审计。
 - [ ] Dashboard 至少展示结果/过程双层指标、Trace、失败分类、成本、模型差异和回归趋势。
 - [ ] PR 使用 deterministic/faux provider 验证状态机；真实 Pi/目标模型评估按成本控制手动或定时运行。

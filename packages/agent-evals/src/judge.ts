@@ -51,6 +51,11 @@ export type JudgePairReport = {
   readonly promptVersion: typeof JUDGE_PROMPT_VERSION;
 };
 
+type JudgeCompletion = Omit<
+  JudgePairReport,
+  'caseId' | 'displayedA' | 'displayedB' | 'model' | 'promptVersion'
+>;
+
 export async function judgePair(
   runtime: AgentRuntime,
   input: JudgePairInput,
@@ -61,7 +66,7 @@ export async function judgePair(
   const displayed = swap
     ? { a: input.candidateB, b: input.candidateA, displayedA: 'candidateB' as const, displayedB: 'candidateA' as const }
     : { a: input.candidateA, b: input.candidateB, displayedA: 'candidateA' as const, displayedB: 'candidateB' as const };
-  let completion: Omit<JudgePairReport, 'caseId' | 'displayedA' | 'displayedB' | 'model' | 'promptVersion'> | undefined;
+  let completion: JudgeCompletion | undefined;
   const model = `${runtime.identity?.provider ?? 'unknown'}/${runtime.identity?.model ?? 'unknown'}`;
   const tool: RuntimeTool = {
     name: 'evaluation_judge_complete',
@@ -71,7 +76,10 @@ export async function judgePair(
     constrainedSampling: { type: 'json_schema', strict: 'require' },
     terminateOnSuccess: true,
     execute: (arguments_) => {
-      completion = arguments_ as typeof completion;
+      if (!isJudgeCompletion(arguments_)) {
+        throw new Error('Judge returned schema-invalid output');
+      }
+      completion = arguments_;
       return Promise.resolve({ accepted: true });
     },
   };
@@ -114,4 +122,34 @@ export async function judgePair(
 
 function hashParity(value: string): 0 | 1 {
   return (createHash('sha256').update(value).digest()[0] ?? 0) % 2 === 0 ? 0 : 1;
+}
+
+function isJudgeCompletion(value: unknown): value is JudgeCompletion {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  if (
+    (item.winner !== 'a' && item.winner !== 'b' && item.winner !== 'tie') ||
+    !boundedScore(item.scoreA) ||
+    !boundedScore(item.scoreB) ||
+    typeof item.rationale !== 'string' ||
+    item.rationale.length < 1 ||
+    item.rationale.length > 4_000 ||
+    !Array.isArray(item.criterionScores) ||
+    item.criterionScores.length > 32
+  ) return false;
+  return item.criterionScores.every((criterion) => {
+    if (typeof criterion !== 'object' || criterion === null || Array.isArray(criterion)) return false;
+    const value = criterion as Record<string, unknown>;
+    return (
+      typeof value.criterion === 'string' &&
+      value.criterion.length >= 1 &&
+      value.criterion.length <= 200 &&
+      boundedScore(value.a) &&
+      boundedScore(value.b)
+    );
+  });
+}
+
+function boundedScore(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 5;
 }

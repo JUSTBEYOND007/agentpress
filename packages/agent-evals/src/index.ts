@@ -4,5 +4,6 @@ export * from './runner.js';
 export * from './online-runner.js';
 export * from './online-model-configuration.js';
 export * from './judge.js';
+export * from './judge-calibration.js';
 export * from './trace-metrics.js';
 export * from './experiment-store.js';

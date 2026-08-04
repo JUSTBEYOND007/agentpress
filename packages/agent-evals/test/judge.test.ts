@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import { PiRuntimeAdapter } from '@agentpress/agent-runtime';
 
-import { judgePair, redactTrace, scoreProcessTrace } from '../src/index.js';
+import {
+  calibrateJudge,
+  findDeterministicJudgeConflicts,
+  judgePair,
+  redactTrace,
+  scoreProcessTrace,
+  summarizeJudgeStability,
+  type JudgePairReport,
+} from '../src/index.js';
 
 describe('evaluation judge and trace metrics', () => {
   it('runs a blind structured judgment through the official Pi runtime', async () => {
@@ -43,5 +51,54 @@ describe('evaluation judge and trace metrics', () => {
     ];
     expect(scoreProcessTrace(events)).toMatchObject({ delegationCount: 1, toolCallCount: 1, latencyMs: 15 });
     expect(redactTrace(events)[0]?.payload).toMatchObject({ apiKey: '[REDACTED]' });
+  });
+
+  it('calibrates against human gold labels and exposes deterministic conflicts', () => {
+    const reports: readonly JudgePairReport[] = [
+      {
+        caseId: 'case-1', displayedA: 'candidateB', displayedB: 'candidateA', winner: 'b',
+        scoreA: 4, scoreB: 3, criterionScores: [], rationale: 'gold', model: 'judge/v1',
+        promptVersion: 'agentpress.llm-judge@1',
+      },
+      {
+        caseId: 'case-2', displayedA: 'candidateA', displayedB: 'candidateB', winner: 'a',
+        scoreA: 5, scoreB: 1, criterionScores: [], rationale: 'wrong', model: 'judge/v1',
+        promptVersion: 'agentpress.llm-judge@1',
+      },
+    ];
+    expect(
+      calibrateJudge(reports, [
+        { caseId: 'case-1', winner: 'candidateA', scoreA: 3, scoreB: 4 },
+        { caseId: 'case-2', winner: 'candidateB', scoreA: 1, scoreB: 5 },
+      ]),
+    ).toMatchObject({ total: 2, winnerCorrect: 1, winnerAccuracy: 0.5 });
+    expect(
+      findDeterministicJudgeConflicts(reports, [
+        { caseId: 'case-1', winner: 'candidateA', securityPassed: true },
+        { caseId: 'case-2', winner: 'candidateB', securityPassed: false },
+      ]),
+    ).toEqual([
+      { caseId: 'case-2', reason: 'winner_mismatch' },
+      { caseId: 'case-2', reason: 'security_failure' },
+    ]);
+  });
+
+  it('reports repeated-judge winner agreement and score variance deterministically', () => {
+    const base: JudgePairReport = {
+      caseId: 'case-variance', displayedA: 'candidateA', displayedB: 'candidateB', winner: 'a',
+      scoreA: 4, scoreB: 2, criterionScores: [], rationale: '', model: 'judge/v1',
+      promptVersion: 'agentpress.llm-judge@1',
+    };
+    const report = summarizeJudgeStability([
+      base,
+      { ...base, scoreA: 2, scoreB: 4, winner: 'b' },
+      { ...base, scoreA: 4, scoreB: 2 },
+    ]);
+    expect(report[0]).toMatchObject({
+      caseId: 'case-variance',
+      samples: 3,
+      winnerAgreement: 2 / 3,
+    });
+    expect(report[0]?.scoreVarianceA).toBeCloseTo(8 / 9, 8);
   });
 });
