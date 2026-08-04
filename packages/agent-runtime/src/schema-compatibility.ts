@@ -28,7 +28,12 @@ export type SchemaValidationFailure = {
 };
 
 export type SchemaValidationResult =
-  | { readonly valid: true; readonly value: unknown }
+  | {
+      readonly valid: true;
+      readonly value: unknown;
+      readonly degraded?: true;
+      readonly failures?: readonly SchemaValidationFailure[];
+    }
   | {
       readonly valid: false;
       readonly failures: readonly SchemaValidationFailure[];
@@ -89,6 +94,7 @@ export function validateSchemaResult(
     path: 'path' in error && typeof error.path === 'string' ? error.path : '/',
     message: error.message,
   }));
+  if (mode === 'permissive') return { valid: true, value, degraded: true, failures };
   return { valid: false, failures, mode };
 }
 

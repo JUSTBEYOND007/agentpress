@@ -80,6 +80,17 @@ describe('agent application contracts', () => {
         () => 'task-3',
       ),
     ).toThrow(/forbidden for researcher/u);
+    expect(() =>
+      validateSubmittedPlan(
+        {
+          goal: 'Malformed',
+          tasks: [{ clientKey: 'bad', owner: 'researcher' }],
+          modelGrantedCapability: 'publication.write',
+        },
+        ['web.research'],
+        () => 'task-4',
+      ),
+    ).toThrow(/plan_submit returned schema-invalid output/u);
   });
 
   it('keeps Specialist Task identity, depth, budget, and detached policy host-owned', () => {

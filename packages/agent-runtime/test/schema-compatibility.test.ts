@@ -82,6 +82,18 @@ describe('provider schema compatibility', () => {
     if (!result.valid) expect(result.failures.length).toBeGreaterThan(0);
   });
 
+  it('returns an explicit degraded result in permissive mode without coercion', () => {
+    const schema = Type.Object({ count: Type.Integer() }, { additionalProperties: false });
+    const value = { count: '3' };
+    const result = validateSchemaResult(schema, value, 'permissive');
+
+    expect(result).toMatchObject({ valid: true, degraded: true, value });
+    if (result.valid) {
+      expect(result.failures?.length).toBeGreaterThan(0);
+      expect(result.value).toBe(value);
+    }
+  });
+
   it('maps provider ids deterministically', () => {
     expect(providerFromId('openai-compatible')).toBe('openai');
     expect(providerFromId('claude')).toBe('anthropic');

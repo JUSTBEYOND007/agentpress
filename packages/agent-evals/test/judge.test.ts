@@ -41,6 +41,34 @@ describe('evaluation judge and trace metrics', () => {
     expect(new Set([report.displayedA, report.displayedB])).toEqual(new Set(['candidateA', 'candidateB']));
   });
 
+  it('rejects schema-invalid Judge output instead of accepting raw scores', async () => {
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage(
+          [
+            fauxToolCall('evaluation_judge_complete', {
+              winner: 'a',
+              scoreA: 9,
+              scoreB: 0,
+              criterionScores: [],
+              rationale: 'Out of range.',
+            }),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+      ],
+    });
+    await expect(
+      judgePair(runtime, {
+        caseId: 'invalid-score',
+        candidateA: 'A',
+        candidateB: 'B',
+        rubric: [{ id: 'accuracy', instruction: 'Accuracy' }],
+        seed: 'fixed',
+      }),
+    ).rejects.toThrow(/validation|schema/u);
+  });
+
   it('computes process metrics and redacts secrets', () => {
     const events = [
       { type: 'run.started', payload: { timestamp: 10, apiKey: 'secret' } },

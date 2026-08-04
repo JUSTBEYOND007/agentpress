@@ -10,6 +10,7 @@ import type {
   RuntimeTranscriptMessage,
   RuntimeUsage,
 } from '@agentpress/agent-runtime';
+import { validateSchemaResult } from '@agentpress/agent-runtime';
 import {
   agentRuns,
   agentTaskDependencies,
@@ -172,6 +173,14 @@ const taskSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const planSubmitSchema = Type.Object(
+  {
+    goal: Type.String({ minLength: 1, maxLength: 4_000 }),
+    tasks: Type.Array(taskSchema, { minItems: 1, maxItems: 12 }),
+  },
+  { additionalProperties: false },
+);
+
 const taskCompleteSchema = Type.Object(
   {
     status: Type.Unsafe<'succeeded' | 'failed'>({
@@ -326,13 +335,7 @@ export class PlannedRunExecutor {
         label: 'Submit execution plan',
         description:
           'Submit a concrete task DAG only when the authoritative current request needs specialist work or tools.',
-        parameters: Type.Object(
-          {
-            goal: Type.String({ minLength: 1, maxLength: 4_000 }),
-            tasks: Type.Array(taskSchema, { minItems: 1, maxItems: 12 }),
-          },
-          { additionalProperties: false },
-        ),
+        parameters: planSubmitSchema,
         constrainedSampling: { type: 'json_schema', strict: 'require' },
         executionMode: 'sequential',
         terminateOnSuccess: true,
@@ -966,6 +969,7 @@ export class PlannedRunExecutor {
       executionMode: 'sequential',
       terminateOnSuccess: true,
       execute: async (arguments_) => {
+        assertStrictSchema(taskCompleteSchema, arguments_, 'task_complete');
         const submitted = arguments_ as typeof completion & {};
         const evidenceIds = submitted.artifacts.flatMap((artifact) => artifact.evidenceIds);
         await this.assertTaskEvidence(runId, task.id, evidenceIds);
@@ -1536,6 +1540,7 @@ export function validateSubmittedPlan(
   availableCapabilities: readonly string[],
   createId: () => string,
 ): SubmittedPlan {
+  assertStrictSchema(planSubmitSchema, value, 'plan_submit');
   const rawTasks = value.tasks as readonly {
     readonly clientKey: string;
     readonly owner: SpecialistRole;
@@ -1579,6 +1584,13 @@ export function validateSubmittedPlan(
 }
 
 const validatePlan = validateSubmittedPlan;
+
+function assertStrictSchema(schema: Parameters<typeof validateSchemaResult>[0], value: unknown, protocol: string): void {
+  const validation = validateSchemaResult(schema, value, 'strict');
+  if (validation.valid) return;
+  const detail = validation.failures.map(({ path, message }) => `${path}: ${message}`).join('; ');
+  throw new Error(`${protocol} returned schema-invalid output: ${detail}`);
+}
 
 function assertAcyclic(tasks: readonly PlannedTaskSpec[]): void {
   const byId = new Map(tasks.map((task) => [task.id, task]));
