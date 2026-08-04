@@ -40,6 +40,7 @@ import {
   reclaimExpiredAgentTasks,
   releaseAgentTaskLease,
   renewAgentTaskLease,
+  settleAgentTaskAttempt,
 } from '../src/index.js';
 
 const connectionString = process.env.DATABASE_URL;
@@ -277,6 +278,26 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       }),
     );
     expect(second?.attempt).toBe(2);
+    expect(
+      await connection.db.transaction((transaction) =>
+        settleAgentTaskAttempt(transaction, {
+          taskId: ids.task,
+          attempt: 1,
+          status: 'succeeded',
+          now: new Date('2026-01-01T00:00:02.050Z'),
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      await connection.db.transaction((transaction) =>
+        settleAgentTaskAttempt(transaction, {
+          taskId: ids.task,
+          attempt: 2,
+          status: 'succeeded',
+          now: new Date('2026-01-01T00:00:02.075Z'),
+        }),
+      ),
+    ).toBe(true);
     await releaseAgentTaskLease(connection.db, {
       leaseToken: second?.lease.leaseToken ?? '',
       workerId: 'task-worker-2',

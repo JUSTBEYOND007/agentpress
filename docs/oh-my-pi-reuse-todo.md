@@ -236,6 +236,9 @@ TODO：
       `run.execute` outbox 唤醒。仍需在真实 PostgreSQL/Kafka 环境跑 worker 丢失、重复 command、
       cancel 和外部写幂等端到端测试后才可勾选。
 - [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
+      已将 Oh My Pi `agent-lifecycle.ts` 的 stale-ref finalizer 保护适配为 PostgreSQL attempt fence：
+      `settleAgentTaskAttempt` 只有在 Task 仍为 `running` 且 attempt 完全匹配时才允许结算；取消、lease
+      过期恢复或新 attempt 后的旧 worker 结果无法覆盖新状态。真实 worker checkpoint/recover 全链路仍待验收。
 - [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
       已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities；完整 root request 仍只保存在 PostgreSQL Context Pack 供 detached 恢复，最小 Context Pack 的全链路 PostgreSQL/真实模型验收仍待完成。
 - [ ] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、

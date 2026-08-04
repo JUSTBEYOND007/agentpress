@@ -37,6 +37,7 @@ import {
   claimAgentTask,
   enqueueOutboxMessage,
   releaseAgentTaskLease,
+  settleAgentTaskAttempt,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
 import { composePromptBlocks, renderPromptTemplate } from '@agentpress/agent-context';
@@ -317,7 +318,7 @@ export class PlannedRunExecutor {
         envelope.rootRequest,
         new Map(),
         signal,
-        true,
+        claim.attempt,
       );
       return result.status;
     } finally {
@@ -1043,9 +1044,10 @@ export class PlannedRunExecutor {
     rootPrompt: RuntimeCurrentTurn,
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
-    claimed = false,
+    claimedAttempt?: number,
   ): Promise<SettledTask> {
-    if (!claimed && !(await this.updateTaskStatus(runId, task, 'running'))) {
+    const attempt = claimedAttempt ?? (await this.updateTaskStatus(runId, task, 'running'));
+    if (attempt === undefined) {
       return {
         ...task,
         status: 'failed',
@@ -1156,8 +1158,9 @@ export class PlannedRunExecutor {
         failure: 'protocol_error',
         ...(assistant ? { usage: assistant.usage } : {}),
       };
-      await this.persistTaskResult(runId, failed);
-      return failed;
+      return (await this.persistTaskResult(runId, failed, attempt))
+        ? failed
+        : staleTaskSettlement(task);
     }
     const taskResult: SettledTask = {
       ...task,
@@ -1168,8 +1171,9 @@ export class PlannedRunExecutor {
       ...(completion.failure ? { failure: completion.failure } : {}),
       ...(assistant ? { usage: assistant.usage } : {}),
     };
-    await this.persistTaskResult(runId, taskResult);
-    return taskResult;
+    return (await this.persistTaskResult(runId, taskResult, attempt))
+      ? taskResult
+      : staleTaskSettlement(task);
   }
 
   /** Waits on the durable TaskResult produced by a detached worker. */
@@ -1527,18 +1531,22 @@ export class PlannedRunExecutor {
     return [message, toolResult];
   }
 
-  private async persistTaskResult(runId: string, result: SettledTask): Promise<void> {
+  private async persistTaskResult(
+    runId: string,
+    result: SettledTask,
+    expectedAttempt: number,
+  ): Promise<boolean> {
     const event = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
-      await transaction
-        .update(agentTasks)
-        .set({
+      if (
+        !(await settleAgentTaskAttempt(transaction, {
+          taskId: result.id,
+          attempt: expectedAttempt,
           status: result.status,
-          updatedAt: now,
-          completedAt: now,
-          version: sql`${agentTasks.version} + 1`,
-        })
-        .where(eq(agentTasks.id, result.id));
+          now,
+        }))
+      )
+        return undefined;
       const persistedArtifacts = [];
       for (const artifact of result.artifacts) {
         const artifactId = this.createId();
@@ -1574,15 +1582,10 @@ export class PlannedRunExecutor {
         persistedArtifacts.push({ artifactId, versionId, ...artifact });
       }
       if (result.status !== 'cancelled' && result.status !== 'skipped') {
-        const attempts = await transaction
-          .select({ attempt: agentTasks.attempt })
-          .from(agentTasks)
-          .where(eq(agentTasks.id, result.id))
-          .limit(1);
         await transaction.insert(taskResults).values({
           id: this.createId(),
           taskId: result.id,
-          attempt: Math.max(1, attempts[0]?.attempt ?? 1),
+          attempt: expectedAttempt,
           status: result.status,
           artifacts: persistedArtifacts,
           evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
@@ -1630,7 +1633,9 @@ export class PlannedRunExecutor {
       });
       return event;
     });
+    if (!event) return false;
     await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+    return true;
   }
 
   private async updateTaskStatus(
@@ -1638,7 +1643,7 @@ export class PlannedRunExecutor {
     task: PlannedTaskSpec,
     status: 'running' | 'skipped',
     failure?: string,
-  ): Promise<boolean> {
+  ): Promise<number | undefined> {
     const event = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
       const updated = await transaction
@@ -1659,18 +1664,19 @@ export class PlannedRunExecutor {
               )
             : eq(agentTasks.id, task.id),
         )
-        .returning({ id: agentTasks.id });
+        .returning({ attempt: agentTasks.attempt });
       if (updated.length === 0) return undefined;
-      return appendRunEvent(transaction, {
+      const event = await appendRunEvent(transaction, {
         id: this.createId(),
         runId,
         eventType: `task.${status === 'running' ? 'started' : 'skipped'}`,
         payload: { taskId: task.id, owner: task.owner, ...(failure ? { failure } : {}) },
       });
+      return { attempt: updated[0]?.attempt, event };
     });
-    if (!event) return false;
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
-    return true;
+    if (event?.attempt === undefined) return undefined;
+    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event.event) });
+    return event.attempt;
   }
 
   private async assertRunReferences(
@@ -2045,6 +2051,16 @@ function decodePersistedArtifacts(value: readonly unknown[]): readonly Structure
 function extractPersistedSummary(value: readonly unknown[]): string {
   const artifacts = decodePersistedArtifacts(value);
   return artifacts.map(({ summary }) => summary).join('\n') || 'Previously completed task result';
+}
+
+function staleTaskSettlement(task: PlannedTaskSpec): SettledTask {
+  return {
+    ...task,
+    status: 'skipped',
+    artifacts: [],
+    warnings: ['A newer Task attempt or terminal state superseded this worker result.'],
+    failure: 'stale_task_settlement',
+  };
 }
 
 function publicTask(task: PlannedTaskSpec) {

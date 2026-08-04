@@ -21,6 +21,42 @@ export type TaskClaim = {
 };
 
 /**
+ * Commits one worker attempt only while that exact attempt still owns the
+ * running Task state. Recovery, retry, and cancellation therefore fence stale workers.
+ */
+export async function settleAgentTaskAttempt(
+  transaction: DatabaseTransaction,
+  input: {
+    readonly taskId: string;
+    readonly attempt: number;
+    readonly status: 'succeeded' | 'failed' | 'cancelled' | 'skipped';
+    readonly now?: Date;
+  },
+): Promise<boolean> {
+  if (!Number.isSafeInteger(input.attempt) || input.attempt < 1) {
+    throw new RangeError('Task settlement attempt must be a positive integer');
+  }
+  const now = input.now ?? new Date();
+  const rows = await transaction
+    .update(agentTasks)
+    .set({
+      status: input.status,
+      completedAt: now,
+      updatedAt: now,
+      version: sql`${agentTasks.version} + 1`,
+    })
+    .where(
+      and(
+        eq(agentTasks.id, input.taskId),
+        eq(agentTasks.status, 'running'),
+        eq(agentTasks.attempt, input.attempt),
+      ),
+    )
+    .returning({ id: agentTasks.id });
+  return rows.length === 1;
+}
+
+/**
  * Atomically claims a pending/recoverable task and creates its durable lease.
  * A successful TaskResult is checked in the same transaction so replayed
  * commands cannot start a settled task again.

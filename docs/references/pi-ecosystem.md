@@ -27,6 +27,15 @@ records a versioned snapshot of template and variable-schema versions plus order
 the Run Context Pack continues to pin that immutable revision. Snapshot hashes detect composition
 drift but do not grant capabilities, drive runtime state, or count as model-behavior evidence.
 
+Specialist lifecycle decision: Oh My Pi's in-memory `AgentLifecycleManager` binds every park/revive
+and late finalizer to the exact `AgentRef` that started it. AgentPress adapts that stale-owner
+invariant at the durable boundary instead of copying sessions or timers: Task settlement is fenced
+by the PostgreSQL `running` state and exact attempt number. A cancelled, recovered, or retried Task
+therefore rejects a late worker result before writing TaskResult, Artifact, Checkpoint, or RunEvent.
+The source behavior is pinned at Oh My Pi commit `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`,
+`packages/coding-agent/src/registry/agent-lifecycle.ts` and
+`packages/coding-agent/test/registry/agent-lifecycle.test.ts`.
+
 Provider dialect behavior is covered by `packages/agent-runtime/test/provider-schema-fixtures.test.ts`,
 adapted from Oh My Pi's schema strict-mode/provider tests at immutable commit
 `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`. AgentPress keeps only boundary transformations needed
