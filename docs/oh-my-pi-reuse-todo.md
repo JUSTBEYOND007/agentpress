@@ -341,7 +341,7 @@ TODO：
 
 TODO：
 
-- [ ] 将 Experiment -> Arm -> Trial -> RunTrace 模型适配到 `packages/agent-evals`，记录模型、Prompt、Skill、
+- [x] 将 Experiment -> Arm -> Trial -> RunTrace 模型适配到 `packages/agent-evals`，记录模型、Prompt、Skill、
       Tool 和 Context policy 版本。
 - [ ] 复用 Harbor 的容器化任务思想，建立隔离数据库/schema、对象存储前缀、Kafka topic/group 和网络策略。
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
