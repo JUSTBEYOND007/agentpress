@@ -2,6 +2,7 @@ import type { Static, TSchema } from '@sinclair/typebox';
 
 export type ToolRisk = 'read_only' | 'draft_write' | 'external_write' | 'destructive';
 export type ToolIdempotency = 'none' | 'provider_key';
+export type { ToolReplaySafety } from './replay-policy.js';
 
 export type ToolExecutionContext = {
   readonly runId: string;
@@ -22,6 +23,7 @@ export type ToolDefinition<TInput extends TSchema = TSchema, TOutput extends TSc
   readonly risk: ToolRisk;
   readonly sideEffect: string;
   readonly idempotency: ToolIdempotency;
+  readonly replaySafety?: import('./replay-policy.js').ToolReplaySafety;
   readonly timeoutMs: number;
   readonly estimateCost: (input: Static<TInput>) => Readonly<Record<string, number>>;
   readonly execute: (
