@@ -153,6 +153,16 @@ export const promptRevisions = pgTable(
     version: varchar('version', { length: 80 }).notNull(),
     content: text('content').notNull(),
     contentHash: varchar('content_hash', { length: 80 }).notNull(),
+    snapshot: jsonb('snapshot')
+      .$type<{
+        readonly schemaVersion: 1;
+        readonly templateVersion: string;
+        readonly variableSchemaVersion: string;
+        readonly renderedContentHash: string;
+        readonly blocks: readonly { readonly id: string; readonly contentHash: string }[];
+      }>()
+      .notNull(),
+    snapshotHash: varchar('snapshot_hash', { length: 80 }).notNull(),
     createdAt,
   },
   (table) => [unique('prompt_revisions_identity_unique').on(table.promptId, table.version)],

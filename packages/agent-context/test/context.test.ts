@@ -359,15 +359,21 @@ describe('Agent context governance', () => {
 
   it('reports Agent Skills conformance issues without rejecting compatibility fields', () => {
     const invalid = `---\nname: Invalid_Name\ndescription: ${'x'.repeat(1025)}\ncompatibility: ${'y'.repeat(501)}\n---\n\nInstructions.`;
-    expect(validateSkillConformance(invalid, { path: 'Invalid_Name/SKILL.md' }).map((issue) => issue.code)).toEqual([
-      'invalid-name',
-      'description-too-long',
-      'compatibility-too-long',
-    ]);
-    expect(validateSkillConformance('---\nid: legacy\ndescription: Legacy\n---\nUse it.').map((issue) => issue.code)).toContain(
-      'missing-name',
-    );
-    expect(validateSkillConformance('---\nname: valid-skill\ndescription: Valid\n---\nUse it.', { path: 'valid-skill/SKILL.md' })).toEqual([]);
+    expect(
+      validateSkillConformance(invalid, { path: 'Invalid_Name/SKILL.md' }).map(
+        (issue) => issue.code,
+      ),
+    ).toEqual(['invalid-name', 'description-too-long', 'compatibility-too-long']);
+    expect(
+      validateSkillConformance('---\nid: legacy\ndescription: Legacy\n---\nUse it.').map(
+        (issue) => issue.code,
+      ),
+    ).toContain('missing-name');
+    expect(
+      validateSkillConformance('---\nname: valid-skill\ndescription: Valid\n---\nUse it.', {
+        path: 'valid-skill/SKILL.md',
+      }),
+    ).toEqual([]);
   });
 
   it('reports malformed and conflicting Skill documents while preserving precedence', () => {
@@ -453,7 +459,20 @@ describe('Agent context governance', () => {
   });
 
   it('pins prompts, selects explicit fallback and bounds review loops', async () => {
-    expect(createPromptRevision('writer', '2', 'Write').contentHash).toHaveLength(64);
+    const prompt = createPromptRevision('writer', '2', 'Write', {
+      templateVersion: 'writer-template@2',
+      variableSchemaVersion: 'writer-vars@1',
+      blocks: [{ id: 'role', content: 'Write' }],
+    });
+    expect(prompt.contentHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(prompt.snapshot).toEqual({
+      schemaVersion: 1,
+      templateVersion: 'writer-template@2',
+      variableSchemaVersion: 'writer-vars@1',
+      renderedContentHash: prompt.contentHash,
+      blocks: [{ id: 'role', contentHash: prompt.contentHash }],
+    });
+    expect(prompt.snapshotHash).toMatch(/^[a-f0-9]{64}$/u);
     const policy = {
       task: 'write',
       primary: 'doubao-pro',

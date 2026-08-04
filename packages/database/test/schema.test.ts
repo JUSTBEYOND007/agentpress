@@ -12,6 +12,7 @@ import {
   inboxMessages,
   memoryCandidates,
   outboxMessages,
+  promptRevisions,
   runEvents,
   runToolChoices,
   toolCalls,
@@ -40,6 +41,12 @@ describe('database schema', () => {
   it('keeps memory consolidation provenance in PostgreSQL', () => {
     expect(getTableConfig(memoryCandidates).columns.map(({ name }) => name)).toContain(
       'source_memory_ids',
+    );
+  });
+
+  it('keeps prompt composition snapshots in the PostgreSQL revision fact', () => {
+    expect(getTableConfig(promptRevisions).columns.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['snapshot', 'snapshot_hash']),
     );
   });
 

@@ -27,6 +27,7 @@ import {
   executionPlans,
   editProposals,
   planRevisions,
+  promptRevisions,
   rootRequests,
   runContextPacks,
   runDirectives,
@@ -821,6 +822,26 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(packs[0]?.content).toContain('Mentioned immutable content');
     expect(packs[0]?.content).toContain('Keep the answer concise.');
     expect(packs[0]?.content).toContain('Prefer short paragraphs');
+    const promptRows = await connection.db
+      .select()
+      .from(promptRevisions)
+      .where(eq(promptRevisions.id, packs[0]?.promptRevisionId ?? randomUUID()));
+    const promptRow = promptRows[0];
+    expect(promptRow?.content).toBe('You are AgentPress.');
+    expect(promptRow?.version).toMatch(/^1\.0\.0-/u);
+    expect(promptRow?.snapshot).toEqual({
+      schemaVersion: 1,
+      templateVersion: promptRow?.version,
+      variableSchemaVersion: 'none',
+      renderedContentHash: promptRow?.contentHash,
+      blocks: [
+        {
+          id: 'agentpress.main.rendered',
+          contentHash: promptRow?.contentHash,
+        },
+      ],
+    });
+    expect(promptRow?.snapshotHash).toBe(promptRow?.contentHash);
     const manifest = packs[0]?.manifest as { readonly skillVersions?: unknown } | undefined;
     const skillVersions = manifest?.skillVersions as Record<string, unknown> | undefined;
     expect(skillVersions?.concise).toEqual(expect.stringMatching(/^1\.0\.0:/u));

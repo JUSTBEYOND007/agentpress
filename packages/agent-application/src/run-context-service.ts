@@ -5,6 +5,7 @@ import {
   createPromptRevision,
   loadSkill,
   pinSkills,
+  promptSnapshotsEqual,
   rankRelevantMemory,
   type ContextCandidate,
   type ContextPack,
@@ -461,8 +462,12 @@ export class RunContextService {
       )
       .limit(1);
     const persisted = rows[0];
-    if (persisted?.contentHash !== this.prompt.contentHash)
-      throw new Error('Prompt revision identity is bound to different content');
+    if (
+      persisted?.contentHash !== this.prompt.contentHash ||
+      persisted.snapshotHash !== this.prompt.snapshotHash ||
+      !promptSnapshotsEqual(persisted.snapshot, this.prompt.snapshot)
+    )
+      throw new Error('Prompt revision identity is bound to different content or snapshot');
     return persisted.id;
   }
 }

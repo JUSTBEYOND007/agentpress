@@ -477,7 +477,12 @@ TODO：
       `PersistentToolBridge` 只把它附加到对应 Pi Runtime tool description。文章锚点/review mode 与 MCP
       untrusted-evidence 规则已从通用 Prompt/长描述下沉到各自工具契约。Capability、成员、Skill、
       ActionEnvelope、approval 和 settlement 仍由确定性代码判定，guidance 不参与授权。
-- [ ] 建立 Prompt snapshot 仅用于变更审计；行为验收必须通过真实模型场景和状态事实。
+- [x] 建立 Prompt snapshot 仅用于变更审计；行为验收必须通过真实模型场景和状态事实。
+      `prompt_revisions` 新增 PostgreSQL `snapshot`/`snapshot_hash` 事实，记录 schema、template、
+      variable-schema 版本、rendered content hash 与有序 block ID/hash；旧 revision 由 migration
+      确定性回填。相同 `promptId + version` 的内容、composition hash 或结构任一漂移都会 fail closed。
+      Snapshot 不进入 capability、approval、状态机或评分逻辑，也不作为模型行为通过的证据；真实模型
+      行为仍由本清单各 online eval 门禁验收。
 - [ ] 不复制 Oh My Pi 的 Bun/Bazel/Rust/native/TUI 工程框架；继续沿用 AgentPress pnpm/Turbo/NestJS/Next.js。
 - [ ] 评估其模块边界而非目录照搬：compaction、schema、task、memory、MCP 和 eval 各自保持独立 owner。
 

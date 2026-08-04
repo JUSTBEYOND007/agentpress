@@ -21,6 +21,12 @@ TypeBox-built domain schemas, and rejects unknown formats with structured paths.
 limited to the official MCP SDK adapter in `packages/mcp-runtime`; it is not exposed through
 AgentPress contracts.
 
+Prompt audit decision: AgentPress keeps prompt composition history in the existing PostgreSQL
+`prompt_revisions` fact rather than adopting Oh My Pi's file/session prompt state. Each revision
+records a versioned snapshot of template and variable-schema versions plus ordered block hashes;
+the Run Context Pack continues to pin that immutable revision. Snapshot hashes detect composition
+drift but do not grant capabilities, drive runtime state, or count as model-behavior evidence.
+
 Provider dialect behavior is covered by `packages/agent-runtime/test/provider-schema-fixtures.test.ts`,
 adapted from Oh My Pi's schema strict-mode/provider tests at immutable commit
 `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`. AgentPress keeps only boundary transformations needed

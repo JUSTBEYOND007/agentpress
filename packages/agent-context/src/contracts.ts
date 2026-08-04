@@ -92,6 +92,23 @@ export type PromptRevision = {
   readonly version: string;
   readonly contentHash: string;
   readonly content: string;
+  readonly snapshot: PromptSnapshot;
+  readonly snapshotHash: string;
+};
+export type PromptSnapshot = {
+  readonly schemaVersion: 1;
+  readonly templateVersion: string;
+  readonly variableSchemaVersion: string;
+  readonly renderedContentHash: string;
+  readonly blocks: readonly {
+    readonly id: string;
+    readonly contentHash: string;
+  }[];
+};
+export type PromptSnapshotSource = {
+  readonly templateVersion: string;
+  readonly variableSchemaVersion: string;
+  readonly blocks: readonly { readonly id: string; readonly content: string }[];
 };
 export type ModelPolicy = {
   readonly task: string;
