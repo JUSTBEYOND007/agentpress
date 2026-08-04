@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentRuns,
+  agentTaskLeases,
   conversationCompactions,
   DATABASE_AGENT_RUN_STATES,
   DATABASE_AGENT_TASK_STATES,
@@ -26,6 +27,11 @@ describe('database schema', () => {
     expect(getTableConfig(outboxMessages).name).toBe('outbox_messages');
     expect(getTableConfig(inboxMessages).name).toBe('inbox_messages');
     expect(getTableConfig(inboxMessages).primaryKeys).toHaveLength(1);
+  });
+
+  it('defines durable specialist task ownership', () => {
+    expect(getTableConfig(agentTaskLeases).name).toBe('agent_task_leases');
+    expect(getTableConfig(agentTaskLeases).columns.map(({ name }) => name)).toContain('id');
   });
 
   it('keeps PostgreSQL state enums aligned with the domain', () => {

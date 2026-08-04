@@ -7,3 +7,4 @@ export * from './outbox.js';
 export * from './postgres.js';
 export * from './run-event-store.js';
 export * from './schema.js';
+export * from './task-lease-store.js';

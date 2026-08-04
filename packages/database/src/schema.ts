@@ -651,6 +651,36 @@ export const agentTasks = pgTable(
   ],
 );
 
+/** Durable ownership for a task attempt. A worker crash is represented by an
+ * expired lease, never by process-local state. */
+export const agentTaskLeases = pgTable(
+  'agent_task_leases',
+  {
+    id: uuid('id').primaryKey(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    attempt: integer('attempt').notNull(),
+    leaseToken: varchar('lease_token', { length: 160 }).notNull().unique(),
+    workerId: varchar('worker_id', { length: 160 }).notNull(),
+    acquiredAt: timestamp('acquired_at', { withTimezone: true, precision: 3 })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, precision: 3 }).notNull(),
+    releasedAt: timestamp('released_at', { withTimezone: true, precision: 3 }),
+    createdAt,
+  },
+  (table) => [
+    unique('agent_task_leases_task_attempt_unique').on(table.taskId, table.attempt),
+    index('agent_task_leases_active_idx').on(table.taskId, table.expiresAt, table.releasedAt),
+    check('agent_task_leases_attempt_check', sql`${table.attempt} > 0`),
+    check('agent_task_leases_expiry_check', sql`${table.expiresAt} > ${table.acquiredAt}`),
+  ],
+);
+
 export const agentTaskDependencies = pgTable(
   'agent_task_dependencies',
   {

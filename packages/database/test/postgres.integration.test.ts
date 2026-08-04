@@ -7,6 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   agentRuns,
+  agentTaskLeases,
+  agentTasks,
+  claimAgentTask,
   appendRunEvent,
   appUsers,
   claimOutboxMessages,
@@ -26,8 +29,14 @@ import {
   processInboxMessage,
   rootRequests,
   runEvents,
+  taskResults,
   workspaces,
   workspaceMembers,
+  executionPlans,
+  planRevisions,
+  reclaimExpiredAgentTasks,
+  releaseAgentTaskLease,
+  renewAgentTaskLease,
 } from '../src/index.js';
 
 const connectionString = process.env.DATABASE_URL;
@@ -43,6 +52,9 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     message: randomUUID(),
     request: randomUUID(),
     run: randomUUID(),
+    plan: randomUUID(),
+    revision: randomUUID(),
+    task: randomUUID(),
   };
 
   beforeAll(async () => {
@@ -85,6 +97,28 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       rootRequestId: ids.request,
       mode: 'planned',
       status: 'queued',
+    });
+    await connection.db.insert(executionPlans).values({ id: ids.plan, runId: ids.run });
+    await connection.db.insert(planRevisions).values({
+      id: ids.revision,
+      planId: ids.plan,
+      revisionNumber: 1,
+      reason: 'integration',
+      summary: 'integration',
+    });
+    await connection.db.insert(agentTasks).values({
+      id: ids.task,
+      runId: ids.run,
+      planRevisionId: ids.revision,
+      objective: 'lease task',
+      criticality: 'required',
+      owner: 'researcher',
+      acceptanceCriteria: ['returns'],
+      outputSchema: { type: 'object' },
+      toolPolicy: { capabilities: [] },
+      budget: {},
+      status: 'pending',
+      maxAttempts: 3,
     });
   });
 
@@ -195,6 +229,89 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     ).toHaveLength(8);
   });
 
+  it('claims a task once, recovers an expired lease, and never reclaims a settled task', async () => {
+    const first = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId: ids.task,
+        workerId: 'task-worker-1',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 1_000,
+        now: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    );
+    expect(first?.attempt).toBe(1);
+    const duplicate = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId: ids.task,
+        workerId: 'task-worker-2',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 1_000,
+        now: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    );
+    expect(duplicate).toBeUndefined();
+    expect(
+      await renewAgentTaskLease(connection.db, {
+        leaseToken: first?.lease.leaseToken ?? '',
+        workerId: 'task-worker-1',
+        leaseMs: 1_000,
+        now: new Date('2026-01-01T00:00:00.500Z'),
+      }),
+    ).toBe(true);
+    expect(
+      await reclaimExpiredAgentTasks(connection.db, new Date('2026-01-01T00:00:02.000Z')),
+    ).toEqual([ids.task]);
+    const second = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId: ids.task,
+        workerId: 'task-worker-2',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 1_000,
+        now: new Date('2026-01-01T00:00:02.000Z'),
+      }),
+    );
+    expect(second?.attempt).toBe(2);
+    await releaseAgentTaskLease(connection.db, {
+      leaseToken: second?.lease.leaseToken ?? '',
+      workerId: 'task-worker-2',
+      now: new Date('2026-01-01T00:00:02.100Z'),
+    });
+    await connection.db.insert(taskResults).values({
+      id: randomUUID(),
+      taskId: ids.task,
+      attempt: 2,
+      status: 'succeeded',
+      artifacts: [],
+      evidence: [],
+      usage: {},
+      warnings: [],
+    });
+    await connection.db
+      .update(agentTasks)
+      .set({ status: 'interrupted' })
+      .where(eq(agentTasks.id, ids.task));
+    expect(
+      await connection.db.transaction((transaction) =>
+        claimAgentTask(transaction, {
+          taskId: ids.task,
+          workerId: 'task-worker-3',
+          leaseId: randomUUID(),
+          leaseToken: randomUUID(),
+          leaseMs: 1_000,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      await connection.db
+        .select()
+        .from(agentTaskLeases)
+        .where(eq(agentTaskLeases.taskId, ids.task)),
+    ).toHaveLength(2);
+  });
+
   it('persists confirmed memory and isolates retrieval by workspace and user', async () => {
     const first = await proposeMemoryCandidate(connection.db, {
       id: randomUUID(),
@@ -296,10 +413,7 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     expect(exported.some(({ id }) => id === replacement.id)).toBe(false);
     expect(JSON.stringify(exported)).not.toContain('sensitive-evidence');
     await expect(
-      connection.db
-        .select()
-        .from(memoryCandidates)
-        .where(eq(memoryCandidates.id, replacement.id)),
+      connection.db.select().from(memoryCandidates).where(eq(memoryCandidates.id, replacement.id)),
     ).resolves.toMatchObject([
       {
         status: 'deleted',
