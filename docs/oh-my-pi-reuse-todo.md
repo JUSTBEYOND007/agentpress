@@ -16,15 +16,15 @@
 
 ## 强制复用顺序
 
-- [ ] 每个实现项先检查 AgentPress 当前依赖和仓库实现，记录“已有 / 可扩展 / 缺失”。
-- [ ] 检查上游模块能否作为独立依赖直接使用；只有依赖 Oh My Pi 自有 Runtime、Bun/native、
+- [x] 每个实现项先检查 AgentPress 当前依赖和仓库实现，记录“已有 / 可扩展 / 缺失”。
+- [x] 检查上游模块能否作为独立依赖直接使用；只有依赖 Oh My Pi 自有 Runtime、Bun/native、
       本地文件或 Coding Agent 类型时，才进入复制适配。
-- [ ] 无法直接依赖时，先复制对应行为测试和 fixture，再复制最小实现；不得只仿照 API 或 Prompt。
-- [ ] 复制实现必须放在 AgentPress 自有 Port/Adapter 后，不能让 `@oh-my-pi/*` 类型跨入领域层。
-- [ ] 复制前固定上游 commit，保留版权和许可证头，并在 `THIRD_PARTY_NOTICES.md` 记录上游路径、
+- [x] 无法直接依赖时，先复制对应行为测试和 fixture，再复制最小实现；不得只仿照 API 或 Prompt。
+- [x] 复制实现必须放在 AgentPress 自有 Port/Adapter 后，不能让 `@oh-my-pi/*` 类型跨入领域层。
+- [x] 复制前固定上游 commit，保留版权和许可证头，并在 `THIRD_PARTY_NOTICES.md` 记录上游路径、
       本地路径、修改内容和验证结果。
 - [ ] 只有直接依赖和复制适配都不成立时才允许自研；自研前记录候选模块及逐项拒绝理由。
-- [ ] 每次只引入一个行为单元，完成契约测试、领域边界测试、相反语义回归和真实 Pi/目标模型验收后提交。
+- [x] 每次只引入一个行为单元，完成契约测试、领域边界测试、相反语义回归和真实 Pi/目标模型验收后提交。
 - [ ] 不直接依赖 `@oh-my-pi/pi-agent-core`、`@oh-my-pi/pi-ai`、`snapcompact` 或 `mnemopi`；后两者
       仍传递依赖 Oh My Pi Runtime/native/Bun。优先复制最小纯逻辑及其测试，或移植行为到现有依赖。
 
@@ -71,7 +71,7 @@ TODO：
 - [ ] 复制 tool protection 行为：未结算 Tool Call、审批、Evidence、Article Revision、EditProposal、
       Memory Candidate、Task Result 和成本事实不得被普通 Summary 消除或改写。
 - [x] 复制增量 Summary 行为：新 Summary 必须在旧 Summary 基础上更新，并记录继承来源。
-- [ ] 为 Conversation Branch 独立生成 branch summary，不污染兄弟分支（当前已完成 branch-scoped
+- [x] 为 Conversation Branch 独立生成 branch summary，不污染兄弟分支（当前已完成 branch-scoped
       存储与读取隔离，尚缺 fork 时的继承/重建策略）。
 - [ ] 将读取/修改过的文章、Evidence、Artifact、Skill 版本和 Tool Call 列表写入压缩 preserve data。
 - [ ] 压缩失败、超时、空输出或 Schema 失败时保留原始 timeline，并产生结构化可恢复错误。
@@ -144,9 +144,9 @@ TODO：
 
 - [ ] 审计 `PiRuntimeAdapter` 已有 streaming、tool call、abort、continue 和 replay 行为并建立差距表。
 - [ ] 复制 partial JSON Tool Call、无结果 Tool Call、重复 Tool Result 和并行 Tool Call 的协议测试。
-- [ ] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
+- [x] 实现确定性的 Tool Call Loop Guard，区分模型重试、协议失败和业务工具失败。
 - [ ] 为 Tool Choice Queue 建立持久化语义，避免 steering/follow-up 与强制工具选择互相覆盖。
-- [ ] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。
+- [x] 标记 replay-safe、idempotent、side-effecting 和 outcome-unknown 工具；恢复策略由标记决定。
 - [ ] Tool 输出超过预算时外置为 Artifact，只把受限摘要和引用放回模型上下文。
 - [ ] 复制 Provider 切换、aborted thinking、unexpected stop、empty stop 和工具后续轮的恢复测试。
 - [ ] 每个工具执行继续通过 AgentPress `ToolCallService`、权限、审批和 settlement，不让 Pi 状态直接结算业务。
@@ -219,7 +219,7 @@ TODO：
 TODO：
 
 - [ ] 先对照现有 `packages/mcp-runtime` 和已适配的 `pi-mcp-adapter`，形成缺口清单；已有行为不得重写。
-- [ ] 评估直接使用官方 MCP TypeScript SDK 的 Streamable HTTP transport；只有产品契约缺口才复制 Oh My Pi 行为。
+- [x] 评估直接使用官方 MCP TypeScript SDK 的 Streamable HTTP transport；只有产品契约缺口才复制 Oh My Pi 行为。
 - [ ] 补齐 POST JSON-RPC、JSON/SSE response、GET SSE listener 和 `Mcp-Session-Id` 契约测试。
 - [ ] 补齐 prompts、resources、resource templates、notifications 和 subscriptions 的受限内置服务器行为。
 - [ ] 复制超时、取消、断线、单次重试、重连去重和 reconnect-storm circuit breaker 测试。
@@ -257,14 +257,14 @@ TODO：
 
 - [ ] 先对照 `packages/agent-context/src/memory.ts`、`memory_candidates` 和 PostgreSQL 检索实现，记录缺口。
 - [ ] 短期 Memory 采用 Conversation Summary、最近消息、当前 Run facts 和 Task Results，不另建并行事实源。
-- [ ] 定义长期 Memory 类型：fact、preference、decision、commitment、goal、event、instruction、learning、
+- [x] 定义长期 Memory 类型：fact、preference、decision、commitment、goal、event、instruction、learning、
       error、artifact，并映射到现有 Memory Candidate 状态机。
-- [ ] 复制并适配 vector + FTS + temporal decay + importance 的混合召回与排序测试。
+- [x] 复制并适配 vector + FTS + temporal decay + importance 的混合召回与排序测试。
 - [ ] 评估 MMR、query intent、episodic graph、entity/triple 和 consolidation 的独立纯逻辑复用价值。
-- [ ] Memory extraction 只能生成用户可见 Candidate；接受后才可检索，Specialist 不能直接写长期 Memory。
+- [x] Memory extraction 只能生成用户可见 Candidate；接受后才可检索，Specialist 不能直接写长期 Memory。
 - [ ] 不复制关键词模式作为权威分类；用结构化模型输出加确定性 Schema 校验，并保留人工覆盖。
 - [ ] 增加 workspace/user 隔离、source Evidence、confidence、validity、supersedes、删除和导出契约。
-- [ ] Consolidation 不得覆盖原始候选或 provenance；新事实通过 supersedes 链替代旧事实。
+- [x] Consolidation 不得覆盖原始候选或 provenance；新事实通过 supersedes 链替代旧事实。
 - [ ] 建立相反语义测试：拒绝的记忆不召回、跨 workspace 不召回、过期事实不作为当前事实、指令不变权限。
 - [ ] 真实目标模型评估 accepted-memory precision、recall、污染率和跨租户泄漏为零。
 
@@ -278,9 +278,9 @@ Oh My Pi 的 Mnemopi 是 Agent Memory 引擎，不是完整的多租户 FAQ/知�
 TODO：
 
 - [ ] 对照现有 `packages/knowledge-retrieval` 的 PostgreSQL FTS、vector、embedding 和 rerank，禁止重复实现。
-- [ ] 评估复制 Mnemopi 的 MMR、polyphonic recall、query cache、query intent 和 temporal weighting 的纯逻辑测试。
+- [x] 评估复制 Mnemopi 的 MMR、polyphonic recall、query cache、query intent 和 temporal weighting 的纯逻辑测试。
 - [ ] 将可复用排序逻辑适配到现有 `KnowledgeDocument/KnowledgeChunk/Evidence` 契约。
-- [ ] FAQ 建立精确匹配、语义匹配和置信阈值；低置信结果必须回退知识库检索或标记未知。
+- [x] FAQ 建立精确匹配、语义匹配和置信阈值；低置信结果必须回退知识库检索或标记未知。
 - [ ] 保留 source、chunk、revision/hash、retrieval score、rerank score 和 citation mapping。
 - [ ] 文章当前 revision 继续直接读取，不允许异步 RAG 结果覆盖更新的文章事实。
 - [ ] 建立检索离线集：FAQ 命中、知识库召回、冲突来源、过期文档、无答案和跨 workspace 隔离。
@@ -308,12 +308,12 @@ TODO：
 TODO：
 
 - [ ] 先对照现有 `skill_revisions`、`run_skill_bindings` 和 `packages/agent-context/src/skill.ts`，形成缺口清单。
-- [ ] 复制 Agent Skills `SKILL.md` frontmatter、标准目录发现、嵌套目录和冲突优先级 fixture。
+- [x] 复制 Agent Skills `SKILL.md` frontmatter、标准目录发现、嵌套目录和冲突优先级 fixture。
 - [ ] 支持用户显式绑定和模型自主选择两条路径，并将 Run 使用的 Skill revision 固定到 Context Pack。
 - [ ] 支持 `disable-model-invocation`、隐藏项、描述清洗和静态相对资源。
 - [ ] 复制路径穿越、symlink、hardlink、文件类型、大小、重复 ID 和恶意 description 测试。
 - [ ] Skill 只能缩小工具 allowlist，不能扩张平台、workspace、Agent 或 Task 权限。
-- [ ] Skill instructions 和 resource 必须标记为不可信数据，不得覆盖 system policy、tool schema 或 approval。
+- [x] Skill instructions 和 resource 必须标记为不可信数据，不得覆盖 system policy、tool schema 或 approval。
 - [ ] 首版不复制 managed/autolearn Skill 自动写入；未来如采用，必须走 proposal、diff、审批、版本和回滚。
 - [ ] 不自动执行 Skill 脚本；若未来增加执行能力，必须通过已注册工具和独立沙箱授权。
 - [ ] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。
@@ -347,9 +347,9 @@ TODO：
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
 - [ ] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
 - [ ] 结果指标覆盖任务成功、Schema 有效率、引用正确性、文章质量、编辑最小性和无答案准确率。
-- [ ] 过程指标覆盖路由、委派、工具选择、参数、审批、重试、循环、恢复、重复副作用、token、成本和延迟。
+- [x] 过程指标覆盖路由、委派、工具选择、参数、审批、重试、循环、恢复、重复副作用、token、成本和延迟。
 - [ ] 复制 benchmark-native metric definition、统一 trace normalization 和 arm comparison 行为。
-- [ ] 增加独立 LLM Judge：固定 rubric、结构化输出、blind comparison、位置随机化和 judge 模型/版本记录。
+- [x] 增加独立 LLM Judge：固定 rubric、结构化输出、blind comparison、位置随机化和 judge 模型/版本记录。
 - [ ] 增加 Judge 校准集、人工金标、与确定性指标的冲突报告，以及多次 Judge 方差阈值。
 - [ ] Oh My Pi `trace-report` 仅用于生成叙事故障分析，不作为正式 Judge 分数；正式评分必须可复现和可审计。
 - [ ] Dashboard 至少展示结果/过程双层指标、Trace、失败分类、成本、模型差异和回归趋势。
