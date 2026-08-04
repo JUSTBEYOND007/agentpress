@@ -7,6 +7,7 @@ import { hashBlock } from '@agentpress/editor-patch';
 import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import {
   agentSessions,
+  agentSessionCompactions,
   agentTranscriptEntries,
   agentTasks,
   agentRuns,
@@ -52,6 +53,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   ActionProposalService,
+  AgentSessionCompactionService,
   ContextGovernanceService,
   DirectRunService,
   PersistentToolBridge,
@@ -180,6 +182,145 @@ describeWithDatabase('Direct Run application flow', () => {
     await expect(
       service.compactConversation(randomUUID(), ids.branch, ids.user),
     ).rejects.toMatchObject({ code: 'unauthorized_user' });
+  });
+
+  it('persists a Pi-generated mid-turn summary against transcript sequence boundaries', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const messageId = randomUUID();
+    const requestId = randomUUID();
+    const runId = randomUUID();
+    const sessionId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Session compaction',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    await connection.db.insert(conversationMessages).values({
+      id: messageId,
+      branchId,
+      role: 'user',
+      sequence: 1,
+      content: [{ type: 'text', text: 'Run a tool-heavy turn' }],
+      stable: true,
+    });
+    await connection.db.insert(rootRequests).values({
+      id: requestId,
+      branchId,
+      messageId,
+      requestedByUserId: ids.user,
+      idempotencyKey: `session-compaction:${requestId}`,
+    });
+    await connection.db.insert(agentRuns).values({
+      id: runId,
+      workspaceId: ids.workspace,
+      branchId,
+      rootRequestId: requestId,
+      mode: 'direct',
+      status: 'completed',
+    });
+    await connection.db.insert(agentSessions).values({
+      id: sessionId,
+      runId,
+      kind: 'main',
+      attempt: 1,
+      logicalKey: `${runId}:main:1`,
+      model: 'faux/test',
+      status: 'completed',
+    });
+    await connection.db.insert(agentTranscriptEntries).values([
+      {
+        id: randomUUID(),
+        sessionId,
+        sequence: 1,
+        role: 'application',
+        messageType: 'current_turn',
+        content: { request: 'Run a tool-heavy turn' },
+      },
+      {
+        id: randomUUID(),
+        sessionId,
+        sequence: 2,
+        role: 'assistant',
+        messageType: 'message',
+        content: { toolCallId: 'mid-call' },
+      },
+      {
+        id: randomUUID(),
+        sessionId,
+        sequence: 3,
+        role: 'tool',
+        messageType: 'tool_result',
+        content: { toolCallId: 'mid-call', result: 'large result' },
+      },
+    ]);
+    const compactions = new AgentSessionCompactionService({
+      database: connection.db,
+      runtimeFactory: {
+        create: () =>
+          PiRuntimeAdapter.forTests({
+            responses: [
+              fauxAssistantMessage(
+                [
+                  fauxToolCall('conversation_compaction_complete', {
+                    summary: 'The current request and completed tool result remain available.',
+                  }),
+                ],
+                { stopReason: 'toolUse' },
+              ),
+            ],
+          }),
+      },
+      createId: randomUUID,
+      now: () => new Date(),
+      keepRecentTokens: 100,
+    });
+
+    await expect(
+      compactions.compact({
+        runId: sessionId,
+        reason: 'mid_turn',
+        contextWindow: 1_000,
+        reserveTokens: 100,
+        messages: [
+          { index: 0, role: 'application', content: 'current request', tokenCount: 100 },
+          {
+            index: 1,
+            role: 'assistant',
+            content: 'tool call',
+            tokenCount: 80,
+            toolCallIds: ['mid-call'],
+          },
+          {
+            index: 2,
+            role: 'tool',
+            content: 'large result',
+            tokenCount: 60,
+            toolCallId: 'mid-call',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      firstKeptMessageIndex: 1,
+      summary: 'The current request and completed tool result remain available.',
+    });
+    const rows = await connection.db
+      .select()
+      .from(agentSessionCompactions)
+      .where(eq(agentSessionCompactions.sessionId, sessionId));
+    expect(rows[0]).toMatchObject({
+      sourceFromSequence: 1,
+      sourceThroughSequence: 1,
+      firstKeptSequence: 2,
+      status: 'completed',
+      preserveData: {
+        runId,
+        runIds: [runId],
+        sessionId,
+      },
+    });
   });
 
   it('deduplicates creation and restores stable history for the next turn', async () => {

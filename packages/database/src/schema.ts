@@ -814,6 +814,97 @@ export const agentTranscriptEntries = pgTable(
   ],
 );
 
+export const agentSessionCompactions = pgTable(
+  'agent_session_compactions',
+  {
+    id: uuid('id').primaryKey(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: 'cascade' }),
+    previousCompactionId: uuid('previous_compaction_id').references(
+      (): AnyPgColumn => agentSessionCompactions.id,
+      { onDelete: 'set null' },
+    ),
+    version: integer('version').notNull(),
+    status: varchar('status', { length: 24 }).notNull(),
+    reason: varchar('reason', { length: 24 }).notNull(),
+    sourceFromEntryId: uuid('source_from_entry_id')
+      .notNull()
+      .references(() => agentTranscriptEntries.id, { onDelete: 'restrict' }),
+    sourceFromSequence: bigint('source_from_sequence', { mode: 'number' }).notNull(),
+    sourceThroughEntryId: uuid('source_through_entry_id')
+      .notNull()
+      .references(() => agentTranscriptEntries.id, { onDelete: 'restrict' }),
+    sourceThroughSequence: bigint('source_through_sequence', { mode: 'number' }).notNull(),
+    firstKeptEntryId: uuid('first_kept_entry_id').references(() => agentTranscriptEntries.id, {
+      onDelete: 'restrict',
+    }),
+    firstKeptSequence: bigint('first_kept_sequence', { mode: 'number' }),
+    summary: text('summary'),
+    tokensBefore: integer('tokens_before').notNull(),
+    tokenCount: integer('token_count'),
+    preserveData: jsonb('preserve_data').$type<Readonly<Record<string, unknown>>>().notNull(),
+    model: varchar('model', { length: 240 }).notNull(),
+    promptVersion: varchar('prompt_version', { length: 160 }).notNull(),
+    reserveTokens: integer('reserve_tokens').notNull(),
+    reserveProvenance: varchar('reserve_provenance', { length: 24 }).notNull(),
+    failure: jsonb('failure').$type<{
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: boolean;
+      readonly details?: Readonly<Record<string, unknown>>;
+    }>(),
+    createdAt,
+  },
+  (table) => [
+    unique('agent_session_compactions_session_version_unique').on(table.sessionId, table.version),
+    index('agent_session_compactions_session_status_version_idx').on(
+      table.sessionId,
+      table.status,
+      table.version,
+    ),
+    check('agent_session_compactions_version_check', sql`${table.version} > 0`),
+    check(
+      'agent_session_compactions_status_check',
+      sql`${table.status} in ('completed', 'failed')`,
+    ),
+    check(
+      'agent_session_compactions_reason_check',
+      sql`${table.reason} in ('mid_turn', 'overflow')`,
+    ),
+    check(
+      'agent_session_compactions_source_range_check',
+      sql`${table.sourceFromSequence} > 0 and ${table.sourceThroughSequence} >= ${table.sourceFromSequence}`,
+    ),
+    check(
+      'agent_session_compactions_token_check',
+      sql`${table.tokensBefore} >= 0 and ${table.reserveTokens} >= 0 and (${table.tokenCount} is null or ${table.tokenCount} >= 0)`,
+    ),
+    check(
+      'agent_session_compactions_reserve_provenance_check',
+      sql`${table.reserveProvenance} in ('default', 'explicit', 'proportional')`,
+    ),
+    check(
+      'agent_session_compactions_result_check',
+      sql`(
+        ${table.status} = 'completed'
+        and length(trim(${table.summary})) > 0
+        and ${table.firstKeptEntryId} is not null
+        and ${table.firstKeptSequence} > ${table.sourceThroughSequence}
+        and ${table.tokenCount} is not null
+        and ${table.failure} is null
+      ) or (
+        ${table.status} = 'failed'
+        and ${table.summary} is null
+        and ${table.firstKeptEntryId} is null
+        and ${table.firstKeptSequence} is null
+        and ${table.tokenCount} is null
+        and ${table.failure} is not null
+      )`,
+    ),
+  ],
+);
+
 export const planRevisionTasks = pgTable(
   'plan_revision_tasks',
   {

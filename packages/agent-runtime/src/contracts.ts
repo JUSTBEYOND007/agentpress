@@ -63,7 +63,47 @@ export type RuntimeAssistantMessage = {
 };
 
 export type RuntimeMessage = RuntimeUserMessage | RuntimeAssistantMessage;
+
+export type RuntimeCompactionSummary = RuntimeUserMessage & {
+  readonly type: 'agentpress_compaction_summary';
+  readonly version: 1;
+  readonly summary: string;
+  readonly compactionId: string;
+  readonly tokensBefore: number;
+  readonly timestamp: number;
+};
+
 export type RuntimeTranscriptMessage = RuntimeMessage | RuntimeToolResultMessage;
+
+export type RuntimeContextCompactionMessage = {
+  readonly index: number;
+  readonly role: 'user' | 'assistant' | 'tool' | 'application' | 'summary';
+  readonly content: string;
+  readonly tokenCount: number;
+  readonly toolCallIds?: readonly string[];
+  readonly toolCallId?: string;
+};
+
+export type RuntimeContextCompactionRequest = {
+  readonly runId: string;
+  readonly reason: 'mid_turn' | 'overflow';
+  readonly contextWindow: number;
+  readonly reserveTokens: number;
+  readonly messages: readonly RuntimeContextCompactionMessage[];
+  readonly signal?: AbortSignal;
+};
+
+export type RuntimeContextCompactionResult =
+  | {
+      readonly status: 'completed';
+      readonly compactionId: string;
+      readonly summary: string;
+      readonly firstKeptMessageIndex: number;
+      readonly tokensBefore: number;
+      readonly tokenCount: number;
+    }
+  | { readonly status: 'not_needed' }
+  | { readonly status: 'failed'; readonly compactionId?: string; readonly message: string };
 
 export type RuntimeEvent =
   | { readonly type: 'run.started' }
@@ -116,6 +156,10 @@ export type RuntimeRequest = {
   readonly afterToolCall?: (
     context: RuntimeAfterToolCallContext,
   ) => Promise<RuntimeAfterToolCallResult | undefined> | RuntimeAfterToolCallResult | undefined;
+  /** Host-owned persistence-backed context maintenance invoked before provider calls. */
+  readonly compactContext?: (
+    request: RuntimeContextCompactionRequest,
+  ) => Promise<RuntimeContextCompactionResult>;
 };
 
 export type RuntimeBeforeToolCallContext = {

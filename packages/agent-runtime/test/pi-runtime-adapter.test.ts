@@ -120,6 +120,193 @@ describe('PiRuntimeAdapter', () => {
     await expect(execution).resolves.toMatchObject({ status: 'cancelled' });
   });
 
+  it('compacts oversized persisted history before the first provider request', async () => {
+    const calls: unknown[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: ['Recovered after preflight compaction.'],
+      contextWindow: 1_000,
+      maxOutputTokens: 100,
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'preflight-overflow',
+        systemPrompt: 'Continue safely.',
+        history: [
+          { role: 'user', content: 'a'.repeat(3_000), timestamp: 1 },
+          { role: 'user', content: 'b'.repeat(3_000), timestamp: 2 },
+          { role: 'user', content: 'recent', timestamp: 3 },
+        ],
+        currentTurn: currentTurn('continue'),
+        compactContext: (request) => {
+          calls.push(request);
+          return Promise.resolve({
+            status: 'completed',
+            compactionId: 'session-compaction-1',
+            summary: 'Earlier persisted history.',
+            firstKeptMessageIndex: 2,
+            tokensBefore: 900,
+            tokenCount: 8,
+          });
+        },
+      },
+      () => undefined,
+    );
+
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ reason: 'overflow', runId: 'preflight-overflow' });
+  });
+
+  it('compacts in place after a complete ToolCall turn and continues the same Pi execute', async () => {
+    const compactions: {
+      readonly reason: string;
+      readonly messages: readonly { readonly role: string; readonly toolCallId?: string }[];
+    }[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('lookup', { key: 'large' }, { id: 'mid-call' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxText('Finished after mid-turn compaction.')]),
+      ],
+      contextWindow: 10_000,
+      maxOutputTokens: 100,
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'mid-turn-compaction',
+        systemPrompt: 'Use the tool and continue.',
+        history: [
+          { role: 'user', content: 'a'.repeat(17_500), timestamp: 1 },
+          { role: 'user', content: 'b'.repeat(17_500), timestamp: 2 },
+        ],
+        currentTurn: currentTurn('lookup'),
+        tools: [
+          {
+            name: 'lookup',
+            label: 'Lookup',
+            description: 'Return a large result.',
+            parameters: Type.Object({ key: Type.String() }),
+            execute: () => Promise.resolve({ content: 'x'.repeat(8_000) }),
+          },
+        ],
+        compactContext: (request) => {
+          compactions.push(request);
+          return Promise.resolve({
+            status: 'completed',
+            compactionId: 'session-compaction-2',
+            summary: 'Current request and earlier completed work.',
+            firstKeptMessageIndex: 3,
+            tokensBefore: 1_400,
+            tokenCount: 12,
+          });
+        },
+      },
+      () => undefined,
+    );
+
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(result.messages.at(-1)).toMatchObject({
+      content: 'Finished after mid-turn compaction.',
+    });
+    expect(compactions).toHaveLength(1);
+    expect(compactions[0]?.reason).toBe('mid_turn');
+    expect(compactions[0]?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'assistant' }),
+        expect.objectContaining({ role: 'tool', toolCallId: 'mid-call' }),
+      ]),
+    );
+  });
+
+  it('keeps a provider overflow error durable while retrying once after persisted compaction', async () => {
+    const reasons: string[] = [];
+    const streamOptions: Readonly<Record<string, unknown>>[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([], {
+          stopReason: 'error',
+          errorMessage: 'context_length_exceeded: input is too long',
+        }),
+        fauxAssistantMessage([fauxText('Recovered from provider overflow.')]),
+      ],
+      contextWindow: 10_000,
+      maxOutputTokens: 100,
+      onStreamOptions: (options) => streamOptions.push(options),
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'provider-overflow',
+        systemPrompt: 'Recover once.',
+        history: [
+          { role: 'user', content: 'a'.repeat(5_000), timestamp: 1 },
+          { role: 'user', content: 'b'.repeat(5_000), timestamp: 2 },
+        ],
+        currentTurn: currentTurn('recover'),
+        toolChoice: 'none',
+        compactContext: (request) => {
+          reasons.push(request.reason);
+          return Promise.resolve({
+            status: 'completed',
+            compactionId: 'provider-overflow-compaction',
+            summary: 'Earlier context was compacted before retry.',
+            firstKeptMessageIndex: 1,
+            tokensBefore: 2_600,
+            tokenCount: 10,
+          });
+        },
+      },
+      () => undefined,
+    );
+
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(result.messages.at(-1)).toMatchObject({ content: 'Recovered from provider overflow.' });
+    expect(reasons).toEqual(['overflow']);
+    expect(streamOptions.map(({ toolChoice }) => toolChoice)).toEqual(['none', 'none']);
+  });
+
+  it('does not retry or hide the provider overflow when compaction fails', async () => {
+    let compactions = 0;
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([], {
+          stopReason: 'error',
+          errorMessage: 'prompt is too long: 12000 tokens > 10000 maximum',
+        }),
+        fauxAssistantMessage([fauxText('must not be consumed')]),
+      ],
+      contextWindow: 10_000,
+      maxOutputTokens: 100,
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'provider-overflow-failed-compaction',
+        systemPrompt: 'Fail closed.',
+        history: [
+          { role: 'user', content: 'a'.repeat(2_000), timestamp: 1 },
+          { role: 'user', content: 'b'.repeat(2_000), timestamp: 2 },
+        ],
+        currentTurn: currentTurn('recover'),
+        compactContext: () => {
+          compactions += 1;
+          return Promise.resolve({
+            status: 'failed',
+            compactionId: 'failed-compaction',
+            message: 'summary provider unavailable',
+          });
+        },
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error.code).toBe('provider_error');
+      expect(result.error.message).toContain('prompt is too long');
+    }
+    expect(compactions).toBe(1);
+  });
+
   it('bridges AgentPress RuntimeTool definitions into the official Pi tool loop', async () => {
     const calls: {
       readonly arguments_: Readonly<Record<string, unknown>>;

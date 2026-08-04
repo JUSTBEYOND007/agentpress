@@ -29,6 +29,17 @@ the fact source: manual and automatic compaction remain AgentPress commands that
 PostgreSQL `ConversationCompaction` facts, and context projection reads only the branch-matched
 effective successful version.
 
+Mid-turn and overflow decision: AgentPress reuses official Pi's
+`prepareNextTurnWithContext` hook so maintenance runs only after a complete ToolCall turn. The
+runtime adapter projects the active Pi context into an AgentPress-owned snapshot; the application
+maps that snapshot back to persisted `agent_transcript_entries` and appends an
+`agent_session_compactions` version before returning a typed summary message to Pi. A provider
+overflow is retained in the transcript, removed only from the active retry context, and retried at
+most once after a compaction that proves a smaller serialized context. Failed/no-op compaction keeps
+the original provider failure. Oh My Pi's remote compaction, JSONL SessionManager, snapcompact,
+mnemopi, Bun/native and handoff reset paths were rejected because they either introduce a second
+runtime/fact source or cannot preserve AgentPress PostgreSQL and ToolCall settlement boundaries.
+
 ## Reuse Matrix
 
 | Source and pin                                                                                                                                                      | License       | Decision                                                                                                                                     | Candidate upstream paths                                                                                                                                                                                                                                   | Planned AgentPress destination                                                                                                                                    | Required verification                                                                                                                                                                                                    |

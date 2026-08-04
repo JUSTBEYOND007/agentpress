@@ -1,5 +1,6 @@
 import {
   Agent,
+  shouldCompact,
   type AgentEvent,
   type AgentMessage,
   type AgentTool,
@@ -10,9 +11,9 @@ import {
   createModels,
   fauxAssistantMessage,
   fauxProvider,
+  isContextOverflow,
   type Api,
   type AssistantMessage,
-  type Message,
   type Model,
   type Models,
   type ToolResultMessage,
@@ -29,6 +30,8 @@ import type {
   AgentRuntime,
   RuntimeAssistantContentBlock,
   RuntimeAssistantMessage,
+  RuntimeContextCompactionMessage,
+  RuntimeContextCompactionResult,
   RuntimeEvent,
   RuntimeEventSink,
   RuntimeFailure,
@@ -41,7 +44,12 @@ import type {
   RuntimeUserMessage,
   RuntimeUsage,
 } from './contracts.js';
-import { convertAgentPressMessages } from './current-turn.js';
+import {
+  convertAgentPressMessages,
+  createRuntimeCompactionSummary,
+  isRuntimeCompactionSummary,
+  isRuntimeCurrentTurn,
+} from './current-turn.js';
 import { adaptProviderSchema, providerFromId } from './schema-compatibility.js';
 import { ToolLoopGuard } from './tool-loop-guard.js';
 
@@ -65,12 +73,18 @@ class ExecutionState {
   public isCancelled(): boolean {
     return this.cancelled;
   }
+
+  public clearFailure(): void {
+    delete this.failure;
+  }
 }
 
 export type FauxRuntimeConfig = {
   readonly responses: readonly (string | AssistantMessage)[];
   readonly tokensPerSecond?: number;
   readonly onStreamOptions?: (options: Readonly<Record<string, unknown>>) => void;
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
 };
 
 export class PiRuntimeAdapter implements AgentRuntime {
@@ -115,7 +129,18 @@ export class PiRuntimeAdapter implements AgentRuntime {
     const models = createModels();
     models.setProvider(faux.provider);
 
-    return new PiRuntimeAdapter({ models, model: faux.getModel() }, config.onStreamOptions);
+    const fauxModel = faux.getModel();
+    return new PiRuntimeAdapter(
+      {
+        models,
+        model: {
+          ...fauxModel,
+          contextWindow: config.contextWindow ?? fauxModel.contextWindow,
+          maxTokens: config.maxOutputTokens ?? fauxModel.maxTokens,
+        },
+      },
+      config.onStreamOptions,
+    );
   }
 
   public async execute(
@@ -129,18 +154,49 @@ export class PiRuntimeAdapter implements AgentRuntime {
       return { status: 'failed', messages: [], error: historyFailure };
     }
     const budget = this.identity.contextWindow - this.identity.maxOutputTokens;
-    const estimatedInput = estimateRequestTokens(request);
-    if (estimatedInput > budget) {
+    const compactContext = async (
+      input: Parameters<NonNullable<RuntimeRequest['compactContext']>>[0],
+    ): Promise<RuntimeContextCompactionResult> => {
+      try {
+        return request.compactContext
+          ? await request.compactContext(input)
+          : { status: 'not_needed' };
+      } catch (error) {
+        return {
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Runtime context compaction failed',
+        };
+      }
+    };
+    let initialHistory = [...request.history];
+    const estimatedInput = estimateRequestTokens({ ...request, history: initialHistory });
+    if (estimatedInput > budget && request.compactContext) {
+      const compacted = await compactContext({
+        runId: request.runId,
+        reason: 'overflow',
+        contextWindow: this.identity.contextWindow,
+        reserveTokens: this.identity.maxOutputTokens,
+        messages: initialHistory.map(toCompactionSnapshot),
+        ...(signal ? { signal } : {}),
+      });
+      if (compacted.status === 'completed') {
+        initialHistory = applyCompactionResult(initialHistory, compacted);
+      }
+    }
+    const effectiveRequest = { ...request, history: initialHistory };
+    const effectiveEstimatedInput = estimateRequestTokens(effectiveRequest);
+    if (effectiveEstimatedInput > budget) {
       const error: RuntimeFailure = {
         code: 'invalid_history',
-        message: `Model input budget exceeded (${String(estimatedInput)} > ${String(budget)} tokens)`,
+        message: `Model input budget exceeded (${String(effectiveEstimatedInput)} > ${String(budget)} tokens)`,
         retryable: false,
       };
       await sink({ type: 'run.failed', error });
       return { status: 'failed', messages: [], error };
     }
-    const stableMessages: RuntimeMessage[] = request.history.filter(
-      (message): message is RuntimeMessage => message.role !== 'tool',
+    const stableMessages: RuntimeMessage[] = initialHistory.filter(
+      (message): message is RuntimeMessage =>
+        'role' in message && (message.role === 'user' || message.role === 'assistant'),
     );
     const terminatingTools = new Set(
       request.tools?.filter(({ terminateOnSuccess }) => terminateOnSuccess).map(({ name }) => name),
@@ -153,6 +209,9 @@ export class PiRuntimeAdapter implements AgentRuntime {
     let domainToolCalls = 0;
     let blockedToolCalls = 0;
     let failedCompletionCalls = 0;
+    let providerToolCallsObserved = 0;
+    let overflowMessage: AssistantMessage | undefined;
+    let overflowRecoveryAttempts = 0;
     const state = new ExecutionState(signal?.aborted ?? false);
     let toolChoiceServed = false;
     const streamFn = (
@@ -173,7 +232,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
       initialState: {
         systemPrompt: request.systemPrompt,
         model: this.backend.model,
-        messages: request.history.map(toPiMessage),
+        messages: initialHistory.map(toPiMessage),
         tools:
           request.tools?.map((tool) =>
             toPiTool(tool, request.runId, providerFromId(this.backend.model.provider)),
@@ -255,6 +314,35 @@ export class PiRuntimeAdapter implements AgentRuntime {
             },
           }
         : {}),
+      ...(request.compactContext
+        ? {
+            prepareNextTurnWithContext: async ({ context, toolResults }) => {
+              if (toolResults.length === 0) return undefined;
+              const estimated = estimateAgentMessagesTokens(context.messages);
+              if (
+                !shouldCompact(estimated, this.identity.contextWindow, {
+                  enabled: true,
+                  reserveTokens: this.identity.maxOutputTokens,
+                  keepRecentTokens: 1,
+                })
+              ) {
+                return undefined;
+              }
+              const compacted = await compactContext({
+                runId: request.runId,
+                reason: 'mid_turn',
+                contextWindow: this.identity.contextWindow,
+                reserveTokens: this.identity.maxOutputTokens,
+                messages: context.messages.map(toCompactionSnapshot),
+                ...(signal ? { signal } : {}),
+              });
+              if (compacted.status !== 'completed') return undefined;
+              const replacement = applyCompactionResult(context.messages, compacted);
+              if (estimateAgentMessagesTokens(replacement) >= estimated) return undefined;
+              return { context: { ...context, messages: replacement } };
+            },
+          }
+        : {}),
     });
     this.activeAgent = agent;
     const abort = (): void => {
@@ -264,12 +352,20 @@ export class PiRuntimeAdapter implements AgentRuntime {
     signal?.addEventListener('abort', abort, { once: true });
 
     const unsubscribe = agent.subscribe(async (event) => {
+      if (event.type === 'tool_execution_start') providerToolCallsObserved += 1;
+      if (
+        event.type === 'message_end' &&
+        isPiAssistantMessage(event.message) &&
+        isContextOverflow(event.message, this.identity.contextWindow)
+      ) {
+        overflowMessage = event.message;
+      }
       const normalized = normalizeEvent(event);
       for (const runtimeEvent of normalized) {
         if (runtimeEvent.type === 'message.completed') {
           if (runtimeEvent.message.role === 'assistant') {
             stableMessages.push(runtimeEvent.message);
-            if (runtimeEvent.message.stopReason === 'error' && !state.failure) {
+            if (runtimeEvent.message.stopReason === 'error' && !state.failure && !overflowMessage) {
               state.failure = {
                 code: 'provider_error',
                 message: runtimeEvent.message.errorMessage ?? 'Provider returned an error',
@@ -309,6 +405,50 @@ export class PiRuntimeAdapter implements AgentRuntime {
         await agent.continue();
       } else {
         await agent.prompt(request.currentTurn);
+      }
+
+      if (overflowMessage && request.compactContext && overflowRecoveryAttempts === 0) {
+        overflowRecoveryAttempts += 1;
+        const failedMessage = overflowMessage;
+        const activeMessages = agent.state.messages.filter((message) => message !== failedMessage);
+        const estimated = estimateAgentMessagesTokens(activeMessages);
+        const compacted = await compactContext({
+          runId: request.runId,
+          reason: 'overflow',
+          contextWindow: this.identity.contextWindow,
+          reserveTokens: this.identity.maxOutputTokens,
+          messages: activeMessages.map(toCompactionSnapshot),
+          ...(signal ? { signal } : {}),
+        });
+        if (compacted.status === 'completed') {
+          const replacement = applyCompactionResult(activeMessages, compacted);
+          if (estimateAgentMessagesTokens(replacement) < estimated) {
+            agent.state.messages = replacement;
+            const failedRuntime = toRuntimeMessage(failedMessage);
+            if (failedRuntime?.role === 'assistant') {
+              const failedIndex = stableMessages.findLastIndex(
+                (message) =>
+                  message.role === 'assistant' &&
+                  message.timestamp === failedRuntime.timestamp &&
+                  message.provider === failedRuntime.provider &&
+                  message.model === failedRuntime.model,
+              );
+              if (failedIndex >= 0) stableMessages.splice(failedIndex, 1);
+            }
+            overflowMessage = undefined;
+            state.clearFailure();
+            if (providerToolCallsObserved === 0) toolChoiceServed = false;
+            await agent.continue();
+          }
+        }
+      }
+
+      if (overflowMessage && !state.failure) {
+        state.failure = {
+          code: 'provider_error',
+          message: overflowMessage.errorMessage ?? 'Provider context window overflow',
+          retryable: true,
+        };
       }
 
       if (state.failure) {
@@ -366,6 +506,7 @@ export function validateRuntimeHistory(
   const pending = new Map<string, string>();
   const seenResults = new Set<string>();
   for (const [index, message] of history.entries()) {
+    if (isRuntimeCompactionSummary(message)) continue;
     if (message.role === 'assistant') {
       for (const block of message.blocks ?? []) {
         if (block.type !== 'tool_call') continue;
@@ -424,6 +565,97 @@ function estimateRequestTokens(request: RuntimeRequest): number {
     })),
   });
   return Math.ceil(Buffer.byteLength(serialized, 'utf8') / 4);
+}
+
+function estimateAgentMessagesTokens(messages: readonly AgentMessage[]): number {
+  return estimateSerializedTokens(messages);
+}
+
+function estimateSerializedTokens(value: unknown): number {
+  return Math.max(1, Math.ceil(Buffer.byteLength(JSON.stringify(value), 'utf8') / 4));
+}
+
+function toCompactionSnapshot(
+  message: RuntimeTranscriptMessage | AgentMessage,
+  index: number,
+): RuntimeContextCompactionMessage {
+  if (isRuntimeCompactionSummary(message)) {
+    return {
+      index,
+      role: 'summary',
+      content: message.summary,
+      tokenCount: estimateSerializedTokens(message),
+    };
+  }
+  if (isRuntimeCurrentTurn(message)) {
+    return {
+      index,
+      role: 'application',
+      content: JSON.stringify(message),
+      tokenCount: estimateSerializedTokens(message),
+    };
+  }
+  if ('role' in message && message.role === 'user') {
+    const content =
+      typeof message.content === 'string' ? message.content : contentText(message.content);
+    return { index, role: 'user', content, tokenCount: estimateSerializedTokens(message) };
+  }
+  if ('role' in message && message.role === 'assistant') {
+    const runtimeBlocks = 'blocks' in message ? message.blocks : undefined;
+    const toolCallIds = runtimeBlocks
+      ? runtimeBlocks.flatMap((part) => (part.type === 'tool_call' ? [part.id] : []))
+      : Array.isArray(message.content)
+        ? message.content.flatMap((part) => (part.type === 'toolCall' ? [part.id] : []))
+        : [];
+    const content =
+      typeof message.content === 'string' ? message.content : contentText(message.content);
+    return {
+      index,
+      role: 'assistant',
+      content,
+      tokenCount: estimateSerializedTokens(message),
+      ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
+    };
+  }
+  if ('role' in message && (message.role === 'tool' || message.role === 'toolResult')) {
+    const content =
+      typeof message.content === 'string' ? message.content : contentText(message.content);
+    return {
+      index,
+      role: 'tool',
+      content,
+      tokenCount: estimateSerializedTokens(message),
+      toolCallId: message.toolCallId,
+    };
+  }
+  return {
+    index,
+    role: 'application',
+    content: JSON.stringify(message),
+    tokenCount: estimateSerializedTokens(message),
+  };
+}
+
+function applyCompactionResult(
+  messages: readonly RuntimeTranscriptMessage[],
+  result: Extract<RuntimeContextCompactionResult, { readonly status: 'completed' }>,
+): RuntimeTranscriptMessage[];
+function applyCompactionResult(
+  messages: readonly AgentMessage[],
+  result: Extract<RuntimeContextCompactionResult, { readonly status: 'completed' }>,
+): AgentMessage[];
+function applyCompactionResult(
+  messages: readonly (RuntimeTranscriptMessage | AgentMessage)[],
+  result: Extract<RuntimeContextCompactionResult, { readonly status: 'completed' }>,
+): (RuntimeTranscriptMessage | AgentMessage)[] {
+  if (
+    !Number.isSafeInteger(result.firstKeptMessageIndex) ||
+    result.firstKeptMessageIndex < 1 ||
+    result.firstKeptMessageIndex >= messages.length
+  ) {
+    return [...messages];
+  }
+  return [createRuntimeCompactionSummary(result), ...messages.slice(result.firstKeptMessageIndex)];
 }
 
 function toPiTool(
@@ -560,6 +792,10 @@ function isSupportedMessage(message: AgentMessage): message is UserMessage | Ass
   );
 }
 
+function isPiAssistantMessage(message: AgentMessage): message is AssistantMessage {
+  return typeof message === 'object' && 'role' in message && message.role === 'assistant';
+}
+
 function normalizeRole(message: UserMessage | AssistantMessage): RuntimeMessage['role'] {
   return message.role === 'assistant' ? 'assistant' : 'user';
 }
@@ -649,7 +885,8 @@ function normalizeStopReason(
   return stopReason === 'toolUse' ? 'tool_use' : stopReason;
 }
 
-function toPiMessage(message: RuntimeTranscriptMessage): Message {
+function toPiMessage(message: RuntimeTranscriptMessage): AgentMessage {
+  if (isRuntimeCompactionSummary(message)) return message;
   if (message.role === 'user') {
     return message;
   }

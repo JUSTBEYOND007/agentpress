@@ -17,6 +17,7 @@ import {
 import { eq, max, sql } from 'drizzle-orm';
 
 import { withHistoricalIntentBoundary } from './agent-transcript-projector.js';
+import { AgentSessionCompactionService } from './agent-session-compaction-service.js';
 import type { AgentRuntimeFactory } from './contracts.js';
 
 type AgentSessionRunnerOptions = {
@@ -33,9 +34,11 @@ export class AgentSessionRunner {
     ReturnType<AgentRuntimeFactory['create']>
   >();
   private readonly toolChoices: ToolChoiceQueueStore;
+  private readonly compactions: AgentSessionCompactionService;
 
   public constructor(private readonly options: AgentSessionRunnerOptions) {
     this.toolChoices = new ToolChoiceQueueStore(options.database, options.createId, options.now);
+    this.compactions = new AgentSessionCompactionService(options);
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
@@ -116,11 +119,12 @@ export class AgentSessionRunner {
     const governedSystemPrompt = withHistoricalIntentBoundary(systemPrompt, history.length > 0);
     await record('system', 'system_prompt', { content: governedSystemPrompt });
     for (const message of history) {
+      const role = 'role' in message ? message.role : 'application';
       await record(
-        message.role,
+        role,
         'history',
         { message },
-        message.role === 'tool' ? message.toolCallId : undefined,
+        role === 'tool' && 'toolCallId' in message ? message.toolCallId : undefined,
       );
     }
     await record('application', 'current_turn', { currentTurn });
@@ -141,6 +145,11 @@ export class AgentSessionRunner {
           continuation,
           ...(claimedToolChoice ? { toolChoice: claimedToolChoice.choice } : {}),
           ...(kind === 'specialist' ? { maxToolCalls: 12, maxFailedCompletionCalls: 2 } : {}),
+          compactContext: async (request) => {
+            const compaction = await this.compactions.compact(request);
+            await record('application', 'context_compaction', { compaction });
+            return compaction;
+          },
         },
         async (event) => {
           if (event.type === 'message.completed') {

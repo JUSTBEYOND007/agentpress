@@ -11,6 +11,7 @@ import {
 import {
   planConversationCompaction,
   resolveCompactionBudget,
+  resolveCompactionKeepTokens,
   shouldCompactConversation,
 } from '@agentpress/agent-context';
 import { and, asc, eq } from 'drizzle-orm';
@@ -122,7 +123,11 @@ export class ConversationCompactionService {
         tokenCount: estimateTokens(message.content),
       })),
       sourceFromSequence,
-      keepRecentTokens: this.options.keepRecentTokens ?? 20_000,
+      keepRecentTokens: resolveCompactionKeepTokens(
+        this.options.contextWindow ?? 128_000,
+        budget,
+        this.options.keepRecentTokens ?? 20_000,
+      ),
     });
     if (!plan) return { status: 'not_needed', reason: 'no_complete_turn' };
     const preserveData = await this.persistence.collectPreserveData(

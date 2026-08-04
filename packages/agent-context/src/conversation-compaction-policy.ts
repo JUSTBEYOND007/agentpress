@@ -21,6 +21,22 @@ export type ConversationCompactionPlan = {
   readonly keptTokens: number;
 };
 
+export type RuntimeCompactionPolicyMessage = {
+  readonly index: number;
+  readonly role: 'user' | 'assistant' | 'tool' | 'application' | 'summary';
+  readonly tokenCount: number;
+  readonly toolCallIds?: readonly string[];
+  readonly toolCallId?: string;
+};
+
+export type RuntimeCompactionPlan = {
+  readonly sourceFromIndex: number;
+  readonly sourceThroughIndex: number;
+  readonly firstKeptMessageIndex: number;
+  readonly tokensBefore: number;
+  readonly keptTokens: number;
+};
+
 export function resolveCompactionBudget(
   contextWindow: number,
   explicitReserveTokens?: number,
@@ -62,6 +78,18 @@ export function shouldCompactConversation(
     reserveTokens: budget.reserveTokens,
     keepRecentTokens: 1,
   });
+}
+
+export function resolveCompactionKeepTokens(
+  contextWindow: number,
+  budget: CompactionBudget,
+  requestedKeepTokens = 20_000,
+): number {
+  if (!Number.isSafeInteger(requestedKeepTokens) || requestedKeepTokens < 1) {
+    throw new Error('Compaction keep budget must be a positive integer');
+  }
+  const usableTokens = Math.max(1, contextWindow - budget.reserveTokens);
+  return Math.max(1, Math.min(requestedKeepTokens, Math.floor(usableTokens / 2)));
 }
 
 export function planConversationCompaction(input: {
@@ -115,4 +143,78 @@ export function planConversationCompaction(input: {
     tokensBefore: messages.reduce((total, message) => total + message.tokenCount, 0),
     keptTokens,
   };
+}
+
+export function planRuntimeCompaction(input: {
+  readonly messages: readonly RuntimeCompactionPolicyMessage[];
+  readonly keepRecentTokens: number;
+}): RuntimeCompactionPlan | undefined {
+  if (!Number.isSafeInteger(input.keepRecentTokens) || input.keepRecentTokens < 1) {
+    throw new Error('Runtime compaction keep budget must be a positive integer');
+  }
+  validateRuntimeCompactionMessages(input.messages);
+  if (input.messages.length < 3) return undefined;
+
+  let keptTokens = 0;
+  for (let position = input.messages.length - 1; position > 0; position -= 1) {
+    const message = input.messages[position];
+    if (!message) continue;
+    keptTokens += message.tokenCount;
+    if (keptTokens < input.keepRecentTokens || !isRuntimeKeepBoundary(message)) continue;
+    const previous = input.messages[position - 1];
+    if (!previous) continue;
+    return {
+      sourceFromIndex: input.messages[0]?.index ?? 0,
+      sourceThroughIndex: previous.index,
+      firstKeptMessageIndex: message.index,
+      tokensBefore: input.messages.reduce((total, item) => total + item.tokenCount, 0),
+      keptTokens,
+    };
+  }
+  return undefined;
+}
+
+function validateRuntimeCompactionMessages(
+  messages: readonly RuntimeCompactionPolicyMessage[],
+): void {
+  const pending = new Set<string>();
+  const settled = new Set<string>();
+  for (const [position, message] of messages.entries()) {
+    const previous = messages[position - 1];
+    if (
+      !Number.isSafeInteger(message.index) ||
+      message.index < 0 ||
+      (previous && message.index <= previous.index) ||
+      !Number.isSafeInteger(message.tokenCount) ||
+      message.tokenCount < 0
+    ) {
+      throw new Error('Runtime compaction messages must be ordered with valid token counts');
+    }
+    if (message.role === 'assistant') {
+      for (const id of message.toolCallIds ?? []) {
+        if (!id || pending.has(id) || settled.has(id)) {
+          throw new Error('Runtime compaction ToolCalls must have unique non-empty ids');
+        }
+        pending.add(id);
+      }
+    }
+    if (message.role === 'tool') {
+      if (!message.toolCallId || !pending.delete(message.toolCallId)) {
+        throw new Error('Runtime compaction ToolResult must match a preceding ToolCall');
+      }
+      settled.add(message.toolCallId);
+    }
+  }
+  if (pending.size > 0) {
+    throw new Error('Runtime compaction cannot summarize an unresolved ToolCall');
+  }
+}
+
+function isRuntimeKeepBoundary(message: RuntimeCompactionPolicyMessage): boolean {
+  return (
+    message.role === 'user' ||
+    message.role === 'application' ||
+    message.role === 'summary' ||
+    (message.role === 'assistant' && (message.toolCallIds?.length ?? 0) > 0)
+  );
 }

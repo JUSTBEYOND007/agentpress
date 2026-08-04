@@ -6,7 +6,10 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  appendAgentSessionCompaction,
   appendConversationCompaction,
+  agentSessions,
+  agentTranscriptEntries,
   agentRuns,
   actionProposals,
   appUsers,
@@ -24,6 +27,7 @@ import {
   editProposalBatches,
   editProposals,
   getEffectiveConversationCompaction,
+  getEffectiveAgentSessionCompaction,
   memoryCandidates,
   modelSelections,
   mentionBindings,
@@ -62,6 +66,7 @@ describeWithDatabase('Conversation compaction persistence', () => {
     editProposal: randomUUID(),
     editProposalBatch: randomUUID(),
     actionProposal: randomUUID(),
+    session: randomUUID(),
   };
 
   beforeAll(async () => {
@@ -127,6 +132,30 @@ describeWithDatabase('Conversation compaction persistence', () => {
       mode: 'direct',
       status: 'completed',
     });
+    await connection.db.insert(agentSessions).values({
+      id: ids.session,
+      runId: ids.run,
+      kind: 'main',
+      attempt: 1,
+      logicalKey: `${ids.run}:main:1`,
+      model: 'provider/model',
+      status: 'completed',
+    });
+    await connection.db.insert(agentTranscriptEntries).values(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: randomUUID(),
+        sessionId: ids.session,
+        sequence: index + 1,
+        role:
+          index === 0
+            ? ('application' as const)
+            : index % 2 === 0
+              ? ('tool' as const)
+              : ('assistant' as const),
+        messageType: index === 0 ? 'current_turn' : index % 2 === 0 ? 'tool_result' : 'message',
+        content: { value: `session-${String(index + 1)}` },
+      })),
+    );
     await connection.db.insert(toolCalls).values({
       id: ids.tool,
       runId: ids.run,
@@ -367,6 +396,78 @@ describeWithDatabase('Conversation compaction persistence', () => {
       skillRevisionIds: [ids.skillRevision],
       modelSelectionIds: [ids.modelSelection],
       costRunIds: [ids.run],
+    });
+  });
+
+  it('appends Agent Session compaction lineage without rewriting transcript', async () => {
+    const first = await appendAgentSessionCompaction(connection.db, {
+      id: randomUUID(),
+      sessionId: ids.session,
+      reason: 'mid_turn',
+      sourceFromSequence: 1,
+      sourceThroughSequence: 2,
+      firstKeptSequence: 3,
+      summary: 'The current request and first tool turn were preserved.',
+      tokensBefore: 1_200,
+      tokenCount: 20,
+      preserveData: { runId: ids.run },
+      model: 'provider/model',
+      promptVersion: 'agentpress.session-compaction@1',
+      reserveTokens: 200,
+      reserveProvenance: 'explicit',
+    });
+    const second = await appendAgentSessionCompaction(connection.db, {
+      id: randomUUID(),
+      sessionId: ids.session,
+      reason: 'overflow',
+      sourceFromSequence: 3,
+      sourceThroughSequence: 4,
+      firstKeptSequence: 5,
+      summary: 'The request and completed tool turns remain recoverable.',
+      tokensBefore: 1_500,
+      tokenCount: 24,
+      preserveData: { runId: ids.run },
+      model: 'provider/model',
+      promptVersion: 'agentpress.session-compaction@1',
+      reserveTokens: 200,
+      reserveProvenance: 'explicit',
+    });
+
+    expect(second).toMatchObject({
+      version: 2,
+      previousCompactionId: first.id,
+      status: 'completed',
+    });
+    expect(await getEffectiveAgentSessionCompaction(connection.db, ids.session)).toMatchObject({
+      id: second.id,
+    });
+    const transcript = await connection.db
+      .select({ sequence: agentTranscriptEntries.sequence })
+      .from(agentTranscriptEntries)
+      .where(eq(agentTranscriptEntries.sessionId, ids.session));
+    expect(transcript).toHaveLength(6);
+  });
+
+  it('records Session compaction failure without replacing the effective summary', async () => {
+    const before = await getEffectiveAgentSessionCompaction(connection.db, ids.session);
+    const failed = await appendAgentSessionCompaction(connection.db, {
+      id: randomUUID(),
+      sessionId: ids.session,
+      reason: 'overflow',
+      sourceFromSequence: 5,
+      sourceThroughSequence: 5,
+      tokensBefore: 1_900,
+      preserveData: { runId: ids.run },
+      model: 'provider/model',
+      promptVersion: 'agentpress.session-compaction@1',
+      reserveTokens: 200,
+      reserveProvenance: 'explicit',
+      failure: { code: 'provider_failure', message: 'summary provider failed', retryable: true },
+    });
+
+    expect(failed).toMatchObject({ status: 'failed', version: 3 });
+    expect(await getEffectiveAgentSessionCompaction(connection.db, ids.session)).toMatchObject({
+      id: before?.id,
     });
   });
 });
