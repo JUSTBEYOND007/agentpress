@@ -310,9 +310,9 @@ TODO：
 - [ ] 先对照现有 `skill_revisions`、`run_skill_bindings` 和 `packages/agent-context/src/skill.ts`，形成缺口清单。
 - [x] 复制 Agent Skills `SKILL.md` frontmatter、标准目录发现、嵌套目录和冲突优先级 fixture。
 - [ ] 支持用户显式绑定和模型自主选择两条路径，并将 Run 使用的 Skill revision 固定到 Context Pack。
-- [ ] 支持 `disable-model-invocation`、隐藏项、描述清洗和静态相对资源。
-- [ ] 复制路径穿越、symlink、hardlink、文件类型、大小、重复 ID 和恶意 description 测试。
-- [ ] Skill 只能缩小工具 allowlist，不能扩张平台、workspace、Agent 或 Task 权限。
+- [x] 支持 `disable-model-invocation`、隐藏项、描述清洗和静态相对资源。
+- [x] 复制路径穿越、symlink、hardlink、文件类型、大小、重复 ID 和恶意 description 测试。
+- [x] Skill 只能缩小工具 allowlist，不能扩张平台、workspace、Agent 或 Task 权限。
 - [x] Skill instructions 和 resource 必须标记为不可信数据，不得覆盖 system policy、tool schema 或 approval。
 - [ ] 首版不复制 managed/autolearn Skill 自动写入；未来如采用，必须走 proposal、diff、审批、版本和回滚。
 - [ ] 不自动执行 Skill 脚本；若未来增加执行能力，必须通过已注册工具和独立沙箱授权。
