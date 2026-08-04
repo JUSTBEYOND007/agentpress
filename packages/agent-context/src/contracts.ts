@@ -49,6 +49,21 @@ export type MemoryCandidate = {
   readonly status: 'pending' | 'accepted' | 'rejected' | 'superseded';
   readonly confidence: number;
   readonly supersedesId?: string;
+  readonly kind?:
+    | 'fact'
+    | 'preference'
+    | 'decision'
+    | 'commitment'
+    | 'goal'
+    | 'event'
+    | 'instruction'
+    | 'learning'
+    | 'error'
+    | 'artifact';
+  readonly importance?: number;
+  readonly validFrom?: string;
+  readonly validUntil?: string;
+  readonly sourceEvidenceIds?: readonly string[];
 };
 export type MentionTarget = {
   readonly id: string;

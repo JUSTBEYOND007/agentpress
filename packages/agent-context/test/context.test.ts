@@ -13,6 +13,8 @@ import {
   replayTrace,
   resolveMention,
   retrieveAcceptedMemory,
+  retrieveRelevantMemory,
+  consolidateMemory,
   runReviewGate,
 } from '../src/index.js';
 
@@ -130,6 +132,58 @@ describe('Agent context governance', () => {
       ),
     ).toBe(accepted);
     expect(retrieveAcceptedMemory('w2', [accepted])).toEqual([]);
+  });
+
+  it('recalls only valid accepted memory and consolidates by superseding without mutation', () => {
+    const accepted = decideMemory(
+      proposeMemory(
+        {
+          id: 'm-accepted',
+          workspaceId: 'w1',
+          subject: 'writing style',
+          value: 'Prefer concise paragraphs',
+          confidence: 0.9,
+          kind: 'preference',
+          validUntil: '2025-01-01T00:00:00Z',
+        },
+        [],
+      ),
+      'accepted',
+    );
+    const current = decideMemory(
+      proposeMemory(
+        {
+          id: 'm-current',
+          workspaceId: 'w1',
+          subject: 'writing style',
+          value: 'Prefer evidence-backed paragraphs',
+          confidence: 0.95,
+          kind: 'preference',
+          importance: 0.9,
+          validFrom: '2026-01-01T00:00:00Z',
+        },
+        [accepted],
+      ),
+      'accepted',
+    );
+    expect(
+      retrieveRelevantMemory('w1', 'evidence paragraphs', [accepted, current], {
+        now: new Date('2026-02-01T00:00:00Z'),
+      }),
+    ).toEqual([current]);
+    const replacement = consolidateMemory(
+      {
+        id: 'm-replacement',
+        workspaceId: 'w1',
+        subject: 'writing style',
+        value: 'Prefer short evidence-backed paragraphs',
+        confidence: 0.99,
+        kind: 'preference',
+      },
+      [current],
+    );
+    expect(replacement.supersedesId).toBe(current.id);
+    expect(current.status).toBe('accepted');
   });
 
   it('loads and pins declarative Skills while only narrowing permissions', () => {
