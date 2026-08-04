@@ -134,6 +134,12 @@ approval facts. Contract and prompt-injection fixtures are in
 `packages/agent-context/test/context.test.ts`; real-model selection accuracy and disabled-skill
 call-rate remain external evaluation gates.
 
+The target-model Skill gate is exposed as `packages/agent-evals/src/skill-selection-online-cli.ts`
+(`pnpm eval:skill`). It reuses the host-owned `PiSkillPreselector`, pins the five-case dataset
+version, records exact-match and forbidden-selection metrics, and never treats a model-selected
+identity as a permission grant. The command is intentionally separate from `eval:pr`; it requires
+explicit online-model execution and a cost budget before its result can satisfy the real-model gate.
+
 ### MetaHarness behavior adopted without copying its store
 
 At `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`, MetaHarness declares benchmark-owned metric

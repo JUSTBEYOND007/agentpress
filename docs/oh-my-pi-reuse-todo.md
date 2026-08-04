@@ -426,7 +426,9 @@ TODO：
 - [x] 首版不复制 managed/autolearn Skill 自动写入；当前只有显式的 PostgreSQL Skill revision/proposal 边界，未来如采用仍必须走 proposal、diff、审批、版本和回滚。
 - [x] 不自动执行 Skill 脚本；Skill 只加载 Markdown 与声明的静态 regular-file resource，不执行脚本或隐式授予工具。
 - [ ] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。
-      已完成离线 conformance/prompt-injection 契约集：`validateSkillConformance`、损坏/冲突发现告警、Skill/resource `trust="untrusted"` 断言；真实模型选择准确率和禁用项调用率仍待在线评估。
+      已完成离线 conformance/prompt-injection 契约集：`validateSkillConformance`、损坏/冲突发现告警、Skill/resource `trust="untrusted"` 断言；
+      新增 `pnpm eval:skill`，固定五案测试 exact selection、显式绑定去重、隐藏/禁用项和恶意 description，报告模型、数据集版本、逐案选择、
+      exactMatchRate、forbiddenSelections 和 gatesPassed。真实模型选择准确率和禁用项调用率仍待用目标模型运行该入口后验收。
 
 首选本地落点：`packages/agent-context/`、`packages/database/`、`packages/agent-evals/`。
 

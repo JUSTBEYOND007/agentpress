@@ -27,6 +27,7 @@
     "build": "tsc -p tsconfig.build.json",
     "eval:online": "tsx src/online-cli.ts",
     "eval:compaction": "tsx src/compaction-online-cli.ts",
+    "eval:skill": "tsx src/skill-selection-online-cli.ts",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
