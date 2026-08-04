@@ -43,6 +43,7 @@ import type {
 } from './contracts.js';
 import { convertAgentPressMessages } from './current-turn.js';
 import { adaptProviderSchema, providerFromId } from './schema-compatibility.js';
+import { ToolLoopGuard } from './tool-loop-guard.js';
 
 type PiBackend = {
   readonly models: Models;
@@ -136,9 +137,14 @@ export class PiRuntimeAdapter implements AgentRuntime {
       request.tools?.filter(({ terminateOnSuccess }) => terminateOnSuccess).map(({ name }) => name),
     );
     const blockedByToolLimit = new Map<string, boolean>();
+    const blockedByLoopGuard = new Map<string, boolean>();
+    const toolLoopGuard = new ToolLoopGuard(
+      request.toolLoopGuard?.maxConsecutiveIdenticalCalls ?? 3,
+    );
     let domainToolCalls = 0;
     let blockedToolCalls = 0;
     let failedCompletionCalls = 0;
+    const state = new ExecutionState(signal?.aborted ?? false);
     const agent = new Agent({
       initialState: {
         systemPrompt: request.systemPrompt,
@@ -154,7 +160,9 @@ export class PiRuntimeAdapter implements AgentRuntime {
       convertToLlm: convertAgentPressMessages,
       sessionId: request.runId,
       maxRetryDelayMs: 10_000,
-      ...(request.beforeToolCall || request.maxToolCalls !== undefined
+      ...(request.beforeToolCall ||
+      request.maxToolCalls !== undefined ||
+      request.toolLoopGuard !== undefined
         ? {
             beforeToolCall: async ({ toolCall, args }) => {
               const policy = await request.beforeToolCall?.({
@@ -164,6 +172,20 @@ export class PiRuntimeAdapter implements AgentRuntime {
               });
               if (policy?.block) return policy;
               if (terminatingTools.has(toolCall.name)) return policy;
+              const loopDecision = toolLoopGuard.observe(
+                toolCall.name,
+                args as Readonly<Record<string, unknown>>,
+              );
+              if (!loopDecision.allow) {
+                blockedByLoopGuard.set(toolCall.id, true);
+                state.failure = {
+                  code: 'protocol_error',
+                  message: loopDecision.reason,
+                  retryable: true,
+                };
+                agent.abort();
+                return { block: true, reason: loopDecision.reason };
+              }
               if (request.maxToolCalls !== undefined && domainToolCalls >= request.maxToolCalls) {
                 blockedToolCalls += 1;
                 blockedByToolLimit.set(toolCall.id, blockedToolCalls > 1);
@@ -189,7 +211,9 @@ export class PiRuntimeAdapter implements AgentRuntime {
               });
               const terminateForLimit = blockedByToolLimit.get(toolCall.id);
               blockedByToolLimit.delete(toolCall.id);
-              const terminate = terminateForLimit ? true : update?.terminate;
+              const terminateForLoop = blockedByLoopGuard.get(toolCall.id);
+              blockedByLoopGuard.delete(toolCall.id);
+              const terminate = terminateForLimit || terminateForLoop ? true : update?.terminate;
               return update || terminate
                 ? {
                     ...(update?.content === undefined
@@ -209,7 +233,6 @@ export class PiRuntimeAdapter implements AgentRuntime {
         : {}),
     });
     this.activeAgent = agent;
-    const state = new ExecutionState(signal?.aborted ?? false);
     const abort = (): void => {
       state.cancel();
       agent.abort();
@@ -222,7 +245,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
         if (runtimeEvent.type === 'message.completed') {
           if (runtimeEvent.message.role === 'assistant') {
             stableMessages.push(runtimeEvent.message);
-            if (runtimeEvent.message.stopReason === 'error') {
+            if (runtimeEvent.message.stopReason === 'error' && !state.failure) {
               state.failure = {
                 code: 'provider_error',
                 message: runtimeEvent.message.errorMessage ?? 'Provider returned an error',

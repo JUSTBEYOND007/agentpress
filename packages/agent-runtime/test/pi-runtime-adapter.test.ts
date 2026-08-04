@@ -434,4 +434,44 @@ describe('PiRuntimeAdapter', () => {
     expect(result.status).toBe('failed');
     expect(executions).toBe(0);
   });
+
+  it('fails closed after repeated identical side-effecting tool calls', async () => {
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('publish', { articleId: 'a-1' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('publish', { articleId: 'a-1' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('publish', { articleId: 'a-1' })], {
+          stopReason: 'toolUse',
+        }),
+      ],
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'run-loop-guard',
+        systemPrompt: 'Use publish only when authorized.',
+        history: [],
+        currentTurn: currentTurn('发布文章'),
+        toolLoopGuard: { maxConsecutiveIdenticalCalls: 2 },
+        tools: [
+          {
+            name: 'publish',
+            label: 'Publish',
+            description: 'Publish an approved article',
+            parameters: Type.Object({ articleId: Type.String() }),
+            execute: () => Promise.resolve({ accepted: true }),
+          },
+        ],
+      },
+      () => undefined,
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'protocol_error' },
+    });
+  });
 });

@@ -98,6 +98,10 @@ export type RuntimeRequest = {
   readonly continuation?: boolean;
   readonly maxToolCalls?: number;
   readonly maxFailedCompletionCalls?: number;
+  readonly toolLoopGuard?: {
+    /** Defaults to three consecutive identical calls. */
+    readonly maxConsecutiveIdenticalCalls?: number;
+  };
   readonly beforeToolCall?: (
     context: RuntimeBeforeToolCallContext,
   ) => Promise<RuntimeBeforeToolCallResult | undefined> | RuntimeBeforeToolCallResult | undefined;
