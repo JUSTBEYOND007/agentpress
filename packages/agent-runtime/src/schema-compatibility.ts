@@ -52,7 +52,29 @@ export function adaptProviderSchema(
   const strict = options.strict ?? false;
   const root = cloneJson(schema) as TSchema;
   const defs = isRecord(root) && isRecord(root.$defs) ? root.$defs : undefined;
-  const normalized = normalizeNode(root, '$', defs, degradations, provider, strict) as TSchema;
+  const preserveDefinitions = defs !== undefined && hasRecursiveDefinitions(defs);
+  const normalized = normalizeNode(
+    root,
+    '$',
+    defs,
+    degradations,
+    provider,
+    strict,
+    new Set(),
+    preserveDefinitions,
+  ) as TSchema;
+  if (preserveDefinitions && isRecord(normalized)) {
+    normalized.$defs = normalizeNode(
+      defs,
+      '$/$defs',
+      defs,
+      degradations,
+      provider,
+      strict,
+      new Set(),
+      preserveDefinitions,
+    );
+  }
   return { schema: normalized, provider, strict, degradations };
 }
 
@@ -87,10 +109,21 @@ function normalizeNode(
   degradations: SchemaDegradation[],
   provider: SchemaProvider,
   strict: boolean,
+  refStack: ReadonlySet<string>,
+  preserveDefinitions: boolean,
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((item, index) =>
-      normalizeNode(item, `${path}/${String(index)}`, defs, degradations, provider, strict),
+      normalizeNode(
+        item,
+        `${path}/${String(index)}`,
+        defs,
+        degradations,
+        provider,
+        strict,
+        refStack,
+        preserveDefinitions,
+      ),
     );
   }
   if (!isRecord(value)) return value;
@@ -98,15 +131,26 @@ function normalizeNode(
   if (typeof value.$ref === 'string' && value.$ref.startsWith('#/$defs/') && defs) {
     const key = value.$ref.slice('#/$defs/'.length);
     const target = defs[key];
-    if (target !== undefined) {
+    if (target !== undefined && !refStack.has(key)) {
       degradations.push({ code: 'dereferenced', path, detail: value.$ref });
-      return normalizeNode(target, path, defs, degradations, provider, strict);
+      const nextRefs = new Set(refStack);
+      nextRefs.add(key);
+      return normalizeNode(
+        target,
+        path,
+        defs,
+        degradations,
+        provider,
+        strict,
+        nextRefs,
+        preserveDefinitions,
+      );
     }
   }
 
   const output: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    if (key === '$schema' || key === '$id' || key === '$defs') {
+    if (key === '$schema' || key === '$id' || (key === '$defs' && !preserveDefinitions)) {
       degradations.push({ code: 'removed_metadata', path, detail: key });
       continue;
     }
@@ -114,7 +158,16 @@ function normalizeNode(
       degradations.push({ code: 'removed_unsupported_keyword', path, detail: key });
       continue;
     }
-    output[key] = normalizeNode(child, `${path}/${escapePointer(key)}`, defs, degradations, provider, strict);
+    output[key] = normalizeNode(
+      child,
+      `${path}/${escapePointer(key)}`,
+      defs,
+      degradations,
+      provider,
+      strict,
+      refStack,
+      preserveDefinitions,
+    );
   }
 
   if (Array.isArray(output.type) && output.type.includes('null')) {
@@ -138,6 +191,17 @@ function cloneJson(value: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasRecursiveDefinitions(defs: Readonly<Record<string, unknown>>): boolean {
+  return Object.entries(defs).some(([key, value]) => containsDefinitionRef(value, key));
+}
+
+function containsDefinitionRef(value: unknown, key: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => containsDefinitionRef(item, key));
+  if (!isRecord(value)) return false;
+  if (value.$ref === `#/$defs/${key}`) return true;
+  return Object.values(value).some((child) => containsDefinitionRef(child, key));
 }
 
 function escapePointer(value: string): string {

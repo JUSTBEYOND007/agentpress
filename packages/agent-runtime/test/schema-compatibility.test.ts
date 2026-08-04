@@ -33,6 +33,47 @@ describe('provider schema compatibility', () => {
     expect(schema.properties.limit).toHaveProperty('default', 8);
   });
 
+  it('preserves recursive definitions instead of infinitely dereferencing them', () => {
+    const schema = {
+      $ref: '#/$defs/Node',
+      $defs: {
+        Node: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            value: { type: 'string' },
+            next: { anyOf: [{ $ref: '#/$defs/Node' }, { type: 'null' }] },
+          },
+          required: ['value'],
+        },
+      },
+    } as TSchema;
+
+    const result = adaptProviderSchema(schema, { provider: 'anthropic', strict: true });
+    const wire = result.schema as TSchema & {
+      readonly $defs?: { readonly Node?: { readonly properties?: { readonly next?: unknown } } };
+    };
+    expect(wire).toHaveProperty('$defs.Node');
+    expect(wire.$defs?.Node?.properties?.next).toBeDefined();
+    expect(JSON.stringify(wire)).toContain('#/$defs/Node');
+  });
+
+  it('uses one deterministic wire adaptation path for supported providers', () => {
+    const schema = Type.Object(
+      {
+        query: Type.String({ minLength: 1 }),
+        limit: Type.Optional(Type.Integer({ minimum: 1, default: 8 })),
+      },
+      { additionalProperties: false },
+    );
+    for (const provider of ['openai', 'anthropic', 'google', 'ollama', 'mcp'] as const) {
+      const result = adaptProviderSchema(schema, { provider, strict: true });
+      expect(result.provider).toBe(provider);
+      expect(result.schema).toHaveProperty('properties.query');
+      expect(result.schema).not.toBe(schema);
+    }
+  });
+
   it('returns structured failures in strict mode and never coerces values', () => {
     const schema = Type.Object({ count: Type.Integer() }, { additionalProperties: false });
     const result = validateSchemaResult(schema, { count: '3' }, 'strict');
