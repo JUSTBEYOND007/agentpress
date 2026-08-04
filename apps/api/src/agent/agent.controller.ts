@@ -128,6 +128,16 @@ export class AgentController {
     }
   }
 
+  @Post('conversations/:conversationId/branches/:branchId/compact')
+  @HttpCode(202)
+  public compactConversation(
+    @Param('conversationId') conversationId: string,
+    @Param('branchId') branchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.runs.compactConversation(conversationId, branchId, user.id);
+  }
+
   @Post('conversations/:conversationId/runs')
   @HttpCode(202)
   public async createRun(

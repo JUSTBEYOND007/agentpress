@@ -1,3 +1,5 @@
+import { shouldCompact as shouldPiCompact } from '@earendil-works/pi-agent-core';
+
 export const DEFAULT_COMPACTION_RESERVE_TOKENS = 16_384;
 
 export type CompactionBudget = {
@@ -55,7 +57,11 @@ export function shouldCompactConversation(
   if (!Number.isFinite(contextTokens) || contextTokens < 0) {
     throw new Error('Compaction context tokens must be non-negative');
   }
-  return contextTokens > Math.max(0, contextWindow - budget.reserveTokens);
+  return shouldPiCompact(contextTokens, contextWindow, {
+    enabled: true,
+    reserveTokens: budget.reserveTokens,
+    keepRecentTokens: 1,
+  });
 }
 
 export function planConversationCompaction(input: {

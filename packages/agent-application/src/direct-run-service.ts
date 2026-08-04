@@ -928,6 +928,7 @@ export class DirectRunService {
   }
 
   public async compactConversation(
+    conversationId: string,
     branchId: string,
     userId: string,
     signal?: AbortSignal,
@@ -943,7 +944,7 @@ export class DirectRunService {
           eq(workspaceMembers.userId, userId),
         ),
       )
-      .where(eq(conversationBranches.id, branchId))
+      .where(and(eq(conversationBranches.id, branchId), eq(conversations.id, conversationId)))
       .limit(1);
     if (!membership[0]) {
       throw new AgentApplicationError(

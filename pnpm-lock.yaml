@@ -469,6 +469,9 @@ importers:
 
   packages/agent-context:
     dependencies:
+      '@earendil-works/pi-agent-core':
+        specifier: 'catalog:'
+        version: 0.82.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.1)(zod@4.4.3)
       yaml:
         specifier: 'catalog:'
         version: 2.8.2

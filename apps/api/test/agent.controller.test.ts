@@ -85,6 +85,22 @@ describe('AgentController SSE replay', () => {
     expect(calls).toEqual([['conversation-1', 'branch-1', 'message-1', 'user-1']]);
   });
 
+  it('delegates manual compaction with the exact conversation branch and caller identity', async () => {
+    const calls: unknown[] = [];
+    const runs = {
+      compactConversation(...arguments_: unknown[]) {
+        calls.push(arguments_);
+        return Promise.resolve({ status: 'completed', compactionId: 'compaction-1', version: 2 });
+      },
+    } as unknown as DirectRunService;
+    const controller = new AgentController(runs, {} as RedisRunEventBus);
+
+    await expect(
+      controller.compactConversation('conversation-1', 'branch-1', user),
+    ).resolves.toMatchObject({ status: 'completed', version: 2 });
+    expect(calls).toEqual([['conversation-1', 'branch-1', 'user-1']]);
+  });
+
   it('buffers live events until durable replay is emitted in sequence order', async () => {
     const replay = [durableEvent(1), durableEvent(2)];
     const live = durableEvent(3);

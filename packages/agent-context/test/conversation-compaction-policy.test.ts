@@ -28,6 +28,13 @@ describe('conversation compaction policy', () => {
     expect(shouldCompactConversation(8_001, 10_000, budget)).toBe(true);
   });
 
+  it('matches the pinned official Pi threshold contract on a proportional reserve', () => {
+    const budget = resolveCompactionBudget(19_000);
+    expect(budget).toEqual({ reserveTokens: 2_850, provenance: 'proportional' });
+    expect(shouldCompactConversation(16_150, 19_000, budget)).toBe(false);
+    expect(shouldCompactConversation(16_151, 19_000, budget)).toBe(true);
+  });
+
   it('keeps complete recent turns and continues from the previous keep boundary', () => {
     const messages = [
       { sequence: 1, role: 'user' as const, tokenCount: 50 },

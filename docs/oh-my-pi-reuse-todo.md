@@ -68,6 +68,9 @@ TODO：
 - [x] 将压缩记录作为 append-only 事实保存，不覆盖旧消息；上下文投影使用“有效 Summary + 最近原始消息”。
 - [ ] 复制并适配 Oh My Pi 的 `CompactionEntry`、branch summary、keep boundary 行为测试。
 - [ ] 实现 token budget 驱动的自动压缩、手动压缩和 mid-turn 压缩，保留明确的 reserve provenance。
+      当前 automatic settlement 与手动 `POST /agent/conversations/:conversationId/branches/:branchId/compact`
+      已落地，阈值直接复用官方 Pi `shouldCompact`；manual 命令同时校验 conversation/branch/workspace
+      边界。mid-turn 与 context-window overflow 恢复完成前保持未勾选。
 - [x] 复制 tool protection 行为：未结算 Tool Call、审批、Evidence、Article Revision、EditProposal、
       Memory Candidate、Task Result 和成本事实不得被普通 Summary 消除或改写。
 - [x] 复制增量 Summary 行为：新 Summary 必须在旧 Summary 基础上更新，并记录继承来源。

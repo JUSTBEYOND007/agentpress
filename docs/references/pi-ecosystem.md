@@ -16,7 +16,18 @@ Schema boundary decision: AgentPress keeps TypeBox as the single domain-contract
 `packages/agent-runtime/src/schema-compatibility.ts` adapter creates a provider wire copy, records
 dereference/normalization/degradation events, and validates decoded results without coercion. Zod
 remains limited to the official MCP SDK adapter in `packages/mcp-runtime`; it is not exposed through
-AgentPress contracts. 8. Security-sensitive code such as URL validation, MCP lifecycle management, and edit application requires local review even when copied unchanged.
+AgentPress contracts.
+
+8. Security-sensitive code such as URL validation, MCP lifecycle management, and edit application requires local review even when copied unchanged.
+
+Compaction boundary decision: `packages/agent-context` directly imports the pure `shouldCompact`
+threshold from official `@earendil-works/pi-agent-core@0.82.1` (upstream commit
+`b4f293684bba718d59cc1157679bcf6157b3a7f5`,
+`packages/agent/src/harness/compaction/compaction.ts`) and checks it against the pinned upstream
+threshold behavior. AgentPress does not adopt Pi's file-backed SessionManager or CompactionEntry as
+the fact source: manual and automatic compaction remain AgentPress commands that append versioned
+PostgreSQL `ConversationCompaction` facts, and context projection reads only the branch-matched
+effective successful version.
 
 ## Reuse Matrix
 

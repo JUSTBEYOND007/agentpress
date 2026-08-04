@@ -21,6 +21,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "catalog:",
     "yaml": "catalog:"
   }
 }

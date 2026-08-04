@@ -176,6 +176,12 @@ describeWithDatabase('Direct Run application flow', () => {
     await connection.close();
   });
 
+  it('rejects manual compaction when the branch does not belong to the requested conversation', async () => {
+    await expect(
+      service.compactConversation(randomUUID(), ids.branch, ids.user),
+    ).rejects.toMatchObject({ code: 'unauthorized_user' });
+  });
+
   it('deduplicates creation and restores stable history for the next turn', async () => {
     const firstInput = {
       conversationId: ids.conversation,
