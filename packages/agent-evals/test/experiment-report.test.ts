@@ -96,6 +96,7 @@ describe('evaluation experiment reporting', () => {
       successRate: 0.5,
       traceCount: 1,
     });
+    expect(report.tracePolicy).toBe('diagnostic_only');
     expect(report.arms[0]?.resultMetrics).toMatchObject({
       succeeded: 0.5,
       schemaValid: 0.5,
@@ -150,6 +151,22 @@ describe('evaluation experiment reporting', () => {
       delta: 0,
       outcome: 'unchanged',
     });
+  });
+
+  it('does not let diagnostic traces change formal result or process scores', () => {
+    const input = {
+      experiment: experiment(),
+      arms: [arm()],
+      trials: [trial()],
+    };
+    const withoutTrace = buildEvalExperimentReport({ ...input, traces: [] });
+    const withTrace = buildEvalExperimentReport({
+      ...input,
+      traces: [{ trialId: 'trial-1', traceHash: 'sha256:diagnostic' }],
+    });
+    expect(withTrace.arms[0]?.resultMetrics).toEqual(withoutTrace.arms[0]?.resultMetrics);
+    expect(withTrace.arms[0]?.processMetrics).toEqual(withoutTrace.arms[0]?.processMetrics);
+    expect(withTrace.arms[0]?.trials[0]?.traceAvailable).toBe(true);
   });
 
   it('uses complete benchmark-owned metric definitions or falls back atomically', () => {

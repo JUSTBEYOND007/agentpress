@@ -135,6 +135,7 @@ export type EvalExperimentReport = {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly completedAt: Date | null;
+  readonly tracePolicy: 'diagnostic_only';
   readonly metricDefinitions: readonly EvalMetricDefinition[];
   readonly arms: readonly EvalArmSummary[];
   readonly comparisons: readonly EvalArmComparison[];
@@ -212,6 +213,7 @@ export function buildEvalExperimentReport(input: {
     createdAt: input.experiment.createdAt,
     updatedAt: input.experiment.updatedAt,
     completedAt: input.experiment.completedAt,
+    tracePolicy: 'diagnostic_only',
     metricDefinitions: definitions,
     arms: summaries,
     comparisons: baseline
