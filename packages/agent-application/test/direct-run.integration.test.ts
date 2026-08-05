@@ -1971,16 +1971,26 @@ describeWithDatabase('Direct Run application flow', () => {
       providerToolCallId,
     });
 
+    const taskOperationKey = `pi-task:${hashToolArguments({
+      taskId,
+      toolId: 'article.apply_proposal',
+      toolVersion: '1.0.0',
+      arguments: { proposalId },
+      ordinal: 1,
+    })}`;
     const proposal = await toolService.propose({
       runId: run.runId,
       taskId,
+      taskAttempt: 1,
+      taskOperationKey,
+      taskOperationOrdinal: 1,
       providerToolCallId,
       toolId: 'article.apply_proposal',
       toolVersion: '1.0.0',
       arguments: { proposalId },
       requestedFromUserId: ids.user,
       allowedCapabilities: new Set(['article.propose']),
-      idempotencyKey: `pi:${hashToolArguments({ runId: run.runId, providerToolCallId })}`,
+      idempotencyKey: taskOperationKey,
     });
     expect(proposal.status).toBe('awaiting_approval');
     await toolService.decideApproval({

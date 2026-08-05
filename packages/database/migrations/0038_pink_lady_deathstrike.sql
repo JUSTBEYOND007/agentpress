@@ -1,0 +1,7 @@
+ALTER TABLE "tool_calls" ADD COLUMN "task_attempt" integer;--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD COLUMN "task_operation_key" varchar(200);--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD COLUMN "task_operation_ordinal" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX "tool_calls_task_operation_unique" ON "tool_calls" USING btree ("task_operation_key") WHERE "tool_calls"."task_operation_key" is not null;--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD CONSTRAINT "tool_calls_task_attempt_check" CHECK ("tool_calls"."task_attempt" is null or "tool_calls"."task_attempt" > 0);--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD CONSTRAINT "tool_calls_task_operation_ordinal_check" CHECK ("tool_calls"."task_operation_ordinal" is null or "tool_calls"."task_operation_ordinal" > 0);--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD CONSTRAINT "tool_calls_task_operation_shape_check" CHECK (("tool_calls"."task_operation_key" is null and "tool_calls"."task_operation_ordinal" is null) or ("tool_calls"."task_id" is not null and "tool_calls"."task_attempt" is not null and "tool_calls"."task_operation_key" is not null and "tool_calls"."task_operation_ordinal" is not null and "tool_calls"."idempotency_key" = "tool_calls"."task_operation_key"));

@@ -1087,7 +1087,12 @@ export class PlannedRunExecutor {
       },
     };
     const domainTools = this.options.runtimeToolFactory
-      ? await this.options.runtimeToolFactory.createForRun(runId, task.capabilities, task.id)
+      ? await this.options.runtimeToolFactory.createForRun(
+          runId,
+          task.capabilities,
+          task.id,
+          attempt,
+        )
       : [];
     const upstream = task.dependencyIds.flatMap((id) => {
       const dependency = settled.get(id);

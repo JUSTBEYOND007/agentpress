@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   agentRuns,
+  agentTasks,
   appendCheckpoint,
   appendRunEvent,
   approvals,
@@ -30,6 +31,8 @@ export class ToolCallApplicationError extends Error {
       | 'approval_mismatch'
       | 'approval_denied'
       | 'invalid_tool_state'
+      | 'stale_task_attempt'
+      | 'tool_replay_blocked'
       | 'unauthorized_tool',
     message: string,
   ) {
@@ -41,6 +44,9 @@ export class ToolCallApplicationError extends Error {
 export type ProposeToolCallInput = {
   readonly runId: string;
   readonly taskId?: string;
+  readonly taskAttempt?: number;
+  readonly taskOperationKey?: string;
+  readonly taskOperationOrdinal?: number;
   readonly providerToolCallId?: string;
   readonly toolId: string;
   readonly toolVersion: string;
@@ -78,10 +84,29 @@ export class ToolCallService {
 
   public async propose(input: ProposeToolCallInput): Promise<{
     readonly toolCallId: string;
-    readonly status: 'proposed' | 'awaiting_approval';
+    readonly status: 'proposed' | 'awaiting_approval' | 'blocked';
+    readonly blockedStatus?:
+      | 'denied'
+      | 'expired'
+      | 'executing'
+      | 'failed'
+      | 'outcome_unknown'
+      | 'cancelled';
     readonly approvalId?: string;
     readonly argumentsHash: string;
   }> {
+    const hasTaskOperation = input.taskOperationKey !== undefined;
+    if (
+      (input.taskId === undefined) !== (input.taskAttempt === undefined) ||
+      (hasTaskOperation &&
+        (!input.taskId ||
+          !input.taskAttempt ||
+          !input.taskOperationOrdinal ||
+          input.idempotencyKey !== input.taskOperationKey)) ||
+      (!hasTaskOperation && input.taskOperationOrdinal !== undefined)
+    ) {
+      throw new TypeError('Specialist Tool Call recovery identity is incomplete');
+    }
     const definition = this.options.registry.get(input.toolId, input.toolVersion);
     this.options.registry.validateInput(definition, input.arguments);
     if (!definition.capabilities.every((capability) => input.allowedCapabilities.has(capability))) {
@@ -97,6 +122,39 @@ export class ToolCallService {
     const now = this.now();
     const status = requiresApproval ? ('awaiting_approval' as const) : ('proposed' as const);
     const persisted = await this.options.database.transaction(async (transaction) => {
+      const runRows = await transaction
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, input.runId))
+        .limit(1);
+      if (!runRows[0]) {
+        throw new ToolCallApplicationError('run_not_found', `Agent Run ${input.runId} not found`);
+      }
+      if (input.taskId) {
+        await transaction.execute(
+          sql`select id from ${agentTasks} where id = ${input.taskId} for update`,
+        );
+        const taskRows = await transaction
+          .select({
+            runId: agentTasks.runId,
+            attempt: agentTasks.attempt,
+            status: agentTasks.status,
+          })
+          .from(agentTasks)
+          .where(eq(agentTasks.id, input.taskId))
+          .limit(1);
+        const task = taskRows[0];
+        if (
+          task?.runId !== input.runId ||
+          (input.taskAttempt !== undefined &&
+            (task.attempt !== input.taskAttempt || task.status !== 'running'))
+        ) {
+          throw new ToolCallApplicationError(
+            'stale_task_attempt',
+            `Specialist Task ${input.taskId} attempt no longer owns execution`,
+          );
+        }
+      }
       if (input.idempotencyKey) {
         await transaction.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`,
@@ -108,42 +166,122 @@ export class ToolCallService {
           .limit(1);
         const existing = existingRows[0];
         if (existing) {
+          const sameTaskOperation =
+            input.taskOperationKey !== undefined &&
+            existing.taskOperationKey === input.taskOperationKey &&
+            existing.taskId === (input.taskId ?? null) &&
+            existing.taskOperationOrdinal === (input.taskOperationOrdinal ?? null);
           if (
             existing.runId !== input.runId ||
             existing.toolId !== definition.toolId ||
             existing.toolVersion !== definition.version ||
             existing.argumentsHash !== argumentsHash ||
-            existing.providerToolCallId !== (input.providerToolCallId ?? null)
+            (!sameTaskOperation &&
+              existing.providerToolCallId !== (input.providerToolCallId ?? null))
           ) {
             throw new ToolCallApplicationError(
               'approval_mismatch',
               'Idempotency key is already bound to a different Tool Call',
             );
           }
+          let existingStatus = existing.status;
+          let event;
+          if (
+            sameTaskOperation &&
+            existingStatus === 'executing' &&
+            input.taskAttempt !== undefined &&
+            existing.taskAttempt !== null &&
+            existing.taskAttempt < input.taskAttempt &&
+            existing.risk !== 'read_only'
+          ) {
+            const recovered = await transaction
+              .update(toolCalls)
+              .set({
+                status: 'outcome_unknown',
+                failure: {
+                  message: 'A newer Specialist attempt fenced an unfinished side effect',
+                  previousTaskAttempt: existing.taskAttempt,
+                  recoveryTaskAttempt: input.taskAttempt,
+                },
+                settledAt: now,
+                updatedAt: now,
+                version: sql`${toolCalls.version} + 1`,
+              })
+              .where(and(eq(toolCalls.id, existing.id), eq(toolCalls.status, 'executing')))
+              .returning({ id: toolCalls.id });
+            if (recovered.length === 1) {
+              existingStatus = 'outcome_unknown';
+              await appendCheckpoint(transaction, {
+                id: this.createId(),
+                runId: input.runId,
+                reason: 'tool_settled',
+                state: {
+                  toolCallId: existing.id,
+                  status: existingStatus,
+                  reason: 'specialist_attempt_recovery',
+                  previousTaskAttempt: existing.taskAttempt,
+                  recoveryTaskAttempt: input.taskAttempt,
+                },
+              });
+              event = toDurableEvent(
+                await appendRunEvent(transaction, {
+                  id: this.createId(),
+                  runId: input.runId,
+                  eventType: 'tool.outcome_unknown',
+                  payload: {
+                    toolCallId: existing.id,
+                    reason: 'specialist_attempt_recovery',
+                    previousTaskAttempt: existing.taskAttempt,
+                    recoveryTaskAttempt: input.taskAttempt,
+                  },
+                }),
+              );
+            }
+          }
+          const blocked = new Set([
+            'denied',
+            'expired',
+            'executing',
+            'failed',
+            'outcome_unknown',
+            'cancelled',
+          ]).has(existingStatus);
           return {
+            ...(event ? { event } : {}),
             result: {
               toolCallId: existing.id,
-              status:
-                existing.status === 'awaiting_approval'
+              status: blocked
+                ? ('blocked' as const)
+                : existingStatus === 'awaiting_approval'
                   ? ('awaiting_approval' as const)
                   : ('proposed' as const),
+              ...(blocked
+                ? {
+                    blockedStatus: existingStatus as
+                      | 'denied'
+                      | 'expired'
+                      | 'executing'
+                      | 'failed'
+                      | 'outcome_unknown'
+                      | 'cancelled',
+                  }
+                : {}),
               argumentsHash,
             },
           };
         }
       }
-      const runRows = await transaction
-        .select({ status: agentRuns.status })
-        .from(agentRuns)
-        .where(eq(agentRuns.id, input.runId))
-        .limit(1);
-      if (!runRows[0]) {
-        throw new ToolCallApplicationError('run_not_found', `Agent Run ${input.runId} not found`);
-      }
       await transaction.insert(toolCalls).values({
         id: toolCallId,
         runId: input.runId,
         ...(input.taskId ? { taskId: input.taskId } : {}),
+        ...(input.taskAttempt ? { taskAttempt: input.taskAttempt } : {}),
+        ...(input.taskOperationKey
+          ? {
+              taskOperationKey: input.taskOperationKey,
+              taskOperationOrdinal: input.taskOperationOrdinal,
+            }
+          : {}),
         ...(input.providerToolCallId ? { providerToolCallId: input.providerToolCallId } : {}),
         toolId: definition.toolId,
         toolVersion: definition.version,
@@ -417,7 +555,7 @@ export class ToolCallService {
     }
     const settled = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
-      await transaction
+      const updated = await transaction
         .update(toolCalls)
         .set({
           status,
@@ -428,7 +566,40 @@ export class ToolCallService {
           updatedAt: now,
           version: sql`${toolCalls.version} + 1`,
         })
-        .where(and(eq(toolCalls.id, toolCallId), eq(toolCalls.status, 'executing')));
+        .where(and(eq(toolCalls.id, toolCallId), eq(toolCalls.status, 'executing')))
+        .returning({ status: toolCalls.status, output: toolCalls.output });
+      if (updated.length !== 1) {
+        const currentRows = await transaction
+          .select({ status: toolCalls.status, output: toolCalls.output })
+          .from(toolCalls)
+          .where(eq(toolCalls.id, toolCallId))
+          .limit(1);
+        const current = currentRows[0];
+        if (!current) {
+          throw new ToolCallApplicationError(
+            'tool_call_not_found',
+            `Tool Call ${toolCallId} disappeared during settlement`,
+          );
+        }
+        if (
+          current.status !== 'succeeded' &&
+          current.status !== 'failed' &&
+          current.status !== 'outcome_unknown'
+        ) {
+          throw new ToolCallApplicationError(
+            'invalid_tool_state',
+            `Tool Call settlement was fenced by ${current.status}`,
+          );
+        }
+        return {
+          events: [] as DurableRunEvent[],
+          result: {
+            toolCallId,
+            status: current.status,
+            ...(current.status === 'succeeded' ? { output: current.output } : {}),
+          },
+        };
+      }
       await appendCheckpoint(transaction, {
         id: this.createId(),
         runId: claimed.call.runId,
@@ -452,12 +623,15 @@ export class ToolCallService {
         });
         events.push(toDurableEvent(created));
       }
-      return events;
+      return {
+        events,
+        result: { toolCallId, status, ...(status === 'succeeded' ? { output } : {}) },
+      };
     });
-    for (const event of settled) {
+    for (const event of settled.events) {
       await this.options.publisher.publish({ durable: true, event });
     }
-    return { toolCallId, status, ...(status === 'succeeded' ? { output } : {}) };
+    return settled.result;
   }
 
   public async waitUntilExecutable(

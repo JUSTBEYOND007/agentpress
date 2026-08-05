@@ -1163,6 +1163,9 @@ export const toolCalls = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: 'cascade' }),
     taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
+    taskAttempt: integer('task_attempt'),
+    taskOperationKey: varchar('task_operation_key', { length: 200 }),
+    taskOperationOrdinal: integer('task_operation_ordinal'),
     providerToolCallId: varchar('provider_tool_call_id', { length: 240 }),
     toolId: varchar('tool_id', { length: 180 }).notNull(),
     toolVersion: varchar('tool_version', { length: 80 }).notNull(),
@@ -1187,6 +1190,21 @@ export const toolCalls = pgTable(
     uniqueIndex('tool_calls_idempotency_unique')
       .on(table.idempotencyKey)
       .where(sql`${table.idempotencyKey} is not null`),
+    uniqueIndex('tool_calls_task_operation_unique')
+      .on(table.taskOperationKey)
+      .where(sql`${table.taskOperationKey} is not null`),
+    check(
+      'tool_calls_task_attempt_check',
+      sql`${table.taskAttempt} is null or ${table.taskAttempt} > 0`,
+    ),
+    check(
+      'tool_calls_task_operation_ordinal_check',
+      sql`${table.taskOperationOrdinal} is null or ${table.taskOperationOrdinal} > 0`,
+    ),
+    check(
+      'tool_calls_task_operation_shape_check',
+      sql`(${table.taskOperationKey} is null and ${table.taskOperationOrdinal} is null) or (${table.taskId} is not null and ${table.taskAttempt} is not null and ${table.taskOperationKey} is not null and ${table.taskOperationOrdinal} is not null and ${table.idempotencyKey} = ${table.taskOperationKey})`,
+    ),
   ],
 );
 

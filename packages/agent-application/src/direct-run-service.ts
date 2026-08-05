@@ -813,7 +813,9 @@ export class DirectRunService {
       for (const call of executing) {
         const safety = resolveToolReplaySafety({
           risk: call.risk,
-          idempotency: call.idempotencyKey ? 'provider_key' : 'none',
+          // A persisted key proves only that AgentPress can identify the call. It does
+          // not prove the external provider committed that key atomically with its side effect.
+          idempotency: call.risk === 'read_only' && call.idempotencyKey ? 'provider_key' : 'none',
         });
         const action = decideToolReplay({
           status: 'executing',

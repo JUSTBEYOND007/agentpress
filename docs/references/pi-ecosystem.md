@@ -50,6 +50,14 @@ and late finalizer to the exact `AgentRef` that started it. AgentPress adapts th
 invariant at the durable boundary instead of copying sessions or timers: Task settlement is fenced
 by the PostgreSQL `running` state and exact attempt number. A cancelled, recovered, or retried Task
 therefore rejects a late worker result before writing TaskResult, Artifact, Checkpoint, or RunEvent.
+Non-read-only Specialist ToolCalls additionally persist the Task attempt, an argument-signature
+ordinal, and a host-generated logical-operation key. A replacement attempt rebuilds its ordinal
+cursor from PostgreSQL: completed same-argument operations remain distinct, while an executing or
+`outcome_unknown` operation pins that signature and fails closed for every new provider call ID.
+Tool settlement uses a status compare-and-set so a late worker response cannot overwrite that
+recovery fact. A key stored by AgentPress is not treated as proof that an external provider committed
+the key atomically with its side effect; only read-only calls are automatically replayed after an
+unscoped Run worker loss.
 The source behavior is pinned at Oh My Pi commit `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`,
 `packages/coding-agent/src/registry/agent-lifecycle.ts` and
 `packages/coding-agent/test/registry/agent-lifecycle.test.ts`.
@@ -186,8 +194,10 @@ upstream process-local session registry and timers. A succeeded or failed Task w
 for the exact current attempt fails closed instead of being inferred from Prompt or transient state.
 Run cancellation is similarly adapted as a PostgreSQL transaction: `cancelAgentRunTasks` changes
 all non-terminal Tasks and releases active leases before the Run can settle, so a late worker cannot
-turn a cancelled Task into a success. The adapter keeps retry/recover and external side-effect
-idempotency as separate gates until their real worker tests are present.
+turn a cancelled Task into a success. PostgreSQL integration tests now cover Task and ToolCall
+attempt fencing, Unknown Outcome recovery, late settlement, and distinct repeated operations. Real
+Kafka process-loss, duplicate-command, and cancellation behavior remains a separate infrastructure
+acceptance gate.
 Expired detached leases are recovered by the production worker through
 `requeueExpiredAgentTasks`: the Task transition to `interrupted` and its replacement
 `task.execute` outbox message share one PostgreSQL transaction. Repeated scans cannot create a

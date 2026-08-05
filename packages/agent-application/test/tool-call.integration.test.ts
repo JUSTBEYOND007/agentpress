@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   agentRuns,
+  agentTasks,
   appUsers,
   approvals,
   checkpoints,
@@ -10,6 +11,8 @@ import {
   conversationBranches,
   conversationMessages,
   conversations,
+  executionPlans,
+  planRevisions,
   rootRequests,
   runEvents,
   runSkillBindings,
@@ -43,6 +46,9 @@ describeWithDatabase('Tool Call application flow', () => {
   const registry = new ToolRegistry();
   let searchExecutions = 0;
   let externalExecutions = 0;
+  let delayedExternalExecutions = 0;
+  let successfulExternalExecutions = 0;
+  let finishDelayedPublish: ((output: { readonly publicationId: string }) => void) | undefined;
   registry.register({
     toolId: 'workspace.search',
     version: '1.0.0',
@@ -60,6 +66,44 @@ describeWithDatabase('Tool Call application flow', () => {
     execute: ({ query }) => {
       searchExecutions += 1;
       return Promise.resolve({ result: query });
+    },
+  });
+  registry.register({
+    toolId: 'publication.delayed_publish',
+    version: '1.0.0',
+    owner: 'publication',
+    description: 'Publish an edition through a delayed provider',
+    capabilities: ['publication.write'],
+    inputSchema: Type.Object({ editionId: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ publicationId: Type.String() }, { additionalProperties: false }),
+    risk: 'external_write',
+    sideEffect: 'Publish the selected immutable edition',
+    idempotency: 'provider_key',
+    timeoutMs: 1_000,
+    estimateCost: () => ({ credits: 1 }),
+    execute: () => {
+      delayedExternalExecutions += 1;
+      return new Promise<{ readonly publicationId: string }>((resolve) => {
+        finishDelayedPublish = resolve;
+      });
+    },
+  });
+  registry.register({
+    toolId: 'publication.successful_publish',
+    version: '1.0.0',
+    owner: 'publication',
+    description: 'Publish an edition through a successful provider',
+    capabilities: ['publication.write'],
+    inputSchema: Type.Object({ editionId: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ publicationId: Type.String() }, { additionalProperties: false }),
+    risk: 'external_write',
+    sideEffect: 'Publish the selected immutable edition',
+    idempotency: 'provider_key',
+    timeoutMs: 1_000,
+    estimateCost: () => ({ credits: 1 }),
+    execute: () => {
+      successfulExternalExecutions += 1;
+      return Promise.resolve({ publicationId: randomUUID() });
     },
   });
   registry.register({
@@ -281,6 +325,130 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(rows[0]?.status).toBe('outcome_unknown');
   });
 
+  it('fences the same Specialist side effect across attempts without merging a second operation', async () => {
+    const runId = await createRunningRun();
+    const taskId = await createRunningTask(runId, 1);
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    });
+    const editionId = randomUUID();
+    const firstPublish = (await bridge.createForRun(runId, ['publication.write'], taskId, 1)).find(
+      (tool) => tool.label === 'publication.delayed_publish',
+    );
+    const before = delayedExternalExecutions;
+    const firstExecution = firstPublish?.execute(
+      { editionId },
+      { runId, providerToolCallId: 'attempt-1-operation-1' },
+    );
+    const firstApproval = await waitForTaskApproval(taskId, 1);
+    await service.decideApproval({
+      toolCallId: firstApproval.toolCallId,
+      decision: 'approved',
+      userId,
+    });
+    await waitForToolStatus(firstApproval.toolCallId, 'executing');
+    expect(delayedExternalExecutions - before).toBe(1);
+
+    await connection.db
+      .update(agentTasks)
+      .set({ attempt: 2, status: 'running' })
+      .where(eq(agentTasks.id, taskId));
+    const recoveredPublish = (
+      await bridge.createForRun(runId, ['publication.write'], taskId, 2)
+    ).find((tool) => tool.label === 'publication.delayed_publish');
+    await expect(
+      recoveredPublish?.execute(
+        { editionId },
+        { runId, providerToolCallId: 'attempt-2-operation-1' },
+      ),
+    ).rejects.toMatchObject({ code: 'tool_replay_blocked' });
+    expect(delayedExternalExecutions - before).toBe(1);
+
+    finishDelayedPublish?.({ publicationId: randomUUID() });
+    await expect(firstExecution).rejects.toMatchObject({ code: 'tool_replay_blocked' });
+
+    await expect(
+      recoveredPublish?.execute(
+        { editionId },
+        { runId, providerToolCallId: 'attempt-2-operation-2' },
+      ),
+    ).rejects.toMatchObject({ code: 'tool_replay_blocked' });
+    expect(delayedExternalExecutions - before).toBe(1);
+    const approvalRows = await connection.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
+      .where(eq(toolCalls.taskId, taskId));
+    expect(approvalRows).toHaveLength(1);
+  });
+
+  it('keeps two successful same-argument Specialist operations distinct', async () => {
+    const runId = await createRunningRun();
+    const taskId = await createRunningTask(runId, 1);
+    const publish = (
+      await new PersistentToolBridge({
+        database: connection.db,
+        registry,
+        toolCalls: service,
+      }).createForRun(runId, ['publication.write'], taskId, 1)
+    ).find((tool) => tool.label === 'publication.successful_publish');
+    const editionId = randomUUID();
+    const before = successfulExternalExecutions;
+    for (const providerToolCallId of ['successful-operation-1', 'successful-operation-2']) {
+      const execution = publish?.execute({ editionId }, { runId, providerToolCallId });
+      const approval = await waitForTaskApproval(
+        taskId,
+        providerToolCallId === 'successful-operation-1' ? 1 : 2,
+      );
+      await service.decideApproval({
+        toolCallId: approval.toolCallId,
+        decision: 'approved',
+        userId,
+      });
+      expectPublicationOutput(await execution);
+    }
+    await connection.db
+      .update(agentTasks)
+      .set({ attempt: 2, status: 'running' })
+      .where(eq(agentTasks.id, taskId));
+    const recoveredPublish = (
+      await new PersistentToolBridge({
+        database: connection.db,
+        registry,
+        toolCalls: service,
+      }).createForRun(runId, ['publication.write'], taskId, 2)
+    ).find((tool) => tool.label === 'publication.successful_publish');
+    const recoveredExecution = recoveredPublish?.execute(
+      { editionId },
+      { runId, providerToolCallId: 'successful-operation-3' },
+    );
+    const recoveredApproval = await waitForTaskApproval(taskId, 3);
+    await service.decideApproval({
+      toolCallId: recoveredApproval.toolCallId,
+      decision: 'approved',
+      userId,
+    });
+    expectPublicationOutput(await recoveredExecution);
+    expect(successfulExternalExecutions - before).toBe(3);
+    const calls = await connection.db
+      .select({
+        ordinal: toolCalls.taskOperationOrdinal,
+        operationKey: toolCalls.taskOperationKey,
+        status: toolCalls.status,
+      })
+      .from(toolCalls)
+      .where(eq(toolCalls.taskId, taskId))
+      .orderBy(toolCalls.taskOperationOrdinal);
+    expect(calls.map(({ ordinal, status }) => ({ ordinal, status }))).toEqual([
+      { ordinal: 1, status: 'succeeded' },
+      { ordinal: 2, status: 'succeeded' },
+      { ordinal: 3, status: 'succeeded' },
+    ]);
+    expect(new Set(calls.map(({ operationKey }) => operationKey)).size).toBe(3);
+  });
+
   it('settles an executing external write as Unknown Outcome during recovery', async () => {
     const runId = await createRunningRun();
     const toolCallId = randomUUID();
@@ -413,5 +581,73 @@ describeWithDatabase('Tool Call application flow', () => {
       status: 'running',
     });
     return runId;
+  }
+
+  async function createRunningTask(runId: string, attempt: number): Promise<string> {
+    const planId = randomUUID();
+    const revisionId = randomUUID();
+    const taskId = randomUUID();
+    await connection.db.insert(executionPlans).values({ id: planId, runId });
+    await connection.db.insert(planRevisions).values({
+      id: revisionId,
+      planId,
+      revisionNumber: 1,
+      reason: 'tool recovery integration',
+      summary: 'Exercise Specialist side-effect fencing',
+    });
+    await connection.db.insert(agentTasks).values({
+      id: taskId,
+      runId,
+      planRevisionId: revisionId,
+      objective: 'Publish one immutable edition',
+      criticality: 'required',
+      owner: 'writer',
+      acceptanceCriteria: ['The logical publication happens at most once'],
+      outputSchema: { type: 'object' },
+      toolPolicy: { capabilities: ['publication.write'] },
+      budget: {},
+      status: 'running',
+      attempt,
+      maxAttempts: 3,
+    });
+    return taskId;
+  }
+
+  async function waitForTaskApproval(
+    taskId: string,
+    expectedCount: number,
+  ): Promise<{ readonly toolCallId: string }> {
+    for (let poll = 0; poll < 100; poll += 1) {
+      const rows = await connection.db
+        .select({ toolCallId: approvals.toolCallId })
+        .from(approvals)
+        .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
+        .where(eq(toolCalls.taskId, taskId))
+        .orderBy(approvals.createdAt);
+      const latest = rows.at(-1);
+      if (rows.length >= expectedCount && latest) return latest;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for Specialist approval ${String(expectedCount)}`);
+  }
+
+  async function waitForToolStatus(toolCallId: string, expectedStatus: 'executing'): Promise<void> {
+    for (let poll = 0; poll < 100; poll += 1) {
+      const rows = await connection.db
+        .select({ status: toolCalls.status })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, toolCallId));
+      if (rows[0]?.status === expectedStatus) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for Tool Call ${toolCallId} to become ${expectedStatus}`);
+  }
+
+  function expectPublicationOutput(value: unknown): void {
+    const output =
+      typeof value === 'object' && value !== null
+        ? (value as Readonly<Record<string, unknown>>)
+        : {};
+    expect(typeof output.publicationId).toBe('string');
   }
 });

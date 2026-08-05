@@ -71,6 +71,7 @@ export type RuntimeToolFactory = {
     runId: string,
     capabilities?: readonly string[],
     taskId?: string,
+    taskAttempt?: number,
   ): Promise<readonly RuntimeTool[]>;
   listCapabilities(runId: string): Promise<readonly string[]>;
   resumeApprovedToolCall?(

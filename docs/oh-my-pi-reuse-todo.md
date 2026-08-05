@@ -251,15 +251,20 @@ TODO：
       `run.execute` outbox 唤醒。`task_results.summary` 现在与 status/artifacts/usage/warnings/failure
       一起持久化；detached wait 会读取最新已决 attempt 的完整成功或失败结果并投递给 Main 综合，
       worker 周期扫描会在同一事务内回收过期 lease 并写入新的 `task.execute` outbox。隔离 PostgreSQL
-      已覆盖只重投一次、第二 attempt claim 和 Main 结果投递；仍需在真实 Kafka 环境跑进程丢失、
-      重复 command、cancel 和外部写幂等端到端测试后才可勾选。
+      已覆盖只重投一次、第二 attempt claim 和 Main 结果投递。Specialist 非只读 ToolCall 现在持久化
+      task attempt、参数签名内调用序号和宿主生成的稳定逻辑操作键；新 attempt 会从 PostgreSQL 重建
+      序号游标，复用已知成功结果，并将执行中或 Unknown Outcome 的相同操作永久 fail closed。旧 worker
+      的延迟 settlement 使用 ToolCall CAS fence，不能覆盖新 attempt 写入的 Unknown Outcome。相反语义
+      回归同时证明正常路径中多个同参操作仍使用不同逻辑键。仍需在真实 Kafka 环境跑进程丢失、重复
+      command 和 cancel 端到端测试后才可勾选。
 - [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
       已将 Oh My Pi `agent-lifecycle.ts` 的 stale-ref finalizer 保护适配为 PostgreSQL attempt fence：
       `settleAgentTaskAttempt` 只有在 Task 仍为 `running` 且 attempt 完全匹配时才允许结算；取消、lease
       过期恢复或新 attempt 后的旧 worker 结果无法覆盖新状态。`requestCancellation` 现在在同一
       PostgreSQL 事务中调用 `cancelAgentRunTasks`，释放活跃 lease 并写 `task.cancelled`；取消后的
-      late success 已通过数据库和 Planned Run 集成回归验证。完整 retry/recover checkpoint 与外部
-      副作用幂等证明仍待完成。
+      late success 已通过数据库和 Planned Run 集成回归验证。ToolCall 的 retry/recover checkpoint、
+      task attempt fence、稳定逻辑操作键、Unknown Outcome 钉住和 stale settlement CAS 已通过隔离
+      PostgreSQL 集成证明；真实 Kafka worker 丢失与重复 command 仍保留为基础设施验收门禁。
 - [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
       已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities。
       PostgreSQL `context_packs` 不再保存完整 root request，只保留 detached 恢复所需的 current-turn 协议壳、

@@ -14,8 +14,8 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { composeToolGuidance, ToolRegistry } from '@agentpress/tool-runtime';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { composeToolGuidance, hashToolArguments, ToolRegistry } from '@agentpress/tool-runtime';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import type { RuntimeToolFactory } from './contracts.js';
 import { effectiveActionCapabilities } from './action-capability-policy.js';
@@ -42,9 +42,19 @@ export class PersistentToolBridge implements RuntimeToolFactory {
     runId: string,
     capabilities: readonly string[] = [],
     taskId?: string,
+    taskAttempt?: number,
   ): Promise<readonly RuntimeTool[]> {
+    if ((taskId === undefined) !== (taskAttempt === undefined)) {
+      throw new TypeError('Specialist tools require both taskId and taskAttempt');
+    }
+    if (taskAttempt !== undefined && (!Number.isSafeInteger(taskAttempt) || taskAttempt < 1)) {
+      throw new RangeError('Specialist tool attempt must be a positive integer');
+    }
     const { definitions, requestedByUserId, allowedCapabilities } = await this.authorize(runId);
     const requested = new Set(capabilities);
+    const taskOperationState = taskId
+      ? await loadTaskOperationState(this.options.database, taskId)
+      : undefined;
     return definitions
       .filter((definition) =>
         definition.capabilities.every((capability) => requested.has(capability)),
@@ -58,17 +68,51 @@ export class PersistentToolBridge implements RuntimeToolFactory {
         constrainedSampling: { type: 'json_schema' as const, strict: 'require' as const },
         executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
         execute: async (arguments_, context) => {
+          const taskOperation =
+            taskId && taskAttempt && definition.risk !== 'read_only'
+              ? resolveTaskOperation(
+                  taskId,
+                  definition.toolId,
+                  definition.version,
+                  arguments_,
+                  context.providerToolCallId,
+                  taskOperationState,
+                )
+              : undefined;
           const proposal = await this.options.toolCalls.propose({
             runId,
-            ...(taskId ? { taskId } : {}),
+            ...(taskId && taskAttempt ? { taskId, taskAttempt } : {}),
             providerToolCallId: context.providerToolCallId,
             toolId: definition.toolId,
             toolVersion: definition.version,
             arguments: arguments_,
             requestedFromUserId: requestedByUserId,
             allowedCapabilities,
-            idempotencyKey: toolIdempotencyKey(runId, context.providerToolCallId),
+            idempotencyKey:
+              taskOperation?.key ?? toolIdempotencyKey(runId, context.providerToolCallId),
+            ...(taskOperation
+              ? {
+                  taskOperationKey: taskOperation.key,
+                  taskOperationOrdinal: taskOperation.ordinal,
+                }
+              : {}),
           });
+          if (proposal.status === 'blocked') {
+            if (
+              taskOperation &&
+              (proposal.blockedStatus === 'executing' ||
+                proposal.blockedStatus === 'outcome_unknown')
+            ) {
+              taskOperationState?.blockedOrdinal.set(
+                taskOperation.signature,
+                taskOperation.ordinal,
+              );
+            }
+            throw new ToolCallApplicationError(
+              'tool_replay_blocked',
+              `Tool Call ${proposal.toolCallId} cannot be replayed from ${proposal.blockedStatus ?? 'an unknown state'}`,
+            );
+          }
           if (proposal.status === 'awaiting_approval') {
             const decision = await this.options.toolCalls.waitUntilExecutable(
               proposal.toolCallId,
@@ -84,7 +128,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
           const result = await this.options.toolCalls.execute(proposal.toolCallId, context.signal);
           if (result.status !== 'succeeded') {
             throw new ToolCallApplicationError(
-              'invalid_tool_state',
+              result.status === 'outcome_unknown' ? 'tool_replay_blocked' : 'invalid_tool_state',
               `Tool Call ${proposal.toolCallId} settled as ${result.status}`,
             );
           }
@@ -312,4 +356,91 @@ export function runtimeToolName(toolId: string, version: string): string {
 
 function toolIdempotencyKey(runId: string, providerToolCallId: string): string {
   return `pi:${createHash('sha256').update(`${runId}:${providerToolCallId}`).digest('hex')}`;
+}
+
+function resolveTaskOperation(
+  taskId: string,
+  toolId: string,
+  toolVersion: string,
+  arguments_: Readonly<Record<string, unknown>>,
+  providerToolCallId: string,
+  state: TaskOperationState | undefined,
+): { readonly key: string; readonly ordinal: number; readonly signature: string } {
+  if (!state) throw new TypeError('Specialist task operation state is unavailable');
+  const argumentsHash = hashToolArguments(arguments_);
+  const signature = taskOperationSignature(toolId, toolVersion, argumentsHash);
+  let ordinal = state.providerOrdinal.get(providerToolCallId);
+  if (ordinal === undefined) {
+    ordinal =
+      state.blockedOrdinal.get(signature) ??
+      state.pendingOrdinal.get(signature) ??
+      (state.nextOrdinal.get(signature) ?? 0) + 1;
+    if (!state.blockedOrdinal.has(signature) && !state.pendingOrdinal.has(signature)) {
+      state.nextOrdinal.set(signature, ordinal);
+    }
+    state.providerOrdinal.set(providerToolCallId, ordinal);
+  }
+  const digest = createHash('sha256')
+    .update(`${taskId}\u0000${signature}\u0000${String(ordinal)}`)
+    .digest('hex');
+  return { key: `pi-task:${digest}`, ordinal, signature };
+}
+
+type TaskOperationState = {
+  readonly nextOrdinal: Map<string, number>;
+  readonly pendingOrdinal: Map<string, number>;
+  readonly blockedOrdinal: Map<string, number>;
+  readonly providerOrdinal: Map<string, number>;
+};
+
+async function loadTaskOperationState(
+  database: AgentPressDatabase,
+  taskId: string,
+): Promise<TaskOperationState> {
+  const rows = await database
+    .select({
+      toolId: toolCalls.toolId,
+      toolVersion: toolCalls.toolVersion,
+      argumentsHash: toolCalls.argumentsHash,
+      ordinal: toolCalls.taskOperationOrdinal,
+      providerToolCallId: toolCalls.providerToolCallId,
+      status: toolCalls.status,
+    })
+    .from(toolCalls)
+    .where(and(eq(toolCalls.taskId, taskId), isNotNull(toolCalls.taskOperationKey)))
+    .orderBy(toolCalls.createdAt);
+  const state: TaskOperationState = {
+    nextOrdinal: new Map(),
+    pendingOrdinal: new Map(),
+    blockedOrdinal: new Map(),
+    providerOrdinal: new Map(),
+  };
+  for (const row of rows) {
+    if (!row.ordinal) continue;
+    const signature = taskOperationSignature(row.toolId, row.toolVersion, row.argumentsHash);
+    if (row.providerToolCallId) state.providerOrdinal.set(row.providerToolCallId, row.ordinal);
+    if (row.status === 'outcome_unknown') {
+      state.blockedOrdinal.set(signature, row.ordinal);
+      continue;
+    }
+    if (
+      row.status === 'proposed' ||
+      row.status === 'awaiting_approval' ||
+      row.status === 'approved' ||
+      row.status === 'executing'
+    ) {
+      state.pendingOrdinal.set(signature, row.ordinal);
+      continue;
+    }
+    state.nextOrdinal.set(signature, Math.max(state.nextOrdinal.get(signature) ?? 0, row.ordinal));
+  }
+  return state;
+}
+
+function taskOperationSignature(
+  toolId: string,
+  toolVersion: string,
+  argumentsHash: string,
+): string {
+  return `${toolId}\u0000${toolVersion}\u0000${argumentsHash}`;
 }
