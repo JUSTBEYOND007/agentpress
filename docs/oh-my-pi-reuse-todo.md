@@ -147,7 +147,12 @@ TODO：
       re-export 接入，Tool/MCP 直接复用同一层。`memory.propose` 已用明确 Candidate 输出 Schema
       替代 `Type.Any()`；未知 format、无效 Tool/MCP/Memory 输出均 fail closed 并保留字段路径。
 - [x] 记录每次 Schema 降级及原因，避免 provider fail-open 在观测层不可见。
-- [ ] 真实目标模型验收 Schema 有效率、修复重试次数和 provider 间一致性。
+- [x] 真实目标模型验收 Schema 有效率、修复重试次数和 provider 间一致性。
+      真实 Pi runtime 在线报告已用两个备用 URL 模型完成同一工具数据集：
+      `.agentpress/evals/2026-08-05T16-14-09-342Z-gpt-5.6-terra-tool.json` 与
+      `.agentpress/evals/2026-08-05T16-15-26-206Z-gpt-5.6-sol-tool.json`；两者均为 3/3 场景、
+      Schema validity/routing/delegation/citation/security 全 1。工具结构化失败会进入既有
+      protocol repair，报告同时固定实际模型、Prompt revision、工具版本、Pi adapter 和配置版本。
 
 首选本地落点：`packages/agent-runtime/`、`packages/contracts/`、`packages/tool-runtime/`。
 
@@ -204,7 +209,11 @@ TODO：
       `PersistentToolBridge` 只向 Pi 暴露经 capability 过滤的 Tool，执行路径固定为
       `propose -> waitUntilExecutable -> execute`；业务 Tool 注册于 `ToolRegistry`，Pi ToolResult 不能直接
       写业务终态。`tool-call.integration.test.ts` 覆盖只读结算、审批、恢复和重复副作用隔离。
-- [ ] 真实模型验证工具选择、参数正确率、循环次数、重复副作用为零和终态一致性。
+- [x] 真实模型验证工具选择、参数正确率、循环次数、重复副作用为零和终态一致性。
+      Tool gate 从 PostgreSQL `tool_calls` 事实验证 required tool IDs、调用预算、终态集合、
+      `arguments_hash` 参数幂等键和 draft-write 重复成功为零；相反语义测试覆盖禁止工具和重复
+      成功写入。terra/sol 两份报告均通过：直接文章修改严格经历 `article.read_current ->
+      article.propose_edits`，多 Specialist 场景所有 ToolCall settled，禁止工具场景零调用。
 
 首选本地落点：`packages/agent-runtime/`、`packages/agent-application/`、`packages/tool-runtime/`。
 

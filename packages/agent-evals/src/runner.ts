@@ -17,6 +17,12 @@ export type PersistedRunObservation = {
   readonly unknownOutcomeRetries: number;
   readonly crossWorkspaceMemoryHits: number;
   readonly parallelExecutionValid?: boolean;
+  readonly toolCalls?: readonly {
+    readonly toolId: string;
+    readonly status: string;
+    readonly argumentsHash: string;
+    readonly risk: string;
+  }[];
 };
 
 export function evaluatePersistedRuns(
@@ -49,6 +55,7 @@ export function evaluatePersistedRun(
         : true;
   const parallelExecutionCorrect =
     scenario.category !== 'parallelism' || observed?.parallelExecutionValid === true;
+  const toolProtocolCorrect = evaluateToolProtocol(scenario, observed);
   return {
     scenarioId: scenario.id,
     routingCorrect: Boolean(
@@ -63,7 +70,8 @@ export function evaluatePersistedRun(
       expected.requiredCapabilities.every((capability) => capabilities.has(capability)) &&
       expected.requiredArtifactTypes.every((type) => artifacts.has(type)) &&
       actionProposalCorrect &&
-      parallelExecutionCorrect,
+      parallelExecutionCorrect &&
+      toolProtocolCorrect,
     ),
     schemaValid: observed?.schemaValid === true && recoveryCorrect,
     citationsResolvable:
@@ -79,6 +87,35 @@ export function evaluatePersistedRun(
     unknownOutcomeRetries: observed?.unknownOutcomeRetries ?? 1,
     crossWorkspaceMemoryHits: observed?.crossWorkspaceMemoryHits ?? 1,
   };
+}
+
+function evaluateToolProtocol(
+  scenario: EvalScenario,
+  observed: PersistedRunObservation | undefined,
+): boolean {
+  if (scenario.category !== 'tool') return true;
+  if (!observed) return false;
+  const calls = observed.toolCalls ?? [];
+  const required = scenario.expected.requiredToolIds ?? [];
+  const maxToolCalls = scenario.expected.maxToolCalls ?? Number.POSITIVE_INFINITY;
+  const terminal = new Set(['succeeded', 'failed', 'denied', 'expired', 'outcome_unknown', 'cancelled']);
+  const repeatedWrites = calls.filter(
+    (call, index) =>
+      call.risk !== 'read_only' &&
+      call.status === 'succeeded' &&
+      calls.findIndex(
+        (candidate) =>
+          candidate.toolId === call.toolId &&
+          candidate.argumentsHash === call.argumentsHash &&
+          candidate.status === 'succeeded',
+      ) !== index,
+  );
+  return (
+    required.every((toolId) => calls.some((call) => call.toolId === toolId)) &&
+    calls.length <= maxToolCalls &&
+    calls.every((call) => terminal.has(call.status)) &&
+    repeatedWrites.length === 0
+  );
 }
 
 export function evaluateRagRanking(

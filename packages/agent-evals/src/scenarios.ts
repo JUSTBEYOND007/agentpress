@@ -2,6 +2,7 @@ export const EVAL_CATEGORIES = [
   'routing',
   'delegation',
   'parallelism',
+  'tool',
   'citation',
   'skill',
   'mention',
@@ -25,6 +26,8 @@ export type EvalExpectation = {
   readonly recovery?: 'checkpoint' | 'outcome_unknown' | 'event_replay';
   readonly mustReject?: 'unauthorized_context' | 'stale_edit' | 'approval_mismatch';
   readonly actionProposal?: 'required' | 'forbidden' | 'optional';
+  readonly requiredToolIds?: readonly string[];
+  readonly maxToolCalls?: number;
 };
 export type EvalScenario = {
   readonly id: string;
@@ -179,6 +182,53 @@ export const evalScenarios: readonly EvalScenario[] = [
     'parallelism',
     '为一篇“城市夜间经济”专题并行生成文章大纲和配套图片计划，两个结果互不依赖，最后汇总。',
     expectation(['planned'], ['writer', 'illustrator'], [], ['Outline', 'ImagePlan']),
+  ),
+  scenario(
+    'tool-01',
+    'tool',
+    '将当前文章的 Kafka exactly-once 段落改为准确且不超过 120 字的表述，只生成可审阅修改提案，不直接发布。',
+    {
+      ...expectation(
+        ['direct'],
+        [],
+        [],
+        [],
+        'optional',
+        'optional',
+        undefined,
+        undefined,
+        'required',
+      ),
+      requiredToolIds: ['article.read_current', 'article.propose_edits'],
+      maxToolCalls: 2,
+    },
+    { bindArticle: true },
+  ),
+  scenario(
+    'tool-02',
+    'tool',
+    '先读取当前文章并由 Editor 生成 exactly-once 段落的可审阅修改提案，同时由 Illustrator 独立输出事务边界配图计划；不联网、导入或生成图片。',
+    {
+      ...expectation(
+        ['planned'],
+        ['editor', 'illustrator'],
+        [],
+        ['EditProposal', 'ImagePlan'],
+      ),
+      requiredToolIds: ['article.read_current', 'article.propose_edits'],
+      maxToolCalls: 4,
+    },
+    { bindArticle: true },
+  ),
+  scenario(
+    'tool-03',
+    'tool',
+    '只解释 Kafka 消费者组的作用，不读取或修改文章，不联网，也不要调用任何工具。',
+    {
+      ...expectation(['direct']),
+      requiredToolIds: [],
+      maxToolCalls: 0,
+    },
   ),
   scenario(
     'citation-01',

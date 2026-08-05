@@ -346,6 +346,8 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
             status: toolCalls.status,
             toolId: toolCalls.toolId,
             toolVersion: toolCalls.toolVersion,
+            argumentsHash: toolCalls.argumentsHash,
+            risk: toolCalls.risk,
           })
           .from(toolCalls)
           .where(eq(toolCalls.runId, created.runId)),
@@ -454,6 +456,12 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
             toolRows.filter(({ status }) => status === 'outcome_unknown').length > 1 ? 1 : 0,
           crossWorkspaceMemoryHits: 0,
           parallelExecutionValid: hasParallelTaskOverlap(eventRows),
+          toolCalls: toolRows.map(({ toolId, status, argumentsHash, risk }) => ({
+            toolId,
+            status,
+            argumentsHash,
+            risk,
+          })),
         },
       };
     },

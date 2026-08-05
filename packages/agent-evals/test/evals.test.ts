@@ -99,6 +99,70 @@ describe('Agent eval suite', () => {
     ).toBe(true);
   });
 
+  it('rejects unnecessary tools and duplicate successful writes', () => {
+    const noTool = evalScenarios.find(({ id }) => id === 'agentpress-tool-03');
+    const edit = evalScenarios.find(({ id }) => id === 'agentpress-tool-01');
+    if (!noTool || !edit) throw new Error('Tool fixtures are missing');
+    const base = {
+      mode: 'direct' as const,
+      status: 'completed',
+      tasks: [],
+      artifactTypes: [],
+      evidenceCount: 0,
+      approvalRequests: 0,
+      schemaValid: true,
+      unauthorizedWrites: 0,
+      unknownOutcomeRetries: 0,
+      crossWorkspaceMemoryHits: 0,
+    };
+
+    expect(
+      evaluatePersistedRuns(
+        [noTool],
+        [{ ...base, scenarioId: noTool.id, toolCalls: [] }],
+      )[0]?.delegationCorrect,
+    ).toBe(true);
+    expect(
+      evaluatePersistedRuns(
+        [noTool],
+        [
+          {
+            ...base,
+            scenarioId: noTool.id,
+            toolCalls: [
+              {
+                toolId: 'web.search',
+                status: 'succeeded',
+                argumentsHash: 'query-1',
+                risk: 'read_only',
+              },
+            ],
+          },
+        ],
+      )[0]?.delegationCorrect,
+    ).toBe(false);
+
+    const duplicateWrite = {
+      toolId: 'article.propose_edits',
+      status: 'succeeded',
+      argumentsHash: 'same-edit',
+      risk: 'draft_write',
+    } as const;
+    expect(
+      evaluatePersistedRuns(
+        [edit],
+        [
+          {
+            ...base,
+            scenarioId: edit.id,
+            actionProposals: 1,
+            toolCalls: [duplicateWrite, duplicateWrite],
+          },
+        ],
+      )[0]?.delegationCorrect,
+    ).toBe(false);
+  });
+
   it('calculates and enforces RAG ranking, citation and faithfulness gates', () => {
     const rag = evaluateRagRanking(
       ['noise', 'evidence-a', 'evidence-b'],
