@@ -589,6 +589,21 @@ TODO：
 
 ## 推荐实施顺序
 
+### 当前真实门禁证据（2026-08-05）
+
+- 在线 orchestrator 已生成真实 Pi runtime 报告：
+  `.agentpress/evals/2026-08-05T13-00-47-777Z-doubao-seed-2-1-pro-260628.json`。
+  报告和每个 item 都包含 model、Prompt revision、Skill、工具、Context 和 runtime/provider 版本；
+  但目标模型 Run 未完成，`gatesPassed=false`，因此不能替代真实行为通过证据。
+- 多轮压缩真实模型报告：
+  `.agentpress/evals/2026-08-05T13-02-56-407Z-doubao-seed-2-1-pro-260628-compaction.json`，
+  当前 `factRetention=0`、`gatesPassed=false`。
+- Skill 真实模型报告：
+  `.agentpress/evals/2026-08-05T13-00-47-396Z-doubao-seed-2-1-pro-260628-skill-selection.json`，
+  Provider 返回 `403 AccountOverdueError`，不能计入目标模型证据。
+- RAG 真实 provider 门禁保持 fail-closed：`.env` 未配置 `ARK_RERANK_MODEL`，且 Ark `/models`
+  查询没有可用 rerank endpoint，故未伪造 Recall/MRR/NDCG 结果。
+
 - [x] 里程碑 1：Compaction contract、PostgreSQL facts、projection 和确定性测试。
 - [x] 里程碑 2：Schema normalization 差距补齐与 Specialist 严格输出。
 - [x] 里程碑 3：Tool loop/replay safety 和恢复协议。
