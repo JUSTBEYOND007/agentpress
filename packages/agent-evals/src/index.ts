@@ -9,6 +9,8 @@ export * from './trace-metrics.js';
 export * from './persisted-trace.js';
 export * from './sandbox-policy.js';
 export * from './docker-sandbox-plan.js';
+export * from './docker-sandbox-runner.js';
+export * from './sandbox-resources.js';
 export * from './rag-provider-eval.js';
 export * from './experiment-store.js';
 export * from './experiment-report.js';

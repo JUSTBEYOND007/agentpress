@@ -509,6 +509,12 @@ importers:
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)
+      kafkajs:
+        specifier: 'catalog:'
+        version: 2.2.4(patch_hash=1d5c373554812c4b66f208342d2fd61d59d3a2b625f0c0484ca99ba0fa3aaf1c)
+      minio:
+        specifier: 'catalog:'
+        version: 8.0.6
 
   packages/agent-runtime:
     dependencies:

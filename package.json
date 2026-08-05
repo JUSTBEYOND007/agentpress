@@ -34,6 +34,7 @@
     "eval:online": "pnpm --filter @agentpress/agent-evals eval:online",
     "eval:pr": "pnpm --filter @agentpress/domain test && pnpm --filter @agentpress/tool-runtime test && pnpm --filter @agentpress/agent-runtime test && pnpm --filter @agentpress/agent-application test && pnpm --filter @agentpress/database test && pnpm --filter @agentpress/agent-evals test",
     "eval:rag": "pnpm --filter @agentpress/agent-evals eval:rag",
+    "eval:sandbox": "pnpm --filter @agentpress/agent-evals eval:sandbox",
     "eval:skill": "pnpm --filter @agentpress/agent-evals eval:skill",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

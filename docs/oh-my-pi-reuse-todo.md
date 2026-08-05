@@ -495,19 +495,24 @@ TODO：
 
 - [x] 将 Experiment -> Arm -> Trial -> RunTrace 模型适配到 `packages/agent-evals`，记录模型、Prompt、Skill、
       Tool 和 Context policy 版本。
-- [ ] 复用 Harbor 的容器化任务思想，建立隔离数据库/schema、对象存储前缀、Kafka topic/group 和网络策略。
+- [x] 复用 Harbor 的容器化任务思想，建立隔离数据库/schema、对象存储前缀、Kafka topic/group 和网络策略。
       已完成 AgentPress-owned `createEvalSandboxDescriptor`：schema、object prefix、topic/group
       均由 experiment/arm/trial 不可变身份派生，网络默认 deny-by-default 且只接受受限 allowlist；
       `createDockerEvalSandboxPlan` 只接受 digest 固定镜像，强制 network namespace=`none`、只读根文件系统、
       非 root、drop ALL capabilities、no-new-privileges、无宿主挂载和 CPU/内存/PID/timeout/tmpfs 上限。
-      非空 egress allowlist 在没有已审计 proxy 时 fail closed，不退化为开放网络。真实 Docker daemon 当前
-      无法启动，容器执行、隔离资源 provision/cleanup 和网络 namespace 仍待基础设施环境验收。
+      非空 egress allowlist 在没有已审计 proxy 时 fail closed，不退化为开放网络。
+      `EvalSandboxResourceManager` 通过 Drizzle/PostgreSQL、KafkaJS 和 MinIO 的成熟客户端创建并清理
+      Trial 专属 schema、topic 和对象前缀；`executeDockerEvalSandbox` 无 shell 执行固定计划，超时、
+      AbortSignal 或输出越界时强制删除容器。`pnpm eval:sandbox` 已在 Docker Engine 29.2.0 与真实
+      PostgreSQL/Kafka/MinIO 上验证非 root、只读根、noexec tmpfs、cap-drop、NoNewPrivs、network=none、
+      资源身份注入、超时删除以及所有外部资源清理。
 - [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
       `ExperimentStore` 已支持固定 seed/attempts、pass@k、cancel、失败重跑和 pending resume；新增
       Eval Trial claim token/worker lease、`FOR UPDATE SKIP LOCKED` 并发领取与过期 worker fence。
       过期 Trial 先标记 `worker_lease_expired`，retry 创建新 trialId，因此得到新的 database schema、
       sandbox object prefix 和 Kafka group；Schema hash 绑定完整 experiment/arm/trial 身份，重试不再共享
-      已污染 Schema。真实容器、Kafka 和网络 namespace 仍待基础设施环境验收。
+      已污染 Schema。基础设施原语已经通过真实验收，但仍需将 Trial claim、资源租约、Docker 执行和
+      exact-claim settlement 接入同一并发 runner，才能勾选本项。
 - [x] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
       `loadPersistedRunTrace` 直接从 PostgreSQL 投影 RunEvent、AgentTask/TaskResult、ToolCall/Approval、
       Evidence、Action/Edit Proposal、Batch 与 operation decision；正文、Tool 参数/输出和编辑操作不复制，

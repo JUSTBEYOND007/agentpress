@@ -22,13 +22,16 @@
     "@agentpress/runtime-tools": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
     "@sinclair/typebox": "catalog:",
-    "drizzle-orm": "catalog:"
+    "drizzle-orm": "catalog:",
+    "kafkajs": "catalog:",
+    "minio": "catalog:"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "eval:online": "node --env-file-if-exists=../../.env ../../node_modules/tsx/dist/cli.mjs src/online-cli.ts",
     "eval:compaction": "node --env-file-if-exists=../../.env ../../node_modules/tsx/dist/cli.mjs src/compaction-online-cli.ts",
     "eval:rag": "node --env-file-if-exists=../../.env ../../node_modules/tsx/dist/cli.mjs src/rag-provider-online-cli.ts",
+    "eval:sandbox": "node --env-file-if-exists=../../.env ../../node_modules/vitest/vitest.mjs run test/sandbox-infrastructure.integration.test.ts",
     "eval:skill": "node --env-file-if-exists=../../.env ../../node_modules/tsx/dist/cli.mjs src/skill-selection-online-cli.ts",
     "lint": "eslint src test",
     "test": "vitest run --exclude 'dist/**'",

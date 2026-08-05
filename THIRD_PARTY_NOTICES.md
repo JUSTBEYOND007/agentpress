@@ -12,6 +12,7 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - NestJS and Fastify — MIT
 - Drizzle ORM — Apache-2.0
 - KafkaJS 2.2.4 — MIT; patched locally to clamp empty request-queue timers for Node 24 compatibility
+- MinIO JavaScript client 8.0.6 — Apache-2.0; used directly for bounded evaluation-prefix lifecycle
 - OpenTelemetry JS Node SDK, OTLP HTTP exporters, Node auto-instrumentations and semantic conventions — Apache-2.0
 - ioredis — MIT
 - Tiptap and ProseMirror — MIT
@@ -38,6 +39,12 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 
 OpenTelemetry packages are used directly from their published npm releases; no source files
 are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm-lock.yaml`.
+
+Docker Engine/CLI, PostgreSQL, KafkaJS and the MinIO client are composed directly by
+`packages/agent-evals/src/docker-sandbox-runner.ts` and `sandbox-resources.ts`; no Harbor source is
+copied. Harbor remains an architecture-only reference because its source license could not be
+confirmed. The Docker acceptance fixture uses an immutable image digest and does not redistribute
+the image.
 
 ## Agent Skills Conformance Reference
 

@@ -216,8 +216,13 @@ claim instead of rebuilding model-visible state.
 For Eval, AgentPress keeps Harbor's isolation boundary as a persisted descriptor and adds a
 PostgreSQL Trial lease: `claimNextTrial` uses `FOR UPDATE SKIP LOCKED`, `settleTrial` requires the
 exact claim token, and `failExpiredTrials` marks a lost attempt failed before `retryTrial` creates a
-new Trial identity. This prevents a polluted attempt from reusing its object prefix or Kafka group;
-container/schema/network enforcement remains an infrastructure acceptance gate.
+new Trial identity. This prevents a polluted attempt from reusing its object prefix or Kafka group.
+No Harbor source is copied: AgentPress directly composes Docker CLI, Drizzle/PostgreSQL, KafkaJS and
+MinIO behind `EvalSandboxResourceManager` and `executeDockerEvalSandbox`. The fixed infrastructure
+test creates and removes real schema/topic/prefix resources and verifies the container's non-root,
+read-only, noexec, capability, NoNewPrivileges, network-none, bounded-output and timeout-cleanup
+contracts. The remaining Eval gap is the operational loop joining Trial claim, resource lease,
+container execution and exact-claim settlement.
 
 ## Primary Pi Business Reference
 
