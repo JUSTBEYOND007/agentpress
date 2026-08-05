@@ -57,7 +57,10 @@ cursor from PostgreSQL: completed same-argument operations remain distinct, whil
 Tool settlement uses a status compare-and-set so a late worker response cannot overwrite that
 recovery fact. A key stored by AgentPress is not treated as proof that an external provider committed
 the key atomically with its side effect; only read-only calls are automatically replayed after an
-unscoped Run worker loss.
+unscoped Run worker loss. Specialist provider thinking remains in its private persisted transcript;
+the closed `task_complete` contract and Main synthesis projection pass only the public summary,
+warnings/failure, Evidence, and Artifact summaries. PostgreSQL behavior tests assert the private
+thinking marker is absent from TaskResult, the Main turn, and the Main transcript.
 The source behavior is pinned at Oh My Pi commit `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`,
 `packages/coding-agent/src/registry/agent-lifecycle.ts` and
 `packages/coding-agent/test/registry/agent-lifecycle.test.ts`.

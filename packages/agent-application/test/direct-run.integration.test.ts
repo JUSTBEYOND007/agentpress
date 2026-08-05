@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
 import { hashBlock } from '@agentpress/editor-patch';
-import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
+import { fauxAssistantMessage, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import {
   agentSessions,
   agentSessionCompactions,
@@ -1489,6 +1489,85 @@ describeWithDatabase('Direct Run application flow', () => {
       new Set(['main', 'researcher', 'writer', 'editor', 'fact_checker', 'illustrator']),
     );
     expect(projection?.agents.slice(1).every(({ status }) => status === 'succeeded')).toBe(true);
+  });
+
+  it('projects only a Specialist public result to Main while keeping private thinking isolated', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const task = plannedTask('private-reasoning-boundary', 'researcher');
+    const privateThinking = 'PRIVATE-SPECIALIST-THINKING-84921';
+    const publicSummary = 'Public source-backed research summary';
+    const delegate = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Verify the Specialist result boundary',
+          tasks: [task],
+        }),
+        fauxAssistantMessage(
+          [
+            fauxThinking(privateThinking),
+            fauxToolCall('task_complete', {
+              status: 'succeeded',
+              summary: publicSummary,
+              artifacts: [],
+              warnings: [],
+            }),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+        runCompleteResponse('Main used only the public Specialist result.'),
+      ],
+    });
+    const observedMainSynthesisTurns: unknown[] = [];
+    const runtime: AgentRuntime = {
+      execute(request, sink, signal) {
+        if (request.tools?.some(({ name }) => name === 'run_complete')) {
+          observedMainSynthesisTurns.push(request.currentTurn);
+        }
+        return delegate.execute(request, sink, signal);
+      },
+    };
+    const isolatedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await isolatedService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '完成研究并只向 Main 返回公开结论',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(isolatedService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    expect(observedMainSynthesisTurns).toHaveLength(1);
+    expect(JSON.stringify(observedMainSynthesisTurns)).toContain(publicSummary);
+    expect(JSON.stringify(observedMainSynthesisTurns)).not.toContain(privateThinking);
+
+    const persistedResults = await connection.db
+      .select({ summary: taskResults.summary, artifacts: taskResults.artifacts })
+      .from(taskResults)
+      .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+      .where(eq(agentTasks.runId, run.runId));
+    expect(persistedResults).toEqual([{ summary: publicSummary, artifacts: [] }]);
+    expect(JSON.stringify(persistedResults)).not.toContain(privateThinking);
+
+    const transcriptRows = await connection.db
+      .select({ kind: agentSessions.kind, content: agentTranscriptEntries.content })
+      .from(agentTranscriptEntries)
+      .innerJoin(agentSessions, eq(agentSessions.id, agentTranscriptEntries.sessionId))
+      .where(eq(agentSessions.runId, run.runId));
+    const specialistTranscript = transcriptRows.filter(({ kind }) => kind === 'specialist');
+    const mainTranscript = transcriptRows.filter(({ kind }) => kind === 'main');
+    expect(JSON.stringify(specialistTranscript)).toContain(privateThinking);
+    expect(JSON.stringify(mainTranscript)).not.toContain(privateThinking);
   });
 
   it('repairs a failed Specialist protocol twice before accepting task_complete', async () => {

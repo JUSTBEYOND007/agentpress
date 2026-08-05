@@ -265,11 +265,14 @@ TODO：
       late success 已通过数据库和 Planned Run 集成回归验证。ToolCall 的 retry/recover checkpoint、
       task attempt fence、稳定逻辑操作键、Unknown Outcome 钉住和 stale settlement CAS 已通过隔离
       PostgreSQL 集成证明；真实 Kafka worker 丢失与重复 command 仍保留为基础设施验收门禁。
-- [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
+- [x] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
       已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities。
       PostgreSQL `context_packs` 不再保存完整 root request，只保留 detached 恢复所需的 current-turn 协议壳、
       Task 与宿主策略；正常、已审批 Tool continuation 和协议修复三条路径统一使用
-      `specialistApplicationTurn`，不会重新继承 Main request、context 或 capability。真实模型验收仍待完成。
+      `specialistApplicationTurn`，不会重新继承 Main request、context 或 capability。`task_complete` 使用 closed
+      Schema，TaskResult 与 Main synthesis envelope 只投影公开 summary、warnings/failure、Evidence 与 Artifact
+      摘要。PostgreSQL 回归证明 provider thinking 只保留在 Specialist transcript，不进入 TaskResult、Main turn
+      或 Main transcript；真实模型的路由、委派和合并质量仍由下方独立 online gate 验收。
 - [x] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、
       EditProposal、Artifact 和 PostgreSQL Checkpoint。
 - [x] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
