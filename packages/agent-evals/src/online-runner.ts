@@ -7,12 +7,28 @@ import type { EvalScenario } from './scenarios.js';
 
 export const ONLINE_EVAL_PROMPT_VERSION = 'agentpress-orchestrator-v2';
 
+export type OnlineEvalProvider = 'faux' | 'volcengine-ark' | 'openai-compatible';
+
+export type OnlineEvalVersionManifest = {
+  readonly model: string;
+  readonly prompt: { readonly id: string; readonly version: string };
+  readonly skills: readonly { readonly skillId: string; readonly version: string }[];
+  readonly tools: readonly { readonly toolId: string; readonly version: string }[];
+  readonly context: { readonly policyVersion: string; readonly schemaVersion: string };
+  readonly runtime: {
+    readonly provider: OnlineEvalProvider;
+    readonly adapterVersion: string;
+    readonly configVersion: string;
+  };
+};
+
 export type OrchestratorEvalResult = {
   readonly observation: PersistedRunObservation;
   readonly usage: RuntimeUsage;
   readonly runId?: string;
   readonly model: string;
   readonly promptRevision?: string;
+  readonly versionManifest: OnlineEvalVersionManifest;
 };
 
 export type OrchestratorEvalHarness = {
@@ -31,6 +47,7 @@ export type OnlineEvalItem = {
   readonly runId?: string;
   readonly model?: string;
   readonly promptRevision?: string;
+  readonly versionManifest: OnlineEvalVersionManifest;
   readonly error?: string;
 };
 
@@ -42,15 +59,16 @@ export type OnlineEvalLimits = {
 };
 
 export type OnlineEvalReport = {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly promptVersion: typeof ONLINE_EVAL_PROMPT_VERSION;
   readonly executionMode: 'deterministic_pr' | 'target_model';
   readonly qualifiesAsTargetModelEvidence: boolean;
   readonly model: string;
-  readonly provider: 'faux' | 'volcengine-ark' | 'openai-compatible';
+  readonly provider: OnlineEvalProvider;
   readonly startedAt: string;
   readonly completedAt: string;
   readonly limits: OnlineEvalLimits;
+  readonly versionManifest: OnlineEvalVersionManifest;
   readonly totals: {
     readonly scenarios: number;
     readonly totalTokens: number;
@@ -68,6 +86,7 @@ export type RunOnlineEvalsOptions = {
   readonly provider?: OnlineEvalReport['provider'];
   readonly scenarios: readonly EvalScenario[];
   readonly limits: OnlineEvalLimits;
+  readonly versionManifest: OnlineEvalVersionManifest;
   readonly now?: () => Date;
 };
 
@@ -83,6 +102,7 @@ const emptyUsage: RuntimeUsage = {
 export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<OnlineEvalReport> {
   validateLimits(options.limits);
   const execution = resolveExecutionMode(options.executionMode, options.provider);
+  validateVersionManifest(options.versionManifest, options.model, execution.provider);
   const now = options.now ?? (() => new Date());
   const startedAt = now().toISOString();
   const selected = options.scenarios.slice(0, options.limits.maxScenarios);
@@ -99,6 +119,7 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
       const started = performance.now();
       try {
         const result = await options.orchestrator.runScenario(scenario);
+        validateVersionManifest(result.versionManifest, result.model, execution.provider);
         if (execution.mode === 'deterministic_pr' && result.usage.costUsd !== 0) {
           throw new Error('Deterministic PR eval cannot report external model cost');
         }
@@ -115,6 +136,7 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
           ...(result.runId ? { runId: result.runId } : {}),
           model: result.model,
           ...(result.promptRevision ? { promptRevision: result.promptRevision } : {}),
+          versionManifest: result.versionManifest,
         });
         totalTokens += result.usage.totalTokens;
         costUsd += result.usage.costUsd;
@@ -128,6 +150,7 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
           latencyMs: Math.round(performance.now() - started),
           usage: emptyUsage,
           observation: fallback,
+          versionManifest: options.versionManifest,
           error: error instanceof Error ? error.message : 'Unknown orchestrator eval error',
         });
       }
@@ -148,12 +171,13 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
     score.securityPassed &&
     items.length === selected.length;
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     promptVersion: ONLINE_EVAL_PROMPT_VERSION,
     executionMode: execution.mode,
     qualifiesAsTargetModelEvidence: execution.mode === 'target_model',
     model: options.model,
     provider: execution.provider,
+    versionManifest: options.versionManifest,
     startedAt,
     completedAt: now().toISOString(),
     limits: options.limits,
@@ -162,6 +186,34 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
     gatesPassed,
     items,
   };
+}
+
+function validateVersionManifest(
+  manifest: OnlineEvalVersionManifest,
+  model: string,
+  provider: OnlineEvalReport['provider'],
+): void {
+  if (manifest.model !== model) throw new Error('Online eval version manifest model mismatch');
+  if (manifest.runtime.provider !== provider)
+    throw new Error('Online eval version manifest provider mismatch');
+  const required = [
+    manifest.prompt.id,
+    manifest.prompt.version,
+    manifest.context.policyVersion,
+    manifest.context.schemaVersion,
+    manifest.runtime.adapterVersion,
+    manifest.runtime.configVersion,
+  ];
+  if (required.some((value) => typeof value !== 'string' || value.trim().length === 0))
+    throw new Error('Online eval version manifest is incomplete');
+  const skills: readonly { readonly skillId: string; readonly version: string }[] = manifest.skills;
+  const tools: readonly { readonly toolId: string; readonly version: string }[] = manifest.tools;
+  for (const skill of skills)
+    if (!skill.skillId.trim() || !skill.version.trim())
+      throw new Error('Online eval Skill version manifest is incomplete');
+  for (const tool of tools)
+    if (!tool.toolId.trim() || !tool.version.trim())
+      throw new Error('Online eval tool version manifest is incomplete');
 }
 
 function resolveExecutionMode(

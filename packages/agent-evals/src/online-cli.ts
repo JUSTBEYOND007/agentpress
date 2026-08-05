@@ -19,7 +19,11 @@ import {
   conversationMessages,
   conversations,
   evidenceRecords,
+  promptRevisions,
+  runContextPacks,
   runEvents,
+  runSkillBindings,
+  skillRevisions,
   toolCalls,
   workspaceMembers,
   workspaces,
@@ -51,6 +55,18 @@ const { values } = parseArgs({
 const modelConfiguration = loadOnlineModelConfiguration();
 const proModel = modelConfiguration.proModel;
 const turboModel = modelConfiguration.turboModel;
+const declaredVersionManifest = {
+  model: proModel,
+  prompt: { id: 'agentpress.main', version: 'runtime-bound' },
+  skills: [],
+  tools: [],
+  context: { policyVersion: 'agentpress.context-policy-v1', schemaVersion: '1' },
+  runtime: {
+    provider: modelConfiguration.kind,
+    adapterVersion: 'pi-runtime@0.82.1',
+    configVersion: 'agentpress-online-config-v1',
+  },
+} as const;
 const databaseUrl = requiredEnv('DATABASE_URL');
 const category = parseCategory(values.category);
 const categoryScenarios = category
@@ -92,6 +108,7 @@ try {
     provider: modelConfiguration.kind,
     scenarios,
     limits,
+    versionManifest: declaredVersionManifest,
   });
   const outputDirectory = resolve(values['output-dir']);
   await mkdir(outputDirectory, { recursive: true });
@@ -282,6 +299,8 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
         toolRows,
         eventRows,
         actionProposalRows,
+        promptRows,
+        skillRows,
       ] = await Promise.all([
         connection.db
           .select({
@@ -314,7 +333,11 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
           .where(eq(toolCalls.runId, created.runId)),
         connection.db
-          .select({ status: toolCalls.status })
+          .select({
+            status: toolCalls.status,
+            toolId: toolCalls.toolId,
+            toolVersion: toolCalls.toolVersion,
+          })
           .from(toolCalls)
           .where(eq(toolCalls.runId, created.runId)),
         connection.db
@@ -325,15 +348,68 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           .select({ id: actionProposals.id })
           .from(actionProposals)
           .where(eq(actionProposals.sourceRunId, created.runId)),
+        connection.db
+          .select({
+            promptId: promptRevisions.promptId,
+            promptVersion: promptRevisions.version,
+            contextManifest: runContextPacks.manifest,
+          })
+          .from(runContextPacks)
+          .innerJoin(promptRevisions, eq(promptRevisions.id, runContextPacks.promptRevisionId))
+          .where(eq(runContextPacks.runId, created.runId)),
+        connection.db
+          .select({ skillId: skillRevisions.skillId, version: skillRevisions.version })
+          .from(runSkillBindings)
+          .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
+          .where(eq(runSkillBindings.runId, created.runId)),
       ]);
       const run = runRows[0];
       if (!run) throw new Error('Persisted eval Run disappeared');
       const finalUsage = recordValue(run.finalOutcome).usage;
       const usage = isUsage(finalUsage) ? finalUsage : emptyUsage;
+      const contextManifest = recordValue(promptRows[0]?.contextManifest);
+      const skillVersions = recordValue(contextManifest.skillVersions);
+      const contextSchemaVersion = contextManifest.schemaVersion;
+      const versionManifest = {
+        model: proModel,
+        prompt: {
+          id: promptRows[0]?.promptId ?? 'agentpress.main',
+          version: promptRows[0]?.promptVersion ?? 'unknown',
+        },
+        skills: skillRows.map(({ skillId, version }) => ({ skillId, version })),
+        tools: toolRows
+          .map(({ toolId, toolVersion }) => ({ toolId, version: toolVersion }))
+          .filter(
+            (tool, index, all) =>
+              all.findIndex(
+                (candidate) =>
+                  candidate.toolId === tool.toolId && candidate.version === tool.version,
+              ) === index,
+          ),
+        context: {
+          policyVersion: 'agentpress.context-policy-v1',
+          schemaVersion:
+            typeof contextSchemaVersion === 'string' || typeof contextSchemaVersion === 'number'
+              ? String(contextSchemaVersion)
+              : '1',
+        },
+        runtime: {
+          provider: modelConfiguration.kind,
+          adapterVersion: 'pi-runtime@0.82.1',
+          configVersion: 'agentpress-online-config-v1',
+        },
+      } as const;
+      if (
+        Object.keys(skillVersions).some(
+          (skillId) => !skillRows.some((skill) => skill.skillId === skillId),
+        )
+      )
+        throw new Error('Persisted context Skill manifest does not match Skill bindings');
       return {
         runId: created.runId,
         model: proModel,
         promptRevision: 'agentpress.main',
+        versionManifest,
         usage,
         observation: {
           scenarioId: scenario.id,
