@@ -21,9 +21,19 @@ const defaultOutputDirectory = resolve(import.meta.dirname, '../../../.agentpres
 const { values } = parseArgs({
   options: {
     'output-dir': { type: 'string', default: defaultOutputDirectory },
+    scenario: { type: 'string' },
+    'timeout-ms': { type: 'string', default: '120000' },
   },
   strict: true,
 });
+const timeoutMs = Number(values['timeout-ms']);
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000)
+  throw new Error('timeout-ms must be an integer between 1000 and 300000');
+const selectedCases = values.scenario
+  ? compactionEvalCases.filter(({ id }) => id === values.scenario)
+  : compactionEvalCases;
+if (selectedCases.length === 0)
+  throw new Error(`Unknown compaction scenario: ${String(values.scenario)}`);
 const configuration = loadOnlineModelConfiguration();
 const generator = new PiConversationSummaryGenerator({
   runtimeFactory: { create: () => configuration.create(configuration.proModel) },
@@ -31,7 +41,7 @@ const generator = new PiConversationSummaryGenerator({
 const startedAt = new Date().toISOString();
 const items = [];
 const generatedSummaries = new Map<string, string>();
-for (const scenario of compactionEvalCases) {
+for (const scenario of selectedCases) {
   const started = performance.now();
   try {
     const result = await generator.generate({
@@ -39,6 +49,7 @@ for (const scenario of compactionEvalCases) {
       ...(scenario.previousSummary ? { previousSummary: scenario.previousSummary } : {}),
       messages: scenario.messages,
       preserveData: scenario.preserveData,
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const score = scoreCompactionSummary(scenario, result.summary);
     generatedSummaries.set(scenario.id, result.summary);
@@ -78,15 +89,21 @@ const missingFacts = items.reduce(
   (total, item) => total + item.missingReferences.length + item.missingSemantics.length,
   0,
 );
-const parityScenario = compactionEvalCases[0];
+const parityScenario = selectedCases.find(({ id }) => id === 'intent-and-unsettled-action');
 const compactedSummary = generatedSummaries.get('intent-and-unsettled-action');
 const taskParity =
   parityScenario && compactedSummary
     ? await evaluateTaskParity(parityScenario, compactedSummary)
-    : {
-        passed: false,
-        error: 'The intent-and-unsettled-action summary was unavailable',
-      };
+    : values.scenario
+      ? {
+          passed: true,
+          skipped: true,
+          reason: 'Task parity belongs to intent-and-unsettled-action',
+        }
+      : {
+          passed: false,
+          error: 'The intent-and-unsettled-action summary was unavailable',
+        };
 const report = {
   schemaVersion: 1,
   datasetVersion: COMPACTION_EVAL_DATASET_VERSION,

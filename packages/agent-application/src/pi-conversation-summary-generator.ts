@@ -5,7 +5,7 @@ import { Type } from '@sinclair/typebox';
 import type { AgentRuntimeFactory } from './contracts.js';
 
 export const CONVERSATION_COMPACTION_PROMPT_VERSION =
-  'agentpress.conversation-compaction@1' as const;
+  'agentpress.conversation-compaction@2' as const;
 
 const completionSchema = Type.Object(
   {
@@ -65,6 +65,7 @@ export class PiConversationSummaryGenerator {
   }): Promise<ConversationSummaryGeneration> {
     const runtime = this.options.runtimeFactory.create('conversation_compaction');
     const model = `${runtime.identity?.provider ?? 'unknown'}/${runtime.identity?.model ?? 'unknown'}`;
+    const protectedReferences = collectProtectedReferences(input.preserveData);
     let completion: { readonly summary: string; readonly shortSummary?: string } | undefined;
     const tool: RuntimeTool = {
       name: 'conversation_compaction_complete',
@@ -91,6 +92,17 @@ export class PiConversationSummaryGenerator {
           throw new ConversationSummaryGenerationError(
             'schema_failure',
             'Conversation compaction returned an invalid short summary',
+            true,
+            model,
+          );
+        }
+        const missingReferences = protectedReferences.filter(
+          (reference) => !summary.includes(reference),
+        );
+        if (missingReferences.length > 0) {
+          throw new ConversationSummaryGenerationError(
+            'schema_failure',
+            `Conversation compaction omitted protected references: ${missingReferences.join(', ')}`,
             true,
             model,
           );
@@ -159,6 +171,17 @@ export class PiConversationSummaryGenerator {
       promptVersion: CONVERSATION_COMPACTION_PROMPT_VERSION,
     };
   }
+}
+
+function collectProtectedReferences(value: unknown): readonly string[] {
+  if (typeof value === 'string') return value.trim() ? [value] : [];
+  if (Array.isArray(value)) return [...new Set(value.flatMap(collectProtectedReferences))];
+  if (typeof value !== 'object' || value === null) return [];
+  return [
+    ...new Set(
+      Object.values(value as Readonly<Record<string, unknown>>).flatMap(collectProtectedReferences),
+    ),
+  ];
 }
 
 function summarySystemPrompt(incremental: boolean): string {

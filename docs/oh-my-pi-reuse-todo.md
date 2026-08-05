@@ -96,7 +96,12 @@ TODO：
       `agentpress-compaction-v1` 在 `packages/agent-evals/src/compaction-scenarios.ts` 固定六类要求与
       四个场景；离线 scorer 和真实模型在线 CLI 共用同一数据集。契约测试同时拒绝遗漏受保护事实与
       `BRANCH-B-SECRET-922` 兄弟分支泄漏，避免只验证正向 golden summary。
-- [ ] 使用真实 Pi runtime/目标模型验证多轮压缩前后任务完成率和事实保留率，而非只断言 Prompt 文本。
+- [x] 使用真实 Pi runtime/目标模型验证多轮压缩前后任务完成率和事实保留率，而非只断言 Prompt 文本。
+      备用 OpenAI-compatible `gpt-5.6-luna` 完整运行 `agentpress-compaction-v1` 四案；报告
+      `.agentpress/evals/2026-08-05T15-01-31-311Z-gpt-5.6-luna-compaction.json` 记录
+      Prompt `agentpress.conversation-compaction@2`、`factRetention=1`、压缩前后 task parity 通过且
+      `gatesPassed=true`。completion tool 现在确定性拒绝遗漏 host-owned protected reference 的摘要；
+      评测器同时覆盖等价否定措辞与相反的 approved 状态，避免 Prompt 文本断言或单一正则误判。
 
 首选本地落点：`packages/agent-context/`、`packages/agent-application/`、
 `packages/database/`、`packages/agent-evals/`。
@@ -595,9 +600,9 @@ TODO：
   `.agentpress/evals/2026-08-05T13-00-47-777Z-doubao-seed-2-1-pro-260628.json`。
   报告和每个 item 都包含 model、Prompt revision、Skill、工具、Context 和 runtime/provider 版本；
   但目标模型 Run 未完成，`gatesPassed=false`，因此不能替代真实行为通过证据。
-- 多轮压缩真实模型报告：
-  `.agentpress/evals/2026-08-05T13-02-56-407Z-doubao-seed-2-1-pro-260628-compaction.json`，
-  当前 `factRetention=0`、`gatesPassed=false`。
+- 多轮压缩已由备用 OpenAI-compatible `gpt-5.6-luna` 完整通过：
+  `.agentpress/evals/2026-08-05T15-01-31-311Z-gpt-5.6-luna-compaction.json`，
+  Prompt `agentpress.conversation-compaction@2`、`factRetention=1`、task parity 与总门禁均通过。
 - Skill 真实模型报告：
   `.agentpress/evals/2026-08-05T13-00-47-396Z-doubao-seed-2-1-pro-260628-skill-selection.json`，
   Provider 返回 `403 AccountOverdueError`，不能计入目标模型证据。

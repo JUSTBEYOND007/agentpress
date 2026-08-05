@@ -65,4 +65,24 @@ describe('compaction evaluation dataset', () => {
       forbiddenReferences: ['BRANCH-B-SECRET-922'],
     });
   });
+
+  it('accepts equivalent rejection wording but rejects the opposite approved state', () => {
+    const scenario = compactionEvalCases.find(({ id }) => id === 'incremental-stale-state');
+    if (!scenario) throw new Error('Stale-state fixture is missing');
+    const references =
+      'STATE-DRAFT-PENDING-810 EVID-BETA-811 STATE-DRAFT-REJECTED-812';
+
+    expect(
+      scoreCompactionSummary(
+        scenario,
+        `${references}. The draft was rejected and must not be called approved.`,
+      ).passed,
+    ).toBe(true);
+    expect(
+      scoreCompactionSummary(
+        scenario,
+        `${references}. The draft was rejected earlier but is now approved.`,
+      ).passed,
+    ).toBe(false);
+  });
 });

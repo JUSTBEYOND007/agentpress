@@ -20,7 +20,7 @@ describe('ConversationCompactionService', () => {
         shortSummary: 'Updated',
         tokenCount: 8,
         model: 'test/summary',
-        promptVersion: 'agentpress.conversation-compaction@1' as const,
+        promptVersion: 'agentpress.conversation-compaction@2' as const,
       });
     };
     const service = new ConversationCompactionService({

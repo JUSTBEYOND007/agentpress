@@ -45,7 +45,10 @@ describe('PiConversationSummaryGenerator', () => {
       execute: async (request): Promise<RuntimeResult> => {
         capturedRequest = request;
         await request.tools?.[0]?.execute(
-          { summary: 'Earlier intent plus the new decision.', shortSummary: 'Decision updated' },
+          {
+            summary: 'Earlier intent plus the new decision with evidence-1.',
+            shortSummary: 'Decision updated',
+          },
           { runId: request.runId, providerToolCallId: 'summary-call' },
         );
         return { status: 'completed', messages: [] };
@@ -68,10 +71,10 @@ describe('PiConversationSummaryGenerator', () => {
         preserveData: { evidenceIds: ['evidence-1'] },
       }),
     ).resolves.toMatchObject({
-      summary: 'Earlier intent plus the new decision.',
+      summary: 'Earlier intent plus the new decision with evidence-1.',
       shortSummary: 'Decision updated',
       model: 'test/summary-model',
-      promptVersion: 'agentpress.conversation-compaction@1',
+      promptVersion: 'agentpress.conversation-compaction@2',
     });
     expect(capturedRequest?.tools?.[0]).toMatchObject({
       name: 'conversation_compaction_complete',
@@ -80,6 +83,31 @@ describe('PiConversationSummaryGenerator', () => {
     });
     expect(capturedRequest?.currentTurn.request).toContain('Earlier intent.');
     expect(capturedRequest?.currentTurn.request).toContain('Use the verified source.');
+  });
+
+  it('rejects a structured summary that omits a host-owned protected reference', async () => {
+    const runtime: AgentRuntime = {
+      identity: { provider: 'test', model: 'summary-model' },
+      execute: async (request): Promise<RuntimeResult> => {
+        await request.tools?.[0]?.execute(
+          { summary: 'The decision remains unresolved.' },
+          { runId: request.runId, providerToolCallId: 'summary-call' },
+        );
+        return { status: 'completed', messages: [] };
+      },
+    };
+    const generator = new PiConversationSummaryGenerator({
+      runtimeFactory: { create: () => runtime },
+      createId: () => 'summary-run',
+    });
+
+    await expect(
+      generator.generate({
+        branchId: 'branch-1',
+        messages: [{ sequence: 1, role: 'user', content: 'Keep the pending action.' }],
+        preserveData: { unsettledToolCallIds: ['TOOL-PENDING-734'] },
+      }),
+    ).rejects.toMatchObject({ code: 'schema_failure', retryable: true });
   });
 
   it('fails structurally when the model does not call the completion tool', async () => {

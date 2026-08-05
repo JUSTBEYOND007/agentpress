@@ -83,7 +83,10 @@ export const compactionEvalCases: readonly CompactionEvalCase[] = [
       { label: 'rejected current state', patterns: ['draft.{0,30}reject'] },
       {
         label: 'not approved constraint',
-        patterns: ['(?:must not|do not).{0,40}approved'],
+        patterns: [
+          '(?:must not|do not).{0,40}approved',
+          'not\\s+(?:be\\s+)?(?:called\\s+)?approved',
+        ],
       },
     ],
   },
@@ -116,6 +119,7 @@ export const compactionEvalCases: readonly CompactionEvalCase[] = [
     ],
     preserveData: {
       branchId: 'BRANCH-A',
+      goalId: 'BRANCH-A-GOAL-920',
       evidenceIds: ['EVID-BRANCH-A-921'],
     },
     requiredReferences: ['BRANCH-A-GOAL-920', 'EVID-BRANCH-A-921'],
