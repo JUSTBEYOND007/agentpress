@@ -163,6 +163,7 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
   );
   items.sort((left, right) => left.scenarioId.localeCompare(right.scenarioId));
   const score = scoreEvals(items.map(({ observation }) => observation));
+  const reportVersionManifest = mergeVersionManifests(options.versionManifest, items);
   const gatesPassed =
     score.routingAccuracy >= 0.9 &&
     score.delegationAccuracy >= 0.9 &&
@@ -177,7 +178,7 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
     qualifiesAsTargetModelEvidence: execution.mode === 'target_model',
     model: options.model,
     provider: execution.provider,
-    versionManifest: options.versionManifest,
+    versionManifest: reportVersionManifest,
     startedAt,
     completedAt: now().toISOString(),
     limits: options.limits,
@@ -186,6 +187,37 @@ export async function runOnlineEvals(options: RunOnlineEvalsOptions): Promise<On
     gatesPassed,
     items,
   };
+}
+
+function mergeVersionManifests(
+  declared: OnlineEvalVersionManifest,
+  items: readonly OnlineEvalItem[],
+): OnlineEvalVersionManifest {
+  const manifests = items.map(({ versionManifest }) => versionManifest);
+  const prompt =
+    manifests.find(({ prompt }) => prompt.version !== 'runtime-bound')?.prompt ?? declared.prompt;
+  const skills = uniqueVersions(
+    [declared.skills, ...manifests.map(({ skills: value }) => value)].flat(),
+    'skillId',
+  );
+  const tools = uniqueVersions(
+    [declared.tools, ...manifests.map(({ tools: value }) => value)].flat(),
+    'toolId',
+  );
+  return { ...declared, prompt, skills, tools };
+}
+
+function uniqueVersions<T extends { readonly version: string }>(
+  values: readonly T[],
+  identity: keyof T,
+): readonly T[] {
+  return values.filter(
+    (value, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate[identity] === value[identity] && candidate.version === value.version,
+      ) === index,
+  );
 }
 
 function validateVersionManifest(

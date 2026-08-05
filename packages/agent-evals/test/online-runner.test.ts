@@ -62,6 +62,8 @@ describe('online Agent eval runner', () => {
     expect(report.gatesPassed).toBe(true);
     expect(report.schemaVersion).toBe(3);
     expect(report.promptVersion).toBe('agentpress-orchestrator-v2');
+    expect(report.versionManifest.prompt.version).toBe('test-prompt@1');
+    expect(report.versionManifest.tools).toEqual([{ toolId: 'test.tool', version: '1.0.0' }]);
     expect(report).toMatchObject({
       executionMode: 'deterministic_pr',
       provider: 'faux',
