@@ -137,6 +137,64 @@ describe('sandbox Trial runner', () => {
     expect(summary).toMatchObject({ recovered: 1, retriesCreated: 1, succeeded: 1 });
     expect(settlements).toEqual([{ trialId: replacement.trialId, status: 'succeeded' }]);
   });
+
+  it('cancels the persisted Experiment before settling an active sandbox', async () => {
+    const claim = makeClaim(1);
+    const descriptors = new Map([[claim.trialId, descriptorFor(claim.trialId, claim.armId)]]);
+    const settlements: { trialId: string; status: string }[] = [];
+    let cancelled = false;
+    const store = fakeStore({
+      claims: [claim],
+      descriptors,
+      settlements,
+      complete: () => false,
+      onCancel: () => {
+        cancelled = true;
+      },
+    });
+    const controller = new AbortController();
+    const execute = async (
+      _plan: Parameters<NonNullable<Parameters<typeof runSandboxExperiment>[0]['execute']>>[0],
+      options?: { readonly signal?: AbortSignal },
+    ) => {
+      await new Promise<void>((resolve) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      throw new Error('cancelled by test');
+    };
+    const resources = {
+      provision: (descriptor: EvalSandboxDescriptor) =>
+        Promise.resolve({ descriptor, cleanup: () => Promise.resolve() }),
+      cleanupAbandoned: () => Promise.resolve(),
+    };
+    const run = runSandboxExperiment({
+      store,
+      resources,
+      experimentId: 'experiment',
+      workerId: 'worker',
+      cases: [{ id: 'case', command: () => ['sh'] }],
+      arms: [{ armId: claim.armId, image: 'image@sha256:' + 'a'.repeat(64) }],
+      concurrency: 1,
+      leaseMs: 1_000,
+      retrySeed: 'seed',
+      maxAttemptsPerCase: 3,
+      signal: controller.signal,
+      execute,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    controller.abort();
+    const summary = await run;
+
+    expect(cancelled).toBe(true);
+    expect(summary).toMatchObject({ claimed: 1, cancelled: 1, retriesCreated: 0 });
+    expect(settlements).toEqual([{ trialId: claim.trialId, status: 'cancelled' }]);
+  });
 });
 
 function makeClaim(attempt: number): EvalTrialClaim {
@@ -163,10 +221,14 @@ function fakeStore(input: {
   readonly complete: () => boolean;
   readonly expired?: readonly string[];
   readonly retry?: (trialId: string) => Promise<string | undefined>;
+  readonly onCancel?: () => void;
 }) {
   const claims = [...input.claims];
   return {
-    cancelExperiment: () => Promise.resolve(true),
+    cancelExperiment: () => {
+      input.onCancel?.();
+      return Promise.resolve(true);
+    },
     claimNextTrial: () => Promise.resolve(claims.shift()),
     completeExperimentIfSettled: () => Promise.resolve(input.complete()),
     failExpiredTrials: () => Promise.resolve(input.expired ?? []),
