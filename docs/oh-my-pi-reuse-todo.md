@@ -467,13 +467,14 @@ TODO：
       byte size 和聚合 hash，额外、缺失或被篡改的 resource 均 fail closed。
 - [x] 首版不复制 managed/autolearn Skill 自动写入；当前只有显式的 PostgreSQL Skill revision/proposal 边界，未来如采用仍必须走 proposal、diff、审批、版本和回滚。
 - [x] 不自动执行 Skill 脚本；Skill 只加载 Markdown 与声明的静态 regular-file resource，不执行脚本或隐式授予工具。
-- [ ] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。
+- [x] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。
       已完成离线 conformance/prompt-injection 契约集：`validateSkillConformance`、损坏/冲突发现告警、Skill/resource `trust="untrusted"` 断言；
       新增 `pnpm eval:skill`，固定五案测试 exact selection、显式绑定去重、隐藏/禁用项和恶意 description，报告模型、数据集版本、逐案选择、
       exactMatchRate、forbiddenSelections 和 gatesPassed。入口自动读取根目录 `.env`，报告同时固定 provider、Prompt、Tool 和 Pi current-turn
-      协议版本，并统一写入根目录 `.agentpress/evals`。2026-08-04 使用 `pnpm eval:skill --limit 1` 验证入口后，Ark 返回
-      `403 AccountOverdueError`；该次运行正确记为 `errors=1`、`gatesPassed=false`，不能作为真实模型通过证据。余额恢复后仍需运行完整五案并达到
-      `exactMatchRate >= 0.8`、`forbiddenSelections = 0`、`errors = 0` 才可勾选。
+      协议版本，并统一写入根目录 `.agentpress/evals`。Ark 欠费运行仍保留为 fail-closed 历史证据；随后使用备用
+      OpenAI-compatible `gpt-5.6-luna` 完整运行五案，报告
+      `.agentpress/evals/2026-08-05T15-02-24-190Z-gpt-5.6-luna-skill-selection.json` 取得
+      `exactMatchRate=1`、`forbiddenSelections=0`、`errors=0`、`gatesPassed=true`。
 
 首选本地落点：`packages/agent-context/`、`packages/database/`、`packages/agent-evals/`。
 
@@ -603,9 +604,9 @@ TODO：
 - 多轮压缩已由备用 OpenAI-compatible `gpt-5.6-luna` 完整通过：
   `.agentpress/evals/2026-08-05T15-01-31-311Z-gpt-5.6-luna-compaction.json`，
   Prompt `agentpress.conversation-compaction@2`、`factRetention=1`、task parity 与总门禁均通过。
-- Skill 真实模型报告：
-  `.agentpress/evals/2026-08-05T13-00-47-396Z-doubao-seed-2-1-pro-260628-skill-selection.json`，
-  Provider 返回 `403 AccountOverdueError`，不能计入目标模型证据。
+- Skill 已由备用 OpenAI-compatible `gpt-5.6-luna` 完整五案通过：
+  `.agentpress/evals/2026-08-05T15-02-24-190Z-gpt-5.6-luna-skill-selection.json`，
+  `exactMatchRate=1`、禁用/隐藏/恶意 description 选择为零且 `gatesPassed=true`。
 - RAG 真实 provider 门禁保持 fail-closed：`.env` 未配置 `ARK_RERANK_MODEL`，且 Ark `/models`
   查询没有可用 rerank endpoint，故未伪造 Recall/MRR/NDCG 结果。
 
