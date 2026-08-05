@@ -28,7 +28,7 @@ export type EvalExpectation = {
 };
 export type EvalScenario = {
   readonly id: string;
-  readonly version: 2;
+  readonly version: 3;
   readonly category: EvalCategory;
   readonly prompt: string;
   readonly setup?: {
@@ -109,7 +109,7 @@ export const evalScenarios: readonly EvalScenario[] = [
   scenario(
     'delegation-01',
     'delegation',
-    '研究后写作并核查事实',
+    '研究 Kafka 消费者组再均衡的工作机制，基于可引用来源撰写一篇 800 字中文技术解读，并由事实核查角色复核关键声明。',
     expectation(
       ['planned'],
       ['researcher', 'writer', 'fact_checker'],
@@ -121,56 +121,63 @@ export const evalScenarios: readonly EvalScenario[] = [
   scenario(
     'delegation-02',
     'delegation',
-    '只润色当前段落',
+    '只润色当前文章的第一段，使其更简洁；不要联网研究或增加事实。',
     expectation(['direct'], [], [], [], 'optional', 'optional', undefined, undefined, 'required'),
     { bindArticle: true },
   ),
   scenario(
     'delegation-03',
     'delegation',
-    '为文章寻找授权配图',
-    expectation(
-      ['planned'],
-      ['illustrator'],
-      ['licensed_media.search'],
-      ['AssetProposal'],
-      'required',
-    ),
+    '为一篇介绍上海天文馆的文章交付两份相互独立的成果：一份由写作角色完成的三段式内容大纲，以及一份由视觉角色完成的配图计划（画面、构图、尺寸、无障碍替代文本和许可要求）。不搜索、导入或生成素材。',
+    expectation(['planned'], ['writer', 'illustrator'], [], ['Outline', 'ImagePlan']),
   ),
   scenario(
     'delegation-04',
     'delegation',
-    '比较资料并列出证据',
-    expectation(['planned'], ['researcher'], ['web.research'], ['ResearchBrief'], 'required'),
+    '为当前文章同时交付两项相互独立的成果：将 Kafka exactly-once 段落改成不超过 120 字的准确表述并生成可审阅修改提案；另行制定一份解释 Kafka 事务边界的配图计划，包含构图、尺寸和无障碍替代文本。不联网搜索、导入或生成素材。',
+    expectation(
+      ['planned'],
+      ['editor', 'illustrator'],
+      [],
+      ['EditProposal', 'ImagePlan'],
+    ),
+    { bindArticle: true },
   ),
   scenario(
     'delegation-05',
     'delegation',
-    '编辑与事实核查串行复审',
+    '先编辑当前文章中关于 Kafka exactly-once 语义的段落，再由事实核查角色按以下给定验收规则复核编辑结果：保证只适用于 Kafka 事务性读-处理-写链路；外部数据库或 HTTP 副作用仍需幂等或去重；不得声称所有消费端在任何情况下都绝不重复。本用例只核对给定规则，不联网检索。',
     expectation(
       ['planned'],
       ['editor', 'fact_checker'],
       [],
       ['EditProposal', 'ClaimReview'],
-      'required',
+      'optional',
     ),
+    { bindArticle: true },
   ),
   scenario(
     'parallelism-01',
     'parallelism',
-    '并行研究三个独立来源',
-    expectation(['planned'], ['researcher'], ['web.research'], ['ResearchBrief'], 'required'),
+    '并行处理三份给定材料并分别形成 ResearchBrief，最后由写作角色合并为 ArticleDraft。每个 Specialist 的 Task Brief 必须逐字包含它所需的材料，不得只写“材料 A/B/C”：材料 A = “组成员变化会触发分区重新分配”；材料 B = “cooperative rebalance 可渐进转移分区”；材料 C = “消费者协议由 coordinator 计算分配”。不联网检索。',
+    expectation(
+      ['planned'],
+      ['researcher', 'writer'],
+      [],
+      ['ResearchBrief', 'ArticleDraft'],
+    ),
   ),
   scenario(
     'parallelism-02',
     'parallelism',
-    '同时核查两组独立声明',
-    expectation(['planned'], ['fact_checker'], [], ['ClaimReview'], 'required'),
+    '基于当前文章修订交付两项互不依赖、可并行执行的成果：Editor 将 exactly-once 段落改为准确的 120 字内表述并生成可审阅 EditProposal；Illustrator 基于当前 revision 独立输出解释事务边界的 ImagePlan，包含构图、尺寸和无障碍替代文本。两者不得互相依赖，不联网搜索、导入或生成素材。',
+    expectation(['planned'], ['editor', 'illustrator'], [], ['EditProposal', 'ImagePlan']),
+    { bindArticle: true },
   ),
   scenario(
     'parallelism-03',
     'parallelism',
-    '并行生成大纲和图片计划',
+    '为一篇“城市夜间经济”专题并行生成文章大纲和配套图片计划，两个结果互不依赖，最后汇总。',
     expectation(['planned'], ['writer', 'illustrator'], [], ['Outline', 'ImagePlan']),
   ),
   scenario(
@@ -349,7 +356,7 @@ function scenario(
 ): EvalScenario {
   return {
     id: `agentpress-${id}`,
-    version: 2,
+    version: 3,
     category,
     prompt,
     ...(setup ? { setup } : {}),

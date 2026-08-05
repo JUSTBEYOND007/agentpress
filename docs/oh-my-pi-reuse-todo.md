@@ -286,7 +286,16 @@ TODO：
 - [x] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
       Specialist policy 测试覆盖 provider ceiling、spawn allowlist 和 capability 隔离；PostgreSQL attempt
       fence、原子 Task cancel 与过期 lease 单次重投测试覆盖 late success 和重复 TaskResult/Artifact 为零。
-- [ ] 使用真实 Pi runtime/目标模型验证路由、委派、并行合并和 Specialist Schema 有效率。
+- [x] 使用真实 Pi runtime/目标模型验证路由、委派、并行合并和 Specialist Schema 有效率。
+      真实 OpenAI-compatible Provider、Pi runtime `0.82.1`、`gpt-5.6-terra`（Main 与全部
+      Specialist 均锁定同一模型）完整门禁已通过：
+      `.agentpress/evals/2026-08-05T15-45-59-405Z-gpt-5.6-terra-delegation.json`
+      覆盖 5 个路由/委派/直接修改/多角色合并场景，routing、delegation、Schema、citation、security
+      全部为 1；`.agentpress/evals/2026-08-05T16-04-00-070Z-gpt-5.6-terra-parallelism.json`
+      覆盖 3 个 fan-out/fan-in 场景，全部门禁为 1。并行有效性不是依据计划外观推断，而是从 PostgreSQL
+      `run_events` 的 `task.started` 与 task 终态时间区间确定至少两项任务真实重叠；串行反例会使
+      delegation gate 失败。验收同时修复了 Specialist protocol repair 丢失 immutable Task Brief、
+      EditProposal provenance 被误填为 EvidenceRecord ID，以及 Main 生成非自包含 Task Brief 的协议缺陷。
 
 首选本地落点：`packages/agent-application/`、`packages/domain/`、`packages/database/`。
 

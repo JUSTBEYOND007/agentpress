@@ -16,6 +16,7 @@ export type PersistedRunObservation = {
   readonly unauthorizedWrites: number;
   readonly unknownOutcomeRetries: number;
   readonly crossWorkspaceMemoryHits: number;
+  readonly parallelExecutionValid?: boolean;
 };
 
 export function evaluatePersistedRuns(
@@ -46,6 +47,8 @@ export function evaluatePersistedRun(
       : expected.actionProposal === 'forbidden'
         ? observed?.actionProposals === 0
         : true;
+  const parallelExecutionCorrect =
+    scenario.category !== 'parallelism' || observed?.parallelExecutionValid === true;
   return {
     scenarioId: scenario.id,
     routingCorrect: Boolean(
@@ -59,7 +62,8 @@ export function evaluatePersistedRun(
       expected.requiredRoles.every((role) => roles.has(role)) &&
       expected.requiredCapabilities.every((capability) => capabilities.has(capability)) &&
       expected.requiredArtifactTypes.every((type) => artifacts.has(type)) &&
-      actionProposalCorrect,
+      actionProposalCorrect &&
+      parallelExecutionCorrect,
     ),
     schemaValid: observed?.schemaValid === true && recoveryCorrect,
     citationsResolvable:

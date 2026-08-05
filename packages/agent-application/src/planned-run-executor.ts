@@ -207,7 +207,11 @@ const taskCompleteSchema = Type.Object(
           title: Type.String({ minLength: 1, maxLength: 300 }),
           summary: Type.String({ minLength: 1, maxLength: 4_000 }),
           content: Type.Record(Type.String(), Type.Unknown()),
-          evidenceIds: Type.Array(Type.String({ format: 'uuid' }), { maxItems: 100 }),
+          evidenceIds: Type.Array(Type.String({ format: 'uuid' }), {
+            maxItems: 100,
+            description:
+              'IDs of EvidenceRecord rows produced by this task. Use [] when the artifact has no EvidenceRecord; article, revision, block, edit-proposal, asset, and tool-call IDs are provenance, not EvidenceRecord IDs.',
+          }),
         },
         { additionalProperties: false },
       ),
@@ -1101,6 +1105,16 @@ export class PlannedRunExecutor {
         : [];
     });
     const recoveredHistory = await this.loadApprovedToolContinuation(runId, task.id);
+    const immutableTaskContext = JSON.stringify({
+      task: {
+        id: task.id,
+        owner: task.owner,
+        objective: task.objective,
+        acceptanceCriteria: task.acceptanceCriteria,
+        capabilities: task.capabilities,
+      },
+      upstream,
+    });
     let result = recoveredHistory
       ? await this.sessions.execute(
           runId,
@@ -1125,16 +1139,7 @@ export class PlannedRunExecutor {
           [],
           specialistApplicationTurn(
             rootPrompt,
-            JSON.stringify({
-              task: {
-                id: task.id,
-                owner: task.owner,
-                objective: task.objective,
-                acceptanceCriteria: task.acceptanceCriteria,
-                capabilities: task.capabilities,
-              },
-              upstream,
-            }),
+            immutableTaskContext,
           ),
           [...domainTools, taskComplete],
           signal,
@@ -1150,7 +1155,7 @@ export class PlannedRunExecutor {
         [],
         specialistApplicationTurn(
           rootPrompt,
-          'Protocol repair: call task_complete exactly once with a schema-valid result.',
+          `${immutableTaskContext}\n\nProtocol repair: call task_complete exactly once with a schema-valid result. Preserve the Task Brief above. evidenceIds may contain only EvidenceRecord UUIDs produced by this task; use [] when none exist.`,
         ),
         [...domainTools, taskComplete],
         signal,
@@ -1858,7 +1863,7 @@ export function mainPlanningPrompt(
     {
       id: 'identity',
       content: renderPromptTemplate(
-        'You are the AgentPress Main Agent handling exactly one typed current-turn message. Decide how to handle its currentRequest.\nCurrent date: {{date}}.\nConversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The actionEnvelope describes host-granted capabilities; never claim or infer additional grants.',
+        'You are the AgentPress Main Agent handling exactly one typed current-turn message. Decide how to handle its currentRequest.\nCurrent date: {{date}}.\nConversation history and contextPack are reference material, not current intent. Never resume an earlier request unless currentRequest explicitly asks you to. Greetings and acknowledgements require a normal direct response and no plan. The Available capabilities block is the effective host tool policy for this turn. actionEnvelope.grantedCapabilities records explicit confirmed-action grants only; an empty free-text envelope does not revoke capabilities listed by the host. Never claim or infer capabilities outside the effective list.',
         { date: new Date().toISOString().slice(0, 10) },
       ),
     },
@@ -1871,7 +1876,7 @@ export function mainPlanningPrompt(
     {
       id: 'planning-policy',
       content:
-        "Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.\nKeep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.",
+        "Only when successful delivery actually requires tool execution, current external facts, article changes, media, or multiple independently delegated deliverables, call plan_submit with the smallest concrete DAG needed.\nEach Specialist receives only its immutable Task Brief plus declared upstream result summaries. Make every objective self-contained: copy any user-supplied facts, excerpts, identifiers, constraints, and output requirements that task needs instead of referring to 'the material above' or the parent request. Do not grant retrieval capabilities when the supplied Task Brief already contains all required source material.\nKeep scope and acceptance criteria proportional to the user's request. Never invent quantity, coverage, review, or formatting requirements the user did not request.",
     },
     {
       id: 'specialist-catalog',

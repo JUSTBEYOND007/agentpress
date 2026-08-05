@@ -1615,6 +1615,9 @@ describeWithDatabase('Direct Run application flow', () => {
       .where(eq(agentSessions.runId, run.runId));
     expect(sessions.some(({ logicalKey }) => logicalKey.endsWith(':2'))).toBe(true);
     expect(observedSpecialistTurns).toHaveLength(2);
+    expect(JSON.stringify(observedSpecialistTurns[0])).toContain(task.objective);
+    expect(JSON.stringify(observedSpecialistTurns[1])).toContain(task.objective);
+    expect(JSON.stringify(observedSpecialistTurns[1])).toContain('Protocol repair');
     expect(
       observedSpecialistTurns.every(
         (turn) =>

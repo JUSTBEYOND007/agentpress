@@ -19,6 +19,7 @@ import {
   conversationMessages,
   conversations,
   evidenceRecords,
+  editProposals,
   promptRevisions,
   runContextPacks,
   runEvents,
@@ -114,7 +115,9 @@ try {
   await mkdir(outputDirectory, { recursive: true });
   const stamp = report.startedAt.replaceAll(/[:.]/gu, '-');
   const safeModel = proModel.replaceAll(/[^a-zA-Z0-9._-]/gu, '_');
-  const basePath = resolve(outputDirectory, `${stamp}-${safeModel}`);
+  const scope = selectedScenario ?? category ?? 'all';
+  const safeScope = scope.replaceAll(/[^a-zA-Z0-9._-]/gu, '_');
+  const basePath = resolve(outputDirectory, `${stamp}-${safeModel}-${safeScope}`);
   await Promise.all([
     writeFile(`${basePath}.json`, `${JSON.stringify(report, undefined, 2)}\n`, 'utf8'),
     writeFile(
@@ -160,7 +163,12 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           {
             type: 'paragraph',
             attrs: { blockId: 'eval-paragraph' },
-            content: [{ type: 'text', text: '这是供 AgentPress 在线评测使用的真实文章上下文。' }],
+            content: [
+              {
+                type: 'text',
+                text: 'Kafka exactly-once 语义表示所有消费端在任何情况下都绝不会重复处理消息。',
+              },
+            ],
           },
         ],
       } as const;
@@ -299,6 +307,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
         toolRows,
         eventRows,
         actionProposalRows,
+        editProposalRows,
         promptRows,
         skillRows,
       ] = await Promise.all([
@@ -341,13 +350,21 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           .from(toolCalls)
           .where(eq(toolCalls.runId, created.runId)),
         connection.db
-          .select({ eventType: runEvents.eventType })
+          .select({
+            eventType: runEvents.eventType,
+            payload: runEvents.payload,
+            createdAt: runEvents.createdAt,
+          })
           .from(runEvents)
           .where(eq(runEvents.runId, created.runId)),
         connection.db
           .select({ id: actionProposals.id })
           .from(actionProposals)
           .where(eq(actionProposals.sourceRunId, created.runId)),
+        connection.db
+          .select({ id: editProposals.id })
+          .from(editProposals)
+          .where(eq(editProposals.runId, created.runId)),
         connection.db
           .select({
             promptId: promptRevisions.promptId,
@@ -423,7 +440,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           artifactTypes: artifactRows.map(({ type }) => type),
           evidenceCount: evidenceRows.length,
           approvalRequests: approvalRows.length,
-          actionProposals: actionProposalRows.length,
+          actionProposals: actionProposalRows.length + editProposalRows.length,
           schemaValid: taskRows.every(({ acceptanceCriteria }) => acceptanceCriteria.length > 0),
           recoveryAssertions: eventRows.flatMap(({ eventType }) =>
             eventType.startsWith('run.recover')
@@ -436,10 +453,41 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           unknownOutcomeRetries:
             toolRows.filter(({ status }) => status === 'outcome_unknown').length > 1 ? 1 : 0,
           crossWorkspaceMemoryHits: 0,
+          parallelExecutionValid: hasParallelTaskOverlap(eventRows),
         },
       };
     },
   };
+}
+
+function hasParallelTaskOverlap(
+  events: readonly {
+    readonly eventType: string;
+    readonly payload: Readonly<Record<string, unknown>>;
+    readonly createdAt: Date;
+  }[],
+): boolean {
+  const startedAt = new Map<string, number>();
+  const completedAt = new Map<string, number>();
+  for (const event of events) {
+    const taskId = event.payload.taskId;
+    if (typeof taskId !== 'string') continue;
+    if (event.eventType === 'task.started') startedAt.set(taskId, event.createdAt.getTime());
+    if (
+      event.eventType === 'task.succeeded' ||
+      event.eventType === 'task.failed' ||
+      event.eventType === 'task.cancelled' ||
+      event.eventType === 'task.skipped'
+    )
+      completedAt.set(taskId, event.createdAt.getTime());
+  }
+  const intervals = [...startedAt].flatMap(([taskId, start]) => {
+    const end = completedAt.get(taskId);
+    return end === undefined ? [] : [{ start, end }];
+  });
+  return intervals.some((left, index) =>
+    intervals.slice(index + 1).some((right) => left.start < right.end && right.start < left.end),
+  );
 }
 
 function encodeEvalMessage(message: Readonly<Record<string, unknown>>): readonly unknown[] {

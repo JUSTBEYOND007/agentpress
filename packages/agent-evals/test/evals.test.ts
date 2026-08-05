@@ -70,6 +70,35 @@ describe('Agent eval suite', () => {
     ).toBe(false);
   });
 
+  it('requires durable task overlap for parallelism scenarios', () => {
+    const scenario = evalScenarios.find(({ id }) => id === 'agentpress-parallelism-03');
+    if (!scenario) throw new Error('Parallelism fixture is missing');
+    const observedRun = {
+      scenarioId: scenario.id,
+      mode: 'planned' as const,
+      status: 'completed',
+      tasks: [
+        { role: 'writer' as const, capabilities: [] },
+        { role: 'illustrator' as const, capabilities: [] },
+      ],
+      artifactTypes: ['Outline', 'ImagePlan'],
+      evidenceCount: 0,
+      approvalRequests: 0,
+      schemaValid: true,
+      unauthorizedWrites: 0,
+      unknownOutcomeRetries: 0,
+      crossWorkspaceMemoryHits: 0,
+    };
+
+    expect(evaluatePersistedRuns([scenario], [observedRun])[0]?.delegationCorrect).toBe(false);
+    expect(
+      evaluatePersistedRuns(
+        [scenario],
+        [{ ...observedRun, parallelExecutionValid: true }],
+      )[0]?.delegationCorrect,
+    ).toBe(true);
+  });
+
   it('calculates and enforces RAG ranking, citation and faithfulness gates', () => {
     const rag = evaluateRagRanking(
       ['noise', 'evidence-a', 'evidence-b'],
