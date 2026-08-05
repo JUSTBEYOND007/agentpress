@@ -7,7 +7,6 @@ import {
   AGENT_RUN_COMMAND_TOPIC,
   AGENT_TASK_COMMAND_TOPIC,
   DirectRunService,
-  parseAgentTaskExecuteCommand,
   type LiveRunEvent,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
@@ -41,6 +40,7 @@ import {
   ensureKafkaTopics,
 } from './kafka-topics.js';
 import { RedisRunLeaseManager } from './redis-run-lease.js';
+import { handleAgentTaskCommand, parseAgentTaskCommandPayload } from './task-command-handler.js';
 
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
 const CONSUMER_GROUP = 'agentpress-agent-worker-v1';
@@ -344,36 +344,37 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     offset: number,
     rawPayload: string | undefined,
   ): Promise<void> {
-    const command = parseAgentTaskExecuteCommand(parseJson(rawPayload));
-    if (!command) {
+    const parsed = parseAgentTaskCommandPayload(rawPayload);
+    if (!parsed) {
       this.logger.warn({ topic, partition, offset }, 'Discarded invalid Agent Task command');
       return;
     }
-    const key = `${command.runId}:${command.taskId}`;
+    const key = `${parsed.runId}:${parsed.taskId}`;
     const controller = new AbortController();
     this.activeTasks.set(key, controller);
     try {
-      const status = await this.runService.executeDetachedTask(
-        command.runId,
-        command.taskId,
-        controller.signal,
-      );
-      await processInboxMessage(
-        this.database.db,
-        {
-          consumerGroup: CONSUMER_GROUP,
-          messageId: command.messageId,
-          topic,
-          partition,
-          offset,
-          payloadHash: createHash('sha256')
-            .update(rawPayload ?? '')
-            .digest('hex'),
-        },
-        () => Promise.resolve(),
-      );
+      const result = await handleAgentTaskCommand({
+        database: this.database.db,
+        consumerGroup: CONSUMER_GROUP,
+        topic,
+        partition,
+        offset,
+        rawPayload,
+        signal: controller.signal,
+        executeDetachedTask: (runId, taskId, signal) =>
+          this.runService.executeDetachedTask(runId, taskId, signal),
+      });
+      if (result.kind === 'invalid') {
+        this.logger.warn({ topic, partition, offset }, 'Discarded invalid Agent Task command');
+        return;
+      }
       this.logger.info(
-        { runId: command.runId, taskId: command.taskId, status },
+        {
+          runId: result.runId,
+          taskId: result.taskId,
+          status: result.status,
+          inbox: result.inbox,
+        },
         'Agent Task settled',
       );
     } finally {
@@ -496,15 +497,6 @@ function parseRunCommand(payload: string | undefined): RunCommand | undefined {
       return undefined;
     }
     return value as RunCommand;
-  } catch {
-    return undefined;
-  }
-}
-
-function parseJson(payload: string | undefined): unknown {
-  if (!payload) return undefined;
-  try {
-    return JSON.parse(payload) as unknown;
   } catch {
     return undefined;
   }

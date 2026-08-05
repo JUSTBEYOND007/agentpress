@@ -245,6 +245,10 @@ importers:
       rxjs:
         specifier: 'catalog:'
         version: 7.8.2
+    devDependencies:
+      '@earendil-works/pi-ai':
+        specifier: 'catalog:'
+        version: 0.82.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.1)(zod@4.4.3)
 
   apps/api:
     dependencies:

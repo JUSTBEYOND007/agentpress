@@ -8,7 +8,8 @@
     "dev": "tsx watch src/main.ts",
     "lint": "eslint src test",
     "start": "node dist/main.js",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --exclude '**/*.integration.test.*' --exclude 'dist/**'",
+    "test:integration": "vitest run test/*.integration.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -33,5 +34,8 @@
     "kafkajs": "catalog:",
     "reflect-metadata": "catalog:",
     "rxjs": "catalog:"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "catalog:"
   }
 }

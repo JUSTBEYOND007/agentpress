@@ -246,7 +246,7 @@ TODO：
       Task/TaskResult，按请求顺序等待任一 exact-attempt 结果并返回 `settled`、`stillRunning`、
       `timedOut`，支持有界 timeout 与 AbortSignal 取消传播；DAG 波次、required/optional failure、
       degraded 综合和原子 cancel 均有确定性测试与 PostgreSQL 集成覆盖。
-- [ ] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
+- [x] 支持 detached Specialist 的恢复和结果投递，但不得在恢复时重复副作用。
       已落地 `agent.task.commands`、transactional outbox、PostgreSQL 原子 Task claim、按 attempt
       持久化 lease、immutable Context Pack 恢复、TaskResult/Checkpoint/RunEvent 同事务结算，以及
       `run.execute` outbox 唤醒。`task_results.summary` 现在与 status/artifacts/usage/warnings/failure
@@ -256,16 +256,18 @@ TODO：
       task attempt、参数签名内调用序号和宿主生成的稳定逻辑操作键；新 attempt 会从 PostgreSQL 重建
       序号游标，复用已知成功结果，并将执行中或 Unknown Outcome 的相同操作永久 fail closed。旧 worker
       的延迟 settlement 使用 ToolCall CAS fence，不能覆盖新 attempt 写入的 Unknown Outcome。相反语义
-      回归同时证明正常路径中多个同参操作仍使用不同逻辑键。仍需在真实 Kafka 环境跑进程丢失、重复
-      command 和 cancel 端到端测试后才可勾选。
-- [ ] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
+      回归同时证明正常路径中多个同参操作仍使用不同逻辑键。`apps/agent-worker/test/task-recovery.integration.test.ts`
+      已在真实 Kafka/PostgreSQL 上验证 consumer 领取后失联、过期 lease 生成恢复 command、第二 attempt
+      结果投递、同一恢复 command 重复投递只产生一个 TaskResult，以及 cancel 后迟到 command 不能复活 Task。
+- [x] 将 kill/revive 适配为 AgentPress cancel/retry/recover 状态转换，并要求 checkpoint 和幂等证明。
       已将 Oh My Pi `agent-lifecycle.ts` 的 stale-ref finalizer 保护适配为 PostgreSQL attempt fence：
       `settleAgentTaskAttempt` 只有在 Task 仍为 `running` 且 attempt 完全匹配时才允许结算；取消、lease
       过期恢复或新 attempt 后的旧 worker 结果无法覆盖新状态。`requestCancellation` 现在在同一
       PostgreSQL 事务中调用 `cancelAgentRunTasks`，释放活跃 lease 并写 `task.cancelled`；取消后的
       late success 已通过数据库和 Planned Run 集成回归验证。ToolCall 的 retry/recover checkpoint、
       task attempt fence、稳定逻辑操作键、Unknown Outcome 钉住和 stale settlement CAS 已通过隔离
-      PostgreSQL 集成证明；真实 Kafka worker 丢失与重复 command 仍保留为基础设施验收门禁。
+      PostgreSQL 集成证明；真实 Kafka worker 失联、重复 recovery command 与 cancel 后迟到 command
+      也已通过生产 command handler 的端到端验收。
 - [x] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
       已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities。
       PostgreSQL `context_packs` 不再保存完整 root request，只保留 detached 恢复所需的 current-turn 协议壳、
@@ -582,7 +584,7 @@ TODO：
 - [x] 里程碑 1：Compaction contract、PostgreSQL facts、projection 和确定性测试。
 - [x] 里程碑 2：Schema normalization 差距补齐与 Specialist 严格输出。
 - [x] 里程碑 3：Tool loop/replay safety 和恢复协议。
-- [ ] 里程碑 4：Typed Specialist Task、并行、yield、cancel/recover。
+- [x] 里程碑 4：Typed Specialist Task、并行、yield、cancel/recover。
 - [x] 里程碑 5：MCP Streamable HTTP 差距补齐。
 - [x] 里程碑 6：Accepted Memory 混合召回与 consolidation。
 - [x] 里程碑 7：Skill conformance、安全资源加载和版本绑定。

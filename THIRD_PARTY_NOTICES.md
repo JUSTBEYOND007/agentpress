@@ -108,8 +108,10 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
   `packages/coding-agent/test/registry/agent-lifecycle.test.ts`
 - Local: `packages/agent-application/src/specialist-task-contract.ts`,
   `packages/agent-application/src/planned-run-executor.ts`,
+  `apps/agent-worker/src/task-command-handler.ts`,
   `packages/agent-application/test/contracts.test.ts`,
   `packages/agent-application/test/direct-run.integration.test.ts`,
+  `apps/agent-worker/test/task-recovery.integration.test.ts`,
   `packages/database/src/task-lease-store.ts`, `packages/database/test/postgres.integration.test.ts`
 - License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
 - Changes: retained output-Schema precedence, bounded spawn/depth/concurrency and stale-owner behavior;
@@ -117,7 +119,8 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
   Task attempts, leases, Context Packs, TaskResults, checkpoints and transactional outbox commands.
 - Verification: caller/agent/session Schema precedence, recursion and allowlist denial, bounded DAG,
   detached recovery, exact-attempt settlement, late-result fencing, private-thinking isolation and
-  public-result projection.
+  public-result projection, plus real Kafka worker disconnect/recovery, duplicate command and late
+  cancellation delivery.
 
 ### Pi Web Access SSRF Protection
 

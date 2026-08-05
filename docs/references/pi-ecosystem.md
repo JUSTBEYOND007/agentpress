@@ -202,8 +202,11 @@ Run cancellation is similarly adapted as a PostgreSQL transaction: `cancelAgentR
 all non-terminal Tasks and releases active leases before the Run can settle, so a late worker cannot
 turn a cancelled Task into a success. PostgreSQL integration tests now cover Task and ToolCall
 attempt fencing, Unknown Outcome recovery, late settlement, and distinct repeated operations. Real
-Kafka process-loss, duplicate-command, and cancellation behavior remains a separate infrastructure
-acceptance gate.
+Kafka acceptance is fixed in `apps/agent-worker/test/task-recovery.integration.test.ts`: a consumer
+claims attempt 1 and stops, lease recovery emits a new command, attempt 2 settles once when the same
+recovery payload is delivered twice, and a command arriving after cancellation cannot revive the
+Task or create a TaskResult. The production `task-command-handler.ts` owns payload parsing and inbox
+facts while the existing PostgreSQL claim/settlement boundaries continue to own idempotency.
 Expired detached leases are recovered by the production worker through
 `requeueExpiredAgentTasks`: the Task transition to `interrupted` and its replacement
 `task.execute` outbox message share one PostgreSQL transaction. Repeated scans cannot create a
