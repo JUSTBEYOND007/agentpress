@@ -23,7 +23,8 @@
 - [x] 复制实现必须放在 AgentPress 自有 Port/Adapter 后，不能让 `@oh-my-pi/*` 类型跨入领域层。
 - [x] 复制前固定上游 commit，保留版权和许可证头，并在 `THIRD_PARTY_NOTICES.md` 记录上游路径、
       本地路径、修改内容和验证结果。
-- [ ] 只有直接依赖和复制适配都不成立时才允许自研；自研前记录候选模块及逐项拒绝理由。
+- [x] 只有直接依赖和复制适配都不成立时才允许自研；自研前记录候选模块及逐项拒绝理由。
+      `docs/references/pi-ecosystem.md` 的 Dependency Versus Adaptation Decisions 记录了官方 Pi、Oh My Pi、MCP、Web Access、Skill、AGPL 与候选参考的直接依赖/复制/拒绝边界；当前没有未记录的自研替代项。
 - [ ] 每次只引入一个行为单元，完成契约测试、领域边界测试、相反语义回归和真实 Pi/目标模型验收后提交。
       独立提交和离线测试纪律已经执行；真实目标模型验收仍受本清单各 online gate 约束，不能提前勾选。
 - [x] 不直接依赖 `@oh-my-pi/pi-agent-core`、`@oh-my-pi/pi-ai`、`snapcompact` 或 `mnemopi`；后两者
@@ -593,11 +594,14 @@ TODO：
 
 ## 完成定义
 
-- [ ] 所有采用项都有固定上游路径、commit、license、本地路径和修改说明。
-- [ ] 能直接依赖的模块已直接依赖；不能直接依赖的模块已有书面原因。
-- [ ] 所有复制适配项都先复制行为测试，并补 AgentPress 领域边界与相反语义测试。
+- [x] 所有采用项都有固定上游路径、commit、license、本地路径和修改说明。
+      `THIRD_PARTY_NOTICES.md` 已逐行为单元记录官方 Pi、Oh My Pi、pi-mcp-adapter、pi-web-access、Skill reference、InkOS reference 和 MetaHarness reference 的固定来源、许可证、Local path、改动与验证；未来候选项明确标为 reference-only。
+- [x] 能直接依赖的模块已直接依赖；不能直接依赖的模块已有书面原因。
+      官方 `@earendil-works/pi-*` 与 MCP SDK 直接依赖；Oh My Pi、pi-mcp-adapter、pi-web-access 的运行时/桌面/事实源边界拒绝理由，以及 AGPL/未授权来源的 reference-only 决策均已记录。
+- [x] 所有复制适配项都先复制行为测试，并补 AgentPress 领域边界与相反语义测试。
+      每个已采用行为单元均在 `THIRD_PARTY_NOTICES.md` 列出 upstream test 起点、local test、适配边界和验证结果；对应 AgentPress 测试覆盖 fail-closed、权限隔离、恢复、取消、重复副作用和跨 workspace 相反语义。
 - [x] PostgreSQL 仍是 Conversation、Run、Task、ToolCall、Event、Checkpoint、Memory、Skill 和 Eval 事实源。
 - [x] 未引入第二套 Pi Runtime、文件事实源、任意 MCP、Prompt 权限或自动长期写入。
 - [ ] 真实 Pi runtime/目标模型验收结果包含模型、Prompt、Skill、工具和配置版本。
-- [ ] `THIRD_PARTY_NOTICES.md` 与 `docs/references/pi-ecosystem.md` 已随实际采用范围更新。
+- [x] `THIRD_PARTY_NOTICES.md` 与 `docs/references/pi-ecosystem.md` 已随实际采用范围更新。
 - [ ] lint、typecheck、unit、integration、build、相关浏览器测试和在线 eval 全部通过。

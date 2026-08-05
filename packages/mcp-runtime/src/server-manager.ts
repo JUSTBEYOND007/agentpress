@@ -1,3 +1,6 @@
+// Lifecycle behavior adapted from pi-mcp-adapter e588296 and Oh My Pi f446b8a (MIT).
+// Copyright (c) 2026 Nico Bailon; Copyright (c) 2025 Mario Zechner.
+// Copyright (c) 2025-2026 Can Boluk.
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 import type { BuiltInMcpServerId, McpServerDefinition, McpServerState } from './contracts.js';

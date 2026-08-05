@@ -1,3 +1,5 @@
+// Recall behavior adapted from Oh My Pi/Mnemopi v17.1.8, commit f446b8a (MIT).
+// Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 import { createHash } from 'node:crypto';
 import type { MemoryCandidate } from './contracts.js';
 

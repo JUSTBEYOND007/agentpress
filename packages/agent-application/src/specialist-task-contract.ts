@@ -1,3 +1,5 @@
+// Behavior adapted from Oh My Pi v17.1.8, commit f446b8a (MIT).
+// Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 import { TypeGuard, type TSchema } from '@sinclair/typebox';
 
 export const SPECIALIST_TASK_MAX_DEPTH = 2;
@@ -87,9 +89,7 @@ export function createSpecialistTaskRequest(input: SpecialistTaskRequest): Speci
   return {
     ...input,
     capabilities: [...new Set(input.capabilities)].sort(),
-    ...(input.allowedOwners
-      ? { allowedOwners: [...new Set(input.allowedOwners)].sort() }
-      : {}),
+    ...(input.allowedOwners ? { allowedOwners: [...new Set(input.allowedOwners)].sort() } : {}),
   };
 }
 
@@ -100,7 +100,11 @@ export function validateSpecialistTaskRequest(input: SpecialistTaskRequest): voi
   if (!specialistRoles.includes(input.owner)) {
     throw new TypeError(`Unknown Specialist owner ${input.owner}`);
   }
-  if (input.parentOwner && input.parentOwner !== 'main' && !specialistRoles.includes(input.parentOwner)) {
+  if (
+    input.parentOwner &&
+    input.parentOwner !== 'main' &&
+    !specialistRoles.includes(input.parentOwner)
+  ) {
     throw new TypeError(`Unknown Specialist parent owner ${input.parentOwner}`);
   }
   if (input.allowedOwners !== undefined && !Array.isArray(input.allowedOwners)) {

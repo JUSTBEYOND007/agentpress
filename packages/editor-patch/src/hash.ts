@@ -1,4 +1,5 @@
 // Adapted from Oh My Pi Hashline snapshot anchoring (MIT), commit f446b8a8193e59b4cbd2cf487ab6fa1915e0b890.
+// Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 // AgentPress uses collision-resistant SHA-256 over canonical Tiptap JSON instead of 16-bit line hashes.
 import { createHash } from 'node:crypto';
 import type { ArticleDocument, EditorBlock } from './contracts.js';

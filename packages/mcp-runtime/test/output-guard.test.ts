@@ -1,3 +1,5 @@
+// Behavior tests adapted from pi-mcp-adapter commit e588296 (MIT).
+// Copyright (c) 2026 Nico Bailon.
 import { Type } from '@sinclair/typebox';
 import { describe, expect, it } from 'vitest';
 

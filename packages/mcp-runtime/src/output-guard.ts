@@ -1,3 +1,5 @@
+// Output-guard behavior adapted from pi-mcp-adapter commit e588296 (MIT).
+// Copyright (c) 2026 Nico Bailon.
 import { validateSchemaResult } from '@agentpress/schema-runtime';
 
 import type { GuardedMcpOutput, McpOutputArtifactReference, McpToolContract } from './contracts.js';

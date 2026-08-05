@@ -1,11 +1,12 @@
+// Behavior fixtures adapted from Oh My Pi v17.1.8, commit f446b8a (MIT).
+// Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 import type { TSchema } from 'typebox';
 import { Type } from 'typebox';
 import { describe, expect, it } from 'vitest';
 
 import { adaptProviderSchema } from '../src/schema-compatibility.js';
 
-// Adapted from Oh My Pi v17.1.8 (f446b8a): schema-strict-mode,
-// anthropic-tool-schema, google-tool-schema, schema-normalization fixtures.
+// Sources: schema-strict-mode, anthropic/google tool schema, and normalization tests.
 describe('provider schema fixtures', () => {
   it('enforces OpenAI strict objects while preserving optionality as nullable', () => {
     const source = Type.Object({

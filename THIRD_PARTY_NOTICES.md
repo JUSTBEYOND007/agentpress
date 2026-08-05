@@ -6,7 +6,8 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 
 ## Direct Dependencies
 
-- `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` — MIT
+- `@earendil-works/pi-agent-core@0.82.1` and `@earendil-works/pi-ai@0.82.1` — MIT;
+  upstream tag `v0.82.1`, commit `b4f293684bba718d59cc1157679bcf6157b3a7f5`
 - Next.js and React — MIT
 - NestJS and Fastify — MIT
 - Drizzle ORM — Apache-2.0
@@ -20,21 +21,103 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - unpdf — MIT; used as a pinned dependency for bounded server-side PDF text extraction
 - fast-xml-parser 4.5.7 — MIT; used directly to parse bounded Google News RSS responses
 
-### Agent Skills Conformance Reference
+### Official Pi Runtime
+
+- Upstream: `https://github.com/earendil-works/pi`
+- Package: `@earendil-works/pi-agent-core@0.82.1`, `@earendil-works/pi-ai@0.82.1`
+- Commit: `b4f293684bba718d59cc1157679bcf6157b3a7f5` (`v0.82.1`)
+- Source: published `packages/agent/` and `packages/ai/` packages
+- Local: `packages/agent-runtime/src/pi-runtime-adapter.ts`,
+  `packages/agent-runtime/src/current-turn.ts`,
+  `packages/agent-context/src/conversation-compaction-policy.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner
+- Changes: no upstream source copied; the packages are direct dependencies behind AgentPress
+  current-turn, provider, PostgreSQL transcript, and compaction adapters.
+- Verification: streaming/event mapping, ToolCall protocol, abort, history validation, schema
+  adaptation, current-turn conformance, mid-turn compaction, and provider fixtures.
+
+OpenTelemetry packages are used directly from their published npm releases; no source files
+are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm-lock.yaml`.
+
+## Agent Skills Conformance Reference
 
 - Upstream: `https://github.com/badlogic/pi-skills`
 - Commit: `90bb51cae36515a648515b633a81c0c6efc8c74d`
 - Source: repository `SKILL.md` examples and `README.md` Skill format/discovery conventions
 - Local: `packages/agent-context/src/skill.ts`, `packages/agent-context/test/context.test.ts`
-- License: MIT, Copyright (c) 2025 Mario Zechner
+- License: MIT, Copyright (c) 2024 Mario Zechner
 - Changes: no executable source copied; added a small AgentPress-owned conformance diagnostic and
   warning adapter, retained old `id` compatibility, and added untrusted Skill/resource boundary
   tests. The upstream examples are used as fixtures/reference only.
+- Verification: standard frontmatter diagnostics, precedence conflicts, static resource hashing,
+  untrusted prompt projection, tool allowlist narrowing, and prompt-injection fixtures.
 
-OpenTelemetry packages are used directly from their published npm releases; no source files
-are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm-lock.yaml`.
+## Adapted Behavior And Source References
 
-## Vendored Or Adapted Sources
+### Oh My Pi Provider Schema Behavior Fixtures
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` (`v17.1.8`)
+- Source: `packages/ai/src/utils/schema/`, `packages/ai/test/schema-strict-mode.test.ts`,
+  `packages/ai/test/openai-tool-strict-mode.test.ts`,
+  `packages/ai/test/google-tool-schema.test.ts`,
+  `packages/ai/test/anthropic-tool-schema.test.ts`
+- Local: `packages/agent-runtime/src/schema-compatibility.ts`,
+  `packages/agent-runtime/test/schema-compatibility.test.ts`,
+  `packages/agent-runtime/test/provider-schema-fixtures.test.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: re-expressed provider fixture behavior behind AgentPress's TypeBox-to-JSON-Schema adapter;
+  retained no Oh My Pi runtime types and did not vendor its complete Schema subsystem.
+- Verification: OpenAI strict optionality, Anthropic constraint descriptions, Google nullable/const,
+  Ollama boolean/type arrays, MCP Zod enum cleanup, recursive refs, tuples, unions, and degradation facts.
+
+### Oh My Pi Tool Protocol And Recovery Behavior
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` (`v17.1.8`)
+- Source: `packages/agent/src/agent-loop.ts`, `packages/agent/src/replay-policy.ts`,
+  `packages/ai/src/utils/tool-call-loop-guard.ts`,
+  `packages/coding-agent/src/session/turn-recovery.ts`,
+  `packages/coding-agent/src/session/turn-persistence.ts`,
+  `packages/agent/test/proxy-toolcall-partial-json.test.ts`,
+  `packages/ai/test/tool-call-without-result.test.ts`,
+  `packages/ai/test/duplicate-tool-results.test.ts`
+- Local: `packages/agent-runtime/src/pi-runtime-adapter.ts`,
+  `packages/agent-runtime/test/pi-runtime-adapter.test.ts`,
+  `packages/tool-runtime/src/replay-policy.ts`, `packages/tool-runtime/test/replay-policy.test.ts`,
+  `packages/agent-application/src/tool-call-service.ts`,
+  `packages/agent-application/test/tool-call.integration.test.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: retained protocol guards and conservative recovery semantics; execution and settlement
+  were rebuilt around official Pi, PostgreSQL ToolCall facts, approval, capability policy, task-attempt
+  fencing, and host-generated logical operation keys.
+- Verification: partial JSON never executes, malformed persisted histories fail closed, parallel calls
+  settle once, approval continuation reuses facts, Unknown Outcome never retries, and stale Specialist
+  settlement cannot overwrite recovery.
+
+### Oh My Pi Specialist Task And Lifecycle Behavior
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` (`v17.1.8`)
+- Source: `packages/coding-agent/src/task/structured-subagent.ts`,
+  `packages/coding-agent/src/task/spawn-policy.ts`, `packages/coding-agent/src/task/types.ts`,
+  `packages/coding-agent/src/registry/agent-lifecycle.ts`,
+  `packages/coding-agent/test/task/structured-subagent.test.ts`,
+  `packages/coding-agent/test/task/spawn-policy.test.ts`,
+  `packages/coding-agent/test/task/task-schema.test.ts`,
+  `packages/coding-agent/test/registry/agent-lifecycle.test.ts`
+- Local: `packages/agent-application/src/specialist-task-contract.ts`,
+  `packages/agent-application/src/planned-run-executor.ts`,
+  `packages/agent-application/test/contracts.test.ts`,
+  `packages/agent-application/test/direct-run.integration.test.ts`,
+  `packages/database/src/task-lease-store.ts`, `packages/database/test/postgres.integration.test.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: retained output-Schema precedence, bounded spawn/depth/concurrency and stale-owner behavior;
+  removed subprocess, Worktree, local session and timer ownership; rebuilt lifecycle as PostgreSQL
+  Task attempts, leases, Context Packs, TaskResults, checkpoints and transactional outbox commands.
+- Verification: caller/agent/session Schema precedence, recursion and allowlist denial, bounded DAG,
+  detached recovery, exact-attempt settlement, late-result fencing, private-thinking isolation and
+  public-result projection.
 
 ### Pi Web Access SSRF Protection
 
@@ -108,15 +191,55 @@ are vendored. Versions are pinned in `pnpm-workspace.yaml` and resolved in `pnpm
 - Changes: replaced JSONL session entries with branch- and Agent-Session-scoped append-only PostgreSQL facts; replaced entry IDs with stable message/transcript IDs and sequences; froze Conversation compaction in each Run Context Pack; reused official Pi `shouldCompact` and `prepareNextTurnWithContext`; retained incremental lineage, complete ToolCall/ToolResult cut boundaries, reserve provenance, one-shot overflow recovery, and failed-compaction records without replacing the last successful summary. Oh My Pi remote compaction, JSONL SessionManager, snapcompact and native/Bun paths were not adopted.
 - Verification: schema/unit/type checks, branch isolation, incremental lineage, malformed or unresolved ToolCall fail-closed behavior, small-window keep-budget fallback, preflight overflow, provider-reported overflow retry-once, failed-compaction preservation, same-execute mid-turn continuation, and fresh PostgreSQL migration/integration tests.
 
-### InkOS Structured Action Envelope
+### InkOS Structured Action Envelope Behavior Reference
 
 - Upstream: `https://github.com/Narcooo/inkos`
 - Commit: `c7851b94ada27f2810b903e96d8fec6f33e5d9bc` (`v1.7.2`)
 - Source: `packages/core/src/interaction/action-envelope.ts`, `packages/core/src/agent/agent-session.ts`, `packages/core/src/__tests__/interaction-models.test.ts`, `packages/core/src/__tests__/agent-session.test.ts`
 - Local: `packages/contracts/src/action-envelope.ts`, `packages/contracts/test/action-envelope.test.ts`, with host authorization adapters under `packages/agent-application/src/`
 - License: AGPL-3.0-only, Copyright (c) 2026 InkOS contributors
-- Changes: reduced the fiction workflow intent union to AgentPress article editing; adapted Zod validation to the repository's TypeBox contracts; replaced file/session ownership with PostgreSQL Root Request and Action Proposal facts; tightened free-text turns so they cannot carry confirmed capabilities.
+- Changes: no InkOS source code or tests were copied because its AGPL-3.0-only license is not accepted
+  for source reuse in the current distribution. AgentPress independently implemented a narrower
+  TypeBox envelope from its own article-edit requirements after reviewing the typed-envelope behavior;
+  PostgreSQL Root Request and Action Proposal facts own authorization and idempotency.
 - Verification: free-text isolation, complete confirmed payloads, host-issued action sources, exact capability grants, invalid/unknown intent rejection, and confirmed-action idempotency.
+
+### Oh My Pi MetaHarness Behavior Reference
+
+- Upstream: `https://github.com/can1357/oh-my-pi`
+- Commit: `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890` (`v17.1.8`)
+- Source: `packages/metaharness/src/benchmarks.ts`,
+  `packages/metaharness/src/experiments.ts`,
+  `packages/metaharness/test/benchmarks.test.ts`,
+  `packages/metaharness/test/experiments.test.ts`
+- Local: `packages/agent-evals/src/experiment-report.ts`,
+  `packages/agent-evals/test/experiment-report.test.ts`
+- License: MIT, Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Bölük
+- Changes: no upstream source or tests copied. AgentPress independently implemented the reviewed
+  metric-definition, trace-normalization, decided-trial aggregation and arm-comparison behavior on
+  PostgreSQL Eval facts; the upstream filesystem/SQLite store was rejected.
+- Verification: weighted metric definitions, undecided-trial exclusion, cost projection, arm
+  comparison, regression trend, result/process separation, and trace-diagnostic isolation.
+
+## Dependency Versus Adaptation Decisions
+
+- Official `@earendil-works/pi-*` is used directly because its maintained public runtime API fits the
+  provider and Agent loop boundary. A second `@oh-my-pi/*` runtime is explicitly rejected.
+- Oh My Pi is not a direct dependency because the candidate packages bind to its own Pi runtime,
+  Bun/native modules, local JSONL/SQLite sessions, coding-agent tools and TUI state. Only fixed-commit
+  pure behavior and tests listed above are adapted behind AgentPress interfaces.
+- `pi-mcp-adapter` is not used directly because it exposes arbitrary remote/stdio/OAuth and desktop
+  lifecycle surfaces. The bounded lifecycle/output behavior is adapted around the official MCP SDK
+  and three host-owned in-process servers.
+- `pi-web-access` is not used directly because its package includes desktop proxy/configuration and
+  broader extraction behavior. Only the server-safe SSRF guard and tests are adapted; bounded HTML,
+  RSS and PDF extraction stays in AgentPress-owned ports and pinned dependencies.
+- `pi-skills` is a format/example reference rather than a runtime dependency; Skill persistence,
+  permissions, resource integrity and model selection remain AgentPress-owned.
+- InkOS and other AGPL sources are behavior references only. Unlicensed sources are likewise never
+  copied. Electric, EchOS, Understudy, Durable Researcher, Sitegeist and Harbor remain architecture
+  references unless a future change records a separate compatible-license adoption. MetaHarness is
+  recorded above as an independently implemented behavior reference, not copied source.
 
 ## Visual Reference
 
