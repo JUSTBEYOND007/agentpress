@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { connectDatabase } from '@agentpress/database';
+import { connectDatabase, evalExperiments, evalTrials } from '@agentpress/database';
 import { sql } from 'drizzle-orm';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Kafka, logLevel } from 'kafkajs';
 import { Client } from 'minio';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,8 +14,11 @@ import {
   createDockerEvalSandboxPlan,
   createEvalSandboxDescriptor,
   EvalSandboxResourceManager,
+  type EvalSandboxDescriptor,
   executeDockerEvalSandbox,
+  ExperimentStore,
   MinioEvalSandboxObjectPrefixStore,
+  runSandboxExperiment,
   type EvalSandboxResourceLease,
 } from '../src/index.js';
 
@@ -56,6 +61,9 @@ describeWithInfrastructure('real evaluation sandbox infrastructure', () => {
   let lease: EvalSandboxResourceLease | undefined;
 
   beforeAll(async () => {
+    await migrate(connection.db, {
+      migrationsFolder: fileURLToPath(new URL('../../database/migrations', import.meta.url)),
+    });
     await admin.connect();
     if (!(await minio.bucketExists(bucket))) {
       throw new Error(`Evaluation sandbox bucket does not exist: ${bucket}`);
@@ -137,6 +145,93 @@ describeWithInfrastructure('real evaluation sandbox infrastructure', () => {
     await expect(containerNames(plan.containerName)).resolves.toBe('');
   }, 15_000);
 
+  it('runs a persisted Trial, retries into fresh resources, and completes the Experiment', async () => {
+    const store = new ExperimentStore(connection.db);
+    const created = await store.createExperiment({
+      name: `sandbox-runner-${suffix}`,
+      datasetVersion: 'sandbox@1',
+      config: { execution: 'docker' },
+      arms: [
+        {
+          name: 'alpine',
+          model: alpineImage,
+          promptVersion: 'sandbox@1',
+          skillVersions: {},
+          toolPolicyVersion: 'sandbox@1',
+          contextPolicyVersion: 'sandbox@1',
+        },
+      ],
+    });
+    await store.enqueueTrials({
+      armId: created.armIds[0] ?? '',
+      caseIds: ['structured-result'],
+      attempts: 1,
+      seed: 'sandbox-seed',
+    });
+    await expect(store.startExperiment(created.experimentId)).resolves.toBe(true);
+
+    const summary = await runSandboxExperiment({
+      store,
+      resources: manager,
+      experimentId: created.experimentId,
+      workerId: `sandbox-runner-${suffix}`,
+      cases: [
+        {
+          id: 'structured-result',
+          command: ({ claim }) => {
+            const output =
+              claim.attempt === 1
+                ? { status: 'failed', failure: { code: 'synthetic_case_failure' } }
+                : { status: 'succeeded', resultMetrics: { recovered: true } };
+            const serialized = JSON.stringify(output);
+            return ['sh', '-ec', `printf '%s' '${serialized}'`];
+          },
+        },
+      ],
+      arms: [{ armId: created.armIds[0] ?? '', image: alpineImage }],
+      concurrency: 1,
+      leaseMs: 1_000,
+      retrySeed: 'sandbox-seed',
+      maxAttemptsPerCase: 2,
+      limits: { timeoutSeconds: 15 },
+    });
+
+    expect(summary).toMatchObject({
+      claimed: 2,
+      failed: 1,
+      succeeded: 1,
+      retriesCreated: 1,
+      experimentCompleted: true,
+    });
+    const trials = await connection.db
+      .select({ id: evalTrials.id, attempt: evalTrials.attempt, status: evalTrials.status })
+      .from(evalTrials)
+      .where(sql`${evalTrials.armId} = ${created.armIds[0]}`)
+      .orderBy(evalTrials.attempt);
+    expect(trials).toEqual([
+      expect.objectContaining({ attempt: 1, status: 'failed' }),
+      expect.objectContaining({ attempt: 2, status: 'succeeded' }),
+    ]);
+    const firstDescriptor = await store.getTrialSandboxDescriptor(trials[0]?.id ?? '');
+    const retryDescriptor = await store.getTrialSandboxDescriptor(trials[1]?.id ?? '');
+    expect(firstDescriptor?.databaseSchema).not.toBe(retryDescriptor?.databaseSchema);
+    expect(firstDescriptor?.kafkaTopic).not.toBe(retryDescriptor?.kafkaTopic);
+    expect(firstDescriptor?.objectPrefix).not.toBe(retryDescriptor?.objectPrefix);
+    await expect(
+      connection.db
+        .select({ status: evalExperiments.status })
+        .from(evalExperiments)
+        .where(sql`${evalExperiments.id} = ${created.experimentId}`),
+    ).resolves.toEqual([{ status: 'completed' }]);
+    await expect(schemaExistsFor(firstDescriptor)).resolves.toBe(false);
+    await expect(schemaExistsFor(retryDescriptor)).resolves.toBe(false);
+    await expect(admin.listTopics()).resolves.not.toEqual(
+      expect.arrayContaining([firstDescriptor?.kafkaTopic, retryDescriptor?.kafkaTopic]),
+    );
+    await expect(listPrefixFor(firstDescriptor)).resolves.toEqual([]);
+    await expect(listPrefixFor(retryDescriptor)).resolves.toEqual([]);
+  }, 40_000);
+
   async function containerNames(containerName: string): Promise<string> {
     const { stdout } = await promisify(execFile)('docker', [
       'ps',
@@ -150,10 +245,15 @@ describeWithInfrastructure('real evaluation sandbox infrastructure', () => {
   }
 
   async function schemaExists(): Promise<boolean> {
+    return schemaExistsFor(descriptor);
+  }
+
+  async function schemaExistsFor(value: EvalSandboxDescriptor | undefined): Promise<boolean> {
+    if (!value) return false;
     const result = await connection.db.execute(sql`
       select exists(
         select 1 from information_schema.schemata
-        where schema_name = ${descriptor.databaseSchema}
+        where schema_name = ${value.databaseSchema}
       ) as exists
     `);
     const row: unknown = result.rows[0];
@@ -161,8 +261,13 @@ describeWithInfrastructure('real evaluation sandbox infrastructure', () => {
   }
 
   async function listPrefix(): Promise<string[]> {
+    return listPrefixFor(descriptor);
+  }
+
+  async function listPrefixFor(value: EvalSandboxDescriptor | undefined): Promise<string[]> {
+    if (!value) return [];
     const names: string[] = [];
-    for await (const item of minio.listObjectsV2(bucket, descriptor.objectPrefix, true)) {
+    for await (const item of minio.listObjectsV2(bucket, value.objectPrefix, true)) {
       const value: unknown = item;
       if (value && typeof value === 'object' && 'name' in value && typeof value.name === 'string') {
         names.push(value.name);

@@ -40,6 +40,7 @@ export type EvalTrialClaim = {
   readonly armId: string;
   readonly caseId: string;
   readonly attempt: number;
+  readonly seed: string;
   readonly claimToken: string;
   readonly workerId: string;
   readonly leaseExpiresAt: Date;
@@ -200,6 +201,7 @@ export class ExperimentStore {
         armId: evalTrials.armId,
         caseId: evalTrials.caseId,
         attempt: evalTrials.attempt,
+        seed: evalTrials.seed,
       });
     const row = rows[0];
     return row
@@ -226,6 +228,7 @@ export class ExperimentStore {
           armId: evalTrials.armId,
           caseId: evalTrials.caseId,
           attempt: evalTrials.attempt,
+          seed: evalTrials.seed,
         })
         .from(evalTrials)
         .innerJoin(evalArms, eq(evalArms.id, evalTrials.armId))
@@ -338,6 +341,30 @@ export class ExperimentStore {
     });
   }
 
+  public async renewTrialLease(input: {
+    readonly trialId: string;
+    readonly claimToken: string;
+    readonly leaseMs: number;
+  }): Promise<boolean> {
+    validateTrialLease('lease-renewal', input.claimToken, input.leaseMs);
+    const now = this.now();
+    const rows = await this.database
+      .update(evalTrials)
+      .set({
+        leaseExpiresAt: new Date(now.getTime() + input.leaseMs),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(evalTrials.id, input.trialId),
+          eq(evalTrials.status, 'running'),
+          eq(evalTrials.claimToken, input.claimToken),
+        ),
+      )
+      .returning({ id: evalTrials.id });
+    return rows.length === 1;
+  }
+
   public async failExpiredTrials(experimentId: string): Promise<readonly string[]> {
     const now = this.now();
     const armRows = await this.database
@@ -374,7 +401,14 @@ export class ExperimentStore {
   public async retryTrial(input: {
     readonly trialId: string;
     readonly seed: string;
+    readonly maxAttempt?: number;
   }): Promise<string | undefined> {
+    if (
+      input.maxAttempt !== undefined &&
+      (!Number.isSafeInteger(input.maxAttempt) || input.maxAttempt < 1 || input.maxAttempt > 20)
+    ) {
+      throw new RangeError('Evaluation retry maxAttempt must be between 1 and 20');
+    }
     return this.database.transaction(async (transaction) => {
       const rows = await transaction
         .select({
@@ -391,7 +425,7 @@ export class ExperimentStore {
       if (!source || (source.status !== 'failed' && source.status !== 'cancelled'))
         return undefined;
       const attempt = source.attempt + 1;
-      if (attempt > 20) throw new RangeError('Evaluation retry exceeds the attempt limit');
+      if (attempt > (input.maxAttempt ?? 20)) return undefined;
       const id = this.createId();
       const inserted = await transaction
         .insert(evalTrials)
@@ -406,6 +440,30 @@ export class ExperimentStore {
         .onConflictDoNothing()
         .returning({ id: evalTrials.id });
       return inserted[0]?.id;
+    });
+  }
+
+  public async completeExperimentIfSettled(experimentId: string): Promise<boolean> {
+    return this.database.transaction(async (transaction) => {
+      const active = await transaction
+        .select({ id: evalTrials.id })
+        .from(evalTrials)
+        .innerJoin(evalArms, eq(evalArms.id, evalTrials.armId))
+        .where(
+          and(
+            eq(evalArms.experimentId, experimentId),
+            inArray(evalTrials.status, ['pending', 'running']),
+          ),
+        )
+        .limit(1);
+      if (active.length > 0) return false;
+      const now = this.now();
+      const rows = await transaction
+        .update(evalExperiments)
+        .set({ status: 'completed', completedAt: now, updatedAt: now })
+        .where(and(eq(evalExperiments.id, experimentId), eq(evalExperiments.status, 'running')))
+        .returning({ id: evalExperiments.id });
+      return rows.length === 1;
     });
   }
 

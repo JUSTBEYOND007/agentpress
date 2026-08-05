@@ -221,8 +221,9 @@ No Harbor source is copied: AgentPress directly composes Docker CLI, Drizzle/Pos
 MinIO behind `EvalSandboxResourceManager` and `executeDockerEvalSandbox`. The fixed infrastructure
 test creates and removes real schema/topic/prefix resources and verifies the container's non-root,
 read-only, noexec, capability, NoNewPrivileges, network-none, bounded-output and timeout-cleanup
-contracts. The remaining Eval gap is the operational loop joining Trial claim, resource lease,
-container execution and exact-claim settlement.
+contracts. `runSandboxExperiment` now joins Trial claim, lease renewal/expiry recovery, resource
+  lease, fixed case/arm command, structured output, cancellation, bounded retry and exact-claim
+  settlement; its real integration case proves failed-attempt cleanup and fresh retry identities.
 
 ## Primary Pi Business Reference
 

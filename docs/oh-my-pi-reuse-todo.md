@@ -506,13 +506,16 @@ TODO：
       AbortSignal 或输出越界时强制删除容器。`pnpm eval:sandbox` 已在 Docker Engine 29.2.0 与真实
       PostgreSQL/Kafka/MinIO 上验证非 root、只读根、noexec tmpfs、cap-drop、NoNewPrivs、network=none、
       资源身份注入、超时删除以及所有外部资源清理。
-- [ ] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
+- [x] 支持固定测试集、并发、attempts、pass@k、resume、cancel 和失败试次重跑，不复用已污染业务数据。
       `ExperimentStore` 已支持固定 seed/attempts、pass@k、cancel、失败重跑和 pending resume；新增
       Eval Trial claim token/worker lease、`FOR UPDATE SKIP LOCKED` 并发领取与过期 worker fence。
       过期 Trial 先标记 `worker_lease_expired`，retry 创建新 trialId，因此得到新的 database schema、
       sandbox object prefix 和 Kafka group；Schema hash 绑定完整 experiment/arm/trial 身份，重试不再共享
-      已污染 Schema。基础设施原语已经通过真实验收，但仍需将 Trial claim、资源租约、Docker 执行和
-      exact-claim settlement 接入同一并发 runner，才能勾选本项。
+      已污染 Schema。`runSandboxExperiment` 现在将 Trial claim、续租/过期恢复、资源租约、固定
+      case/arm、Docker structured output、cancel、失败重试和 exact-claim settlement 串成有界并发循环；
+      失败 attempt 和进程丢失的旧资源在 retry 前先按旧 descriptor 清理。离线 runner 测试覆盖并发
+      claim/lease fence、结构化输出和恢复，`pnpm eval:sandbox` 真实 PostgreSQL/Kafka/MinIO/Docker
+      测试覆盖 persisted Experiment、失败重试、fresh schema/topic/group/prefix 和 completed settlement。
 - [x] 保存完整但脱敏的 RunEvent/ToolCall/Task/Evidence/Proposal/Settlement trace，供过程评分和故障分析。
       `loadPersistedRunTrace` 直接从 PostgreSQL 投影 RunEvent、AgentTask/TaskResult、ToolCall/Approval、
       Evidence、Action/Edit Proposal、Batch 与 operation decision；正文、Tool 参数/输出和编辑操作不复制，
@@ -593,7 +596,7 @@ TODO：
 - [x] 里程碑 5：MCP Streamable HTTP 差距补齐。
 - [x] 里程碑 6：Accepted Memory 混合召回与 consolidation。
 - [x] 里程碑 7：Skill conformance、安全资源加载和版本绑定。
-- [ ] 里程碑 8：Sandbox eval、过程/结果双层指标和 LLM Judge。
+- [x] 里程碑 8：Sandbox eval、过程/结果双层指标和 LLM Judge。
 - [ ] 里程碑 9：RAG/FAQ 检索评测和跨 workspace 安全门禁。
 
 每个里程碑是独立可验收的大功能，完成对应测试和检查后按仓库规则立即创建一条

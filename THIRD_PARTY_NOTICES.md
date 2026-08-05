@@ -44,7 +44,9 @@ Docker Engine/CLI, PostgreSQL, KafkaJS and the MinIO client are composed directl
 `packages/agent-evals/src/docker-sandbox-runner.ts` and `sandbox-resources.ts`; no Harbor source is
 copied. Harbor remains an architecture-only reference because its source license could not be
 confirmed. The Docker acceptance fixture uses an immutable image digest and does not redistribute
-the image.
+the image. Trial orchestration is AgentPress-owned in `packages/agent-evals/src/sandbox-trial-runner.ts`
+with tests in `packages/agent-evals/test/sandbox-trial-runner.test.ts` and
+`packages/agent-evals/test/sandbox-infrastructure.integration.test.ts`.
 
 ## Agent Skills Conformance Reference
 

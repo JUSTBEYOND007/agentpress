@@ -44,7 +44,7 @@ export function createEvalSandboxDescriptor(input: EvalSandboxPolicyInput): Eval
     trialId: input.trialId,
     databaseSchema: `eval_${databaseScope}`,
     objectPrefix: `eval/${experiment}/${arm}/${trial}/`,
-    kafkaTopic: `eval.${experiment}.trials`,
+    kafkaTopic: `eval.${experiment}.${trial}.trials`,
     kafkaConsumerGroup: `eval.${experiment}.${arm}.${trial}`,
     network: { mode: 'deny-by-default', allowedHosts },
   };

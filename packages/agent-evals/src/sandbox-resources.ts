@@ -17,6 +17,11 @@ export type EvalSandboxResourceLease = {
   cleanup(): Promise<void>;
 };
 
+export type EvalSandboxResources = {
+  provision(descriptor: EvalSandboxDescriptor): Promise<EvalSandboxResourceLease>;
+  cleanupAbandoned(descriptor: EvalSandboxDescriptor): Promise<void>;
+};
+
 export class MinioEvalSandboxObjectPrefixStore implements EvalSandboxObjectPrefixStore {
   public constructor(
     private readonly client: Client,
@@ -90,6 +95,19 @@ export class EvalSandboxResourceManager {
         return cleanupPromise;
       },
     };
+  }
+
+  public async cleanupAbandoned(descriptor: EvalSandboxDescriptor): Promise<void> {
+    assertDescriptor(descriptor);
+    const topics = await this.kafka.listTopics();
+    const errors = await this.cleanupParts(descriptor, {
+      schema: true,
+      topic: topics.includes(descriptor.kafkaTopic),
+      objects: true,
+    });
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Abandoned evaluation sandbox cleanup failed');
+    }
   }
 
   private async cleanup(descriptor: EvalSandboxDescriptor): Promise<void> {

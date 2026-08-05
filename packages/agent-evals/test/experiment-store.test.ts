@@ -48,7 +48,7 @@ describe('evaluation experiment store policy', () => {
     expect(
       /^eval\/[a-f0-9]{24}\/[a-f0-9]{24}\/[a-f0-9]{24}\/$/u.test(descriptor.objectPrefix),
     ).toBe(true);
-    expect(/^eval\.[a-f0-9]{24}\.trials$/u.test(descriptor.kafkaTopic)).toBe(true);
+    expect(/^eval\.[a-f0-9]{24}\.[a-f0-9]{24}\.trials$/u.test(descriptor.kafkaTopic)).toBe(true);
     expect(
       /^eval\.[a-f0-9]{24}\.[a-f0-9]{24}\.[a-f0-9]{24}$/u.test(descriptor.kafkaConsumerGroup),
     ).toBe(true);
