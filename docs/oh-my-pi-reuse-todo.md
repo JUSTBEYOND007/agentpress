@@ -651,6 +651,9 @@ TODO：
       每个已采用行为单元均在 `THIRD_PARTY_NOTICES.md` 列出 upstream test 起点、local test、适配边界和验证结果；对应 AgentPress 测试覆盖 fail-closed、权限隔离、恢复、取消、重复副作用和跨 workspace 相反语义。
 - [x] PostgreSQL 仍是 Conversation、Run、Task、ToolCall、Event、Checkpoint、Memory、Skill 和 Eval 事实源。
 - [x] 未引入第二套 Pi Runtime、文件事实源、任意 MCP、Prompt 权限或自动长期写入。
-- [ ] 真实 Pi runtime/目标模型验收结果包含模型、Prompt、Skill、工具和配置版本。
+- [x] 真实 Pi runtime/目标模型验收结果包含模型、Prompt、Skill、工具和配置版本。
+      Multi-Agent 与 Tool online report 的 `versionManifest` 均记录实际 model/provider、Prompt revision、
+      Skill 版本、每个实际 Tool 版本、context policy/schema、`pi-runtime@0.82.1` 与 config version；
+      terra/sol 对照报告还保留了不同目标模型的完整 manifest。
 - [x] `THIRD_PARTY_NOTICES.md` 与 `docs/references/pi-ecosystem.md` 已随实际采用范围更新。
 - [ ] lint、typecheck、unit、integration、build、相关浏览器测试和在线 eval 全部通过。
