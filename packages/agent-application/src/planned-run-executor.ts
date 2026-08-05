@@ -1105,7 +1105,7 @@ export class PlannedRunExecutor {
           task.owner,
           specialistPrompt(task.owner),
           recoveredHistory,
-          applicationTurn(rootPrompt, ''),
+          specialistApplicationTurn(rootPrompt, ''),
           [...domainTools, taskComplete],
           signal,
           true,
@@ -1143,7 +1143,7 @@ export class PlannedRunExecutor {
         task.owner,
         specialistPrompt(task.owner),
         [],
-        applicationTurn(
+        specialistApplicationTurn(
           rootPrompt,
           'Protocol repair: call task_complete exactly once with a schema-valid result.',
         ),
@@ -1367,7 +1367,11 @@ export class PlannedRunExecutor {
     if (dependencies.length > 0)
       await transaction.insert(agentTaskDependencies).values(dependencies);
     for (const { task, request } of requests) {
-      const content = JSON.stringify({ rootRequest: prompt, task, specialistTaskRequest: request });
+      const content = JSON.stringify({
+        rootRequest: specialistApplicationTurn(prompt, ''),
+        task,
+        specialistTaskRequest: request,
+      });
       const contentHash = createHash('sha256').update(content).digest('hex');
       await transaction.insert(taskBriefs).values({
         id: this.createId(),
@@ -1981,9 +1985,9 @@ function applicationTurn(parent: RuntimeCurrentTurn, request: string): RuntimeCu
 }
 
 /**
- * Specialist turns intentionally do not inherit the Main action envelope or
- * any parent capability grants. The full root request remains in the durable
- * Context Pack solely for detached recovery, never as model-visible input.
+ * Specialist turns intentionally do not inherit the Main action envelope,
+ * context, request text, or any parent capability grants. Detached recovery
+ * persists only this minimal protocol envelope in the Specialist Context Pack.
  */
 export function specialistApplicationTurn(
   parent: RuntimeCurrentTurn,

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
+  hashSkillRevisionContent,
   loadSkill,
   loadStaticSkillResources,
   type SkillResourceDocument,
@@ -36,9 +37,7 @@ export class ContextGovernanceService {
   ) {
     const skill = loadSkill(markdown);
     const resources = loadStaticSkillResources(skill, resourceDocuments);
-    const contentHash = createHash('sha256')
-      .update(resources.length === 0 ? markdown : JSON.stringify({ markdown, resources }))
-      .digest('hex');
+    const contentHash = hashSkillRevisionContent(markdown, resources);
     const inserted = await this.database.transaction(async (transaction) => {
       const rows = await transaction
         .insert(skillRevisions)

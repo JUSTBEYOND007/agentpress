@@ -824,6 +824,9 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(packs[0]?.content).toContain('Mentioned immutable content');
     expect(packs[0]?.content).toContain('Keep the answer concise.');
     expect(packs[0]?.content).toContain('Prefer short paragraphs');
+    expect(packs[0]?.content).toContain('kind="mention" trust="untrusted"');
+    expect(packs[0]?.content).toContain('kind="policy" trust="untrusted"');
+    expect(packs[0]?.content).toContain('kind="memory" trust="untrusted"');
     const promptRows = await connection.db
       .select()
       .from(promptRevisions)
@@ -919,6 +922,8 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(packs[0]?.manifest).toMatchObject({
       retrievalVersion: 'accepted-memory.hybrid-v1',
     });
+    await service.requestCancellation(run.runId);
+    await service.execute(run.runId);
   });
 
   it('creates consolidation as a pending candidate and supersedes sources only after acceptance', async () => {
@@ -1008,6 +1013,8 @@ describeWithDatabase('Direct Run application flow', () => {
         }),
       ]),
     );
+    await selectingService.requestCancellation(run.runId);
+    await selectingService.execute(run.runId);
 
     await governance.createSkill(
       ids.workspace,
@@ -1253,6 +1260,23 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(runContextPacks)
       .where(eq(runContextPacks.runId, run.runId));
     expect(packs[0]?.content).toContain('Use short paragraphs.');
+    await service.requestCancellation(run.runId);
+    await service.execute(run.runId);
+
+    await connection.db
+      .update(skillRevisionResources)
+      .set({ content: 'Tampered resource content.' })
+      .where(eq(skillRevisionResources.skillRevisionId, resourceRevision[0]?.id ?? ''));
+    await expect(
+      service.create({
+        conversationId: ids.conversation,
+        userId: ids.user,
+        branchId: ids.branch,
+        prompt: 'Use the tampered resource skill',
+        idempotencyKey: randomUUID(),
+        skills: [{ skillId: 'resource-skill', version: '1.0.0' }],
+      }),
+    ).rejects.toThrow(/integrity validation/u);
   });
 
   it('persists cancellation before aborting Pi and reaches a terminal state', async () => {
@@ -1419,6 +1443,23 @@ describeWithDatabase('Direct Run application flow', () => {
           manifest.detached === false,
       ),
     ).toBe(true);
+    expect(
+      contexts.every(({ content }) => {
+        const envelope = JSON.parse(content) as {
+          readonly rootRequest?: {
+            readonly request?: unknown;
+            readonly context?: unknown;
+            readonly actionEnvelope?: { readonly grantedCapabilities?: readonly string[] };
+          };
+        };
+        return (
+          envelope.rootRequest?.request === '' &&
+          envelope.rootRequest.context === undefined &&
+          envelope.rootRequest.actionEnvelope?.grantedCapabilities?.length === 0 &&
+          !content.includes('联网搜索最新资料并写一篇图文文章')
+        );
+      }),
+    ).toBe(true);
     const results = await connection.db.select().from(taskResults);
     expect(
       results.filter(({ taskId }) => persistedTasks.some(({ id }) => id === taskId)),
@@ -1457,16 +1498,23 @@ describeWithDatabase('Direct Run application flow', () => {
       conversationId: ids.conversation,
     });
     const task = plannedTask('repairable', 'writer');
-    const runtime = PiRuntimeAdapter.forTests({
+    const delegate = PiRuntimeAdapter.forTests({
       responses: [
         toolResponse('plan_submit', { goal: 'Repair specialist completion', tasks: [task] }),
-        fauxAssistantMessage([fauxToolCall('task_complete', { status: 'invalid' })], {
-          stopReason: 'toolUse',
-        }),
+        'Stopped without calling task_complete.',
         taskCompleteResponse('Recovered after protocol repair'),
         runCompleteResponse('协议修复后完成。'),
       ],
     });
+    const observedSpecialistTurns: unknown[] = [];
+    const runtime: AgentRuntime = {
+      execute(request, sink, signal) {
+        if (request.tools?.some(({ name }) => name === 'task_complete')) {
+          observedSpecialistTurns.push(request.currentTurn);
+        }
+        return delegate.execute(request, sink, signal);
+      },
+    };
     const repairService = new DirectRunService({
       database: connection.db,
       publisher,
@@ -1487,6 +1535,18 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(agentSessions)
       .where(eq(agentSessions.runId, run.runId));
     expect(sessions.some(({ logicalKey }) => logicalKey.endsWith(':2'))).toBe(true);
+    expect(observedSpecialistTurns).toHaveLength(2);
+    expect(
+      observedSpecialistTurns.every(
+        (turn) =>
+          typeof turn === 'object' &&
+          turn !== null &&
+          !('context' in turn) &&
+          'actionEnvelope' in turn &&
+          JSON.stringify(turn.actionEnvelope) ===
+            JSON.stringify({ version: 1, source: 'free_text', grantedCapabilities: [] }),
+      ),
+    ).toBe(true);
   });
 
   it('persists and can cancel Steering while a Direct Run is still active', async () => {

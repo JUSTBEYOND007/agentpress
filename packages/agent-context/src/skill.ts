@@ -99,9 +99,15 @@ export function validateSkillConformance(
   }
   const description = value.description;
   if (typeof description !== 'string' || description.trim().length === 0) {
-    issues.push({ code: 'missing-description', message: 'Agent Skills requires a description field' });
+    issues.push({
+      code: 'missing-description',
+      message: 'Agent Skills requires a description field',
+    });
   } else if (description.length > 1_024) {
-    issues.push({ code: 'description-too-long', message: 'Skill description exceeds 1024 characters' });
+    issues.push({
+      code: 'description-too-long',
+      message: 'Skill description exceeds 1024 characters',
+    });
   }
   if (typeof value.compatibility === 'string' && value.compatibility.length > 500) {
     issues.push({
@@ -278,6 +284,18 @@ export function loadStaticSkillResources(
       contentHash: createHash('sha256').update(document.content).digest('hex'),
     };
   });
+}
+
+export function hashSkillRevisionContent(
+  markdown: string,
+  resources: readonly {
+    readonly path: string;
+    readonly content: string;
+    readonly contentHash: string;
+  }[],
+): string {
+  const content = resources.length === 0 ? markdown : JSON.stringify({ markdown, resources });
+  return createHash('sha256').update(content).digest('hex');
 }
 
 export function sanitizeSkillDescription(value: string): string {

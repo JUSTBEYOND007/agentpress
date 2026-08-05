@@ -261,7 +261,10 @@ TODO：
       late success 已通过数据库和 Planned Run 集成回归验证。完整 retry/recover checkpoint 与外部
       副作用幂等证明仍待完成。
 - [ ] Specialist 只拿最小 Context Pack；Main 只接收结构化结果、Evidence 和公开摘要，不接收私有推理。
-      已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities；完整 root request 仍只保存在 PostgreSQL Context Pack 供 detached 恢复，最小 Context Pack 的全链路 PostgreSQL/真实模型验收仍待完成。
+      已收紧 Specialist 模型可见 turn：仅传 task/验收条件/能力与上游公开摘要，清空父级 granted capabilities。
+      PostgreSQL `context_packs` 不再保存完整 root request，只保留 detached 恢复所需的 current-turn 协议壳、
+      Task 与宿主策略；正常、已审批 Tool continuation 和协议修复三条路径统一使用
+      `specialistApplicationTurn`，不会重新继承 Main request、context 或 capability。真实模型验收仍待完成。
 - [x] 不复制 Worktree、Git patch、Bash subprocess 和本地 artifacts 目录；映射为 Article Revision、
       EditProposal、Artifact 和 PostgreSQL Checkpoint。
 - [x] 复制并扩展相反语义测试：并行不越权、子 Agent 不继承未授权工具、取消不变成功、重试不重复写入。
@@ -366,6 +369,8 @@ TODO：
       因为它对中文/多语言不可靠且不应成为权威分类。episodic graph/entity/triple 会复制 PostgreSQL
       Memory/Evidence 事实模型并引入自动提取写入，当前无独立采用价值。
 - [x] Memory extraction 只能生成用户可见 Candidate；接受后才可检索，Specialist 不能直接写长期 Memory。
+      接受状态只决定是否可召回，不提升内容信任级别；进入 Run Context Pack 的长期 Memory 固定为
+      `trust="untrusted"`，与 Mention、Attachment、Evidence、Summary 和 Skill 数据保持一致。
 - [x] 不复制关键词模式作为权威分类；用结构化模型输出加确定性 Schema 校验，并保留人工覆盖。
       Memory Candidate 通过结构化字段和 PostgreSQL 状态决策，检索不使用关键词分类授权。
 - [x] 增加 workspace/user 隔离、source Evidence、confidence、validity、supersedes、删除和导出契约。
@@ -441,6 +446,9 @@ TODO：
 - [x] 复制路径穿越、symlink、hardlink、文件类型、大小、重复 ID 和恶意 description 测试。
 - [x] Skill 只能缩小工具 allowlist，不能扩张平台、workspace、Agent 或 Task 权限。
 - [x] Skill instructions 和 resource 必须标记为不可信数据，不得覆盖 system policy、tool schema 或 approval。
+      `contextCandidate` 使用具名 `{ required, trusted }` 策略，避免布尔位置参数把数据误标为 trusted；
+      Skill revision hash 同时覆盖 Markdown 和按声明顺序加载的静态 resources，读取时逐项复算 content hash、
+      byte size 和聚合 hash，额外、缺失或被篡改的 resource 均 fail closed。
 - [x] 首版不复制 managed/autolearn Skill 自动写入；当前只有显式的 PostgreSQL Skill revision/proposal 边界，未来如采用仍必须走 proposal、diff、审批、版本和回滚。
 - [x] 不自动执行 Skill 脚本；Skill 只加载 Markdown 与声明的静态 regular-file resource，不执行脚本或隐式授予工具。
 - [ ] 建立 Skill conformance 和 prompt-injection 测试集，并用真实模型验证选择准确率与禁用项不被调用。

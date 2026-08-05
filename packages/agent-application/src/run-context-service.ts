@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import {
   assembleContext,
   createPromptRevision,
+  hashSkillRevisionContent,
   loadSkill,
+  loadStaticSkillResources,
   pinSkills,
   promptSnapshotsEqual,
   rankRelevantMemory,
@@ -184,7 +186,6 @@ export class RunContextService {
         );
       return row;
     });
-    const parsedSkills = selectedSkillRows.map(validateStoredSkill);
     const skillResourceRows =
       selectedSkillRows.length === 0
         ? []
@@ -194,6 +195,7 @@ export class RunContextService {
               path: skillRevisionResources.path,
               content: skillRevisionResources.content,
               contentHash: skillRevisionResources.contentHash,
+              byteSize: skillRevisionResources.byteSize,
             })
             .from(skillRevisionResources)
             .where(
@@ -202,6 +204,12 @@ export class RunContextService {
                 selectedSkillRows.map(({ id }) => id),
               ),
             );
+    const parsedSkills = selectedSkillRows.map((row) =>
+      validateStoredSkill(
+        row,
+        skillResourceRows.filter(({ skillRevisionId }) => skillRevisionId === row.id),
+      ),
+    );
     const now = new Date();
     const acceptedMemoryRows = await transaction
       .select()
@@ -260,18 +268,13 @@ export class RunContextService {
         'The versioned system policy is supplied separately by the runtime.',
         `${this.prompt.version}:${this.prompt.contentHash}`,
         1,
-        true,
+        { required: true, trusted: true },
       ),
       ...parsedSkills.map((skill) =>
-        contextCandidate(
-          `skill:${skill.id}`,
-          'policy',
-          skill.instructions,
-          skill.version,
-          0.9,
-          false,
-          false,
-        ),
+        contextCandidate(`skill:${skill.id}`, 'policy', skill.instructions, skill.version, 0.9, {
+          required: false,
+          trusted: false,
+        }),
       ),
       ...skillResourceRows.map((resource) =>
         contextCandidate(
@@ -280,8 +283,7 @@ export class RunContextService {
           resource.content,
           resource.contentHash,
           0.85,
-          false,
-          false,
+          { required: false, trusted: false },
         ),
       ),
       ...mentionRows.map((mention) =>
@@ -291,7 +293,7 @@ export class RunContextService {
           JSON.stringify(mention.document),
           `${mention.revisionId}:${mention.contentHash}`,
           1,
-          true,
+          { required: true, trusted: false },
         ),
       ),
       ...attachmentRows.map((attachment) =>
@@ -301,11 +303,14 @@ export class RunContextService {
           attachment.content ?? '',
           attachment.contentHash,
           1,
-          true,
+          { required: true, trusted: false },
         ),
       ),
       ...articleBindings.map((binding) =>
-        contextCandidate(binding.id, 'mention', binding.content, binding.revision, 1, true),
+        contextCandidate(binding.id, 'mention', binding.content, binding.revision, 1, {
+          required: true,
+          trusted: false,
+        }),
       ),
       ...evidenceRows.map((evidence) =>
         contextCandidate(
@@ -314,7 +319,7 @@ export class RunContextService {
           `${evidence.title}\n${evidence.excerpt}`,
           evidence.sourceRevision,
           1,
-          true,
+          { required: true, trusted: false },
         ),
       ),
       ...(compaction?.summary && compaction.firstKeptMessageSequence
@@ -330,8 +335,7 @@ export class RunContextService {
               ),
               String(compaction.version),
               1,
-              true,
-              false,
+              { required: true, trusted: false },
             ),
           ]
         : []),
@@ -342,7 +346,7 @@ export class RunContextService {
           `${memory.subject}: ${memory.value}`,
           memory.valueHash,
           score,
-          false,
+          { required: false, trusted: false },
         ),
       ),
     ];
@@ -472,13 +476,39 @@ export class RunContextService {
   }
 }
 
-function validateStoredSkill(row: typeof skillRevisions.$inferSelect): SkillDefinition {
+function validateStoredSkill(
+  row: typeof skillRevisions.$inferSelect,
+  resourceRows: readonly {
+    readonly path: string;
+    readonly content: string;
+    readonly contentHash: string;
+    readonly byteSize: number;
+  }[],
+): SkillDefinition {
   const skill = loadSkill(row.content);
-  const contentHash = createPromptRevision('skill', 'integrity', row.content).contentHash;
+  const resources = loadStaticSkillResources(
+    skill,
+    resourceRows.map((resource) => ({
+      path: resource.path,
+      content: resource.content,
+      fileType: 'file',
+    })),
+  );
+  const resourcesValid =
+    resources.length === resourceRows.length &&
+    resources.every((resource) => {
+      const persisted = resourceRows.find(({ path }) => path === resource.path);
+      return (
+        persisted?.contentHash === resource.contentHash &&
+        persisted.byteSize === Buffer.byteLength(resource.content, 'utf8')
+      );
+    });
+  const contentHash = hashSkillRevisionContent(row.content, resources);
   if (
     skill.id !== row.skillId ||
     skill.version !== row.version ||
     contentHash !== row.contentHash ||
+    !resourcesValid ||
     JSON.stringify(skill.allowedTools) !== JSON.stringify([...row.allowedTools].sort())
   )
     throw new Error(`Stored Skill ${row.skillId}@${row.version} failed integrity validation`);
@@ -491,8 +521,7 @@ function contextCandidate(
   content: string,
   revision: string,
   score: number,
-  required: boolean,
-  trusted = true,
+  policy: { readonly required: boolean; readonly trusted: boolean },
 ): ContextCandidate {
   return {
     id,
@@ -501,8 +530,8 @@ function contextCandidate(
     revision,
     tokenCount: Math.max(1, Math.ceil(Buffer.byteLength(content, 'utf8') / 4)),
     score,
-    trusted,
-    required,
+    trusted: policy.trusted,
+    required: policy.required,
   };
 }
 
