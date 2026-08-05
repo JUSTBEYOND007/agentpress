@@ -20,6 +20,7 @@ import {
   conversations,
   evidenceRecords,
   editProposals,
+  memoryCandidates,
   promptRevisions,
   runContextPacks,
   runEvents,
@@ -152,6 +153,11 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
         scenario.expected.requiredCapabilities.includes('article.propose');
       const articleId = requiresArticle ? randomUUID() : undefined;
       const revisionId = requiresArticle ? randomUUID() : undefined;
+      const otherWorkspaceId =
+        scenario.setup?.memoryFixtures?.some(({ scope }) => scope === 'other') === true
+          ? randomUUID()
+          : undefined;
+      const memoryFixtureIds = (scenario.setup?.memoryFixtures ?? []).map(() => randomUUID());
       const document = {
         type: 'doc',
         content: [
@@ -181,6 +187,36 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           .insert(workspaces)
           .values({ id: workspaceId, name: `Eval ${scenario.id}` });
         await transaction.insert(workspaceMembers).values({ workspaceId, userId, role: 'owner' });
+        if (otherWorkspaceId) {
+          await transaction.insert(workspaces).values({
+            id: otherWorkspaceId,
+            name: `Other Eval ${scenario.id}`,
+          });
+        }
+        const memoryFixtures = scenario.setup?.memoryFixtures ?? [];
+        if (memoryFixtures.length > 0) {
+          await transaction.insert(memoryCandidates).values(
+            memoryFixtures.map((fixture, index) => {
+              const memoryId = memoryFixtureIds[index];
+              if (!memoryId) throw new Error('Memory fixture ID was not allocated');
+              const memoryWorkspaceId =
+                fixture.scope === 'other' ? otherWorkspaceId : workspaceId;
+              if (!memoryWorkspaceId) throw new Error('Other memory workspace was not allocated');
+              return {
+                id: memoryId,
+                workspaceId: memoryWorkspaceId,
+                userId,
+                subject: fixture.subject,
+                value: fixture.value,
+                valueHash: createHash('sha256').update(fixture.value).digest('hex'),
+                confidenceBps: 9000,
+                kind: 'preference' as const,
+                importanceBps: 8000,
+                status: fixture.status,
+              };
+            }),
+          );
+        }
         if (articleId && revisionId) {
           await transaction.insert(articles).values({
             id: articleId,
@@ -310,6 +346,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
         editProposalRows,
         promptRows,
         skillRows,
+        memoryPackRows,
       ] = await Promise.all([
         connection.db
           .select({
@@ -381,6 +418,10 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           .from(runSkillBindings)
           .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
           .where(eq(runSkillBindings.runId, created.runId)),
+        connection.db
+          .select({ content: runContextPacks.content })
+          .from(runContextPacks)
+          .where(eq(runContextPacks.runId, created.runId)),
       ]);
       const run = runRows[0];
       if (!run) throw new Error('Persisted eval Run disappeared');
@@ -454,7 +495,16 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
           unauthorizedWrites: 0,
           unknownOutcomeRetries:
             toolRows.filter(({ status }) => status === 'outcome_unknown').length > 1 ? 1 : 0,
-          crossWorkspaceMemoryHits: 0,
+          crossWorkspaceMemoryHits: (scenario.setup?.memoryFixtures ?? []).filter(
+            ({ scope }, index) => {
+              const memoryId = memoryFixtureIds[index];
+              return (
+                scope === 'other' &&
+                memoryId !== undefined &&
+                memoryPackRows.some(({ content }) => content.includes(memoryId))
+              );
+            },
+          ).length,
           parallelExecutionValid: hasParallelTaskOverlap(eventRows),
           toolCalls: toolRows.map(({ toolId, status, argumentsHash, risk }) => ({
             toolId,
@@ -462,6 +512,9 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
             argumentsHash,
             risk,
           })),
+          acceptedMemoryHits: memoryFixtureIds.filter((id) =>
+            memoryPackRows.some(({ content }) => content.includes(id)),
+          ).length,
         },
       };
     },

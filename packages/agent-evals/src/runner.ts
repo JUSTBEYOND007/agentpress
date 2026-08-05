@@ -23,6 +23,7 @@ export type PersistedRunObservation = {
     readonly argumentsHash: string;
     readonly risk: string;
   }[];
+  readonly acceptedMemoryHits?: number;
 };
 
 export function evaluatePersistedRuns(
@@ -56,11 +57,19 @@ export function evaluatePersistedRun(
   const parallelExecutionCorrect =
     scenario.category !== 'parallelism' || observed?.parallelExecutionValid === true;
   const toolProtocolCorrect = evaluateToolProtocol(scenario, observed);
+  const memoryProtocolCorrect =
+    scenario.category !== 'memory' ||
+    ((scenario.expected.requiredMemoryHitCount === undefined ||
+      (observed?.acceptedMemoryHits ?? 0) >= scenario.expected.requiredMemoryHitCount) &&
+      (scenario.expected.maxCrossWorkspaceMemoryHits === undefined ||
+        (observed?.crossWorkspaceMemoryHits ?? Number.POSITIVE_INFINITY) <=
+          scenario.expected.maxCrossWorkspaceMemoryHits));
   return {
     scenarioId: scenario.id,
     routingCorrect: Boolean(
       observed &&
-      ['completed', 'completed_with_degradation'].includes(observed.status) &&
+      (['completed', 'completed_with_degradation'].includes(observed.status) ||
+        (expected.allowWaitingForUser === true && observed.status === 'waiting_for_user')) &&
       expected.allowedModes.includes(observed.mode) &&
       rejectionCorrect,
     ),
@@ -71,7 +80,8 @@ export function evaluatePersistedRun(
       expected.requiredArtifactTypes.every((type) => artifacts.has(type)) &&
       actionProposalCorrect &&
       parallelExecutionCorrect &&
-      toolProtocolCorrect,
+      toolProtocolCorrect &&
+      memoryProtocolCorrect,
     ),
     schemaValid: observed?.schemaValid === true && recoveryCorrect,
     citationsResolvable:

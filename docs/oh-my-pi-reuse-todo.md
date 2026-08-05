@@ -416,6 +416,10 @@ TODO：
       `packages/agent-context/test/context.test.ts` 覆盖 rejected、跨 user、过期和 instruction-like
       memory；Context Pack 将记忆固定标记为 untrusted 且不产生 capability。
 - [ ] 真实目标模型评估 accepted-memory precision、recall、污染率和跨租户泄漏为零。
+      部分真实证据已具备：`.agentpress/evals/2026-08-05T16-27-21-427Z-gpt-5.6-terra-memory.json`
+      通过等待确认、当前 workspace accepted-memory 召回（1）和跨 workspace hit（0）。总门禁暂不勾选，
+      因为 `memory.propose` 尚未接入该在线 harness，尚未形成 pending/accepted 对照集上的完整
+      precision、recall 和污染率统计。
 
 首选本地落点：`packages/agent-context/`、`packages/knowledge-retrieval/`、`packages/database/`。
 
