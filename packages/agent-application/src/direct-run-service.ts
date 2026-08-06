@@ -11,7 +11,6 @@ import { loadSkill } from '@agentpress/agent-context';
 import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {
   agentRuns,
-  agentTasks,
   appendCheckpoint,
   appendRunEvent,
   cancelAgentRunTasks,
@@ -28,11 +27,9 @@ import {
   runEvents,
   runToolChoices,
   skillRevisions,
-  toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
 import { and, asc, desc, eq, gte, inArray, lt, max, sql } from 'drizzle-orm';
-import { decideToolReplay, resolveToolReplaySafety } from '@agentpress/tool-runtime';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -69,6 +66,7 @@ import { RunProjectionService, isTerminalRunStatus } from './run-projection-serv
 import { ConversationBranchService } from './conversation-branch-service.js';
 import { decodeRuntimeMessage, encodeRuntimeMessage } from './runtime-message-codec.js';
 import { RunInteractionService } from './run-interaction-service.js';
+import { RunRecoveryService } from './run-recovery-service.js';
 
 export { isTerminalRunStatus } from './run-projection-service.js';
 
@@ -98,6 +96,7 @@ export class DirectRunService {
   private readonly projections: RunProjectionService;
   private readonly branches: ConversationBranchService;
   private readonly interactions: RunInteractionService;
+  private readonly recovery: RunRecoveryService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
@@ -113,6 +112,12 @@ export class DirectRunService {
       createId: this.createId,
       now: this.now,
       steerActiveMain: (runId, content) => this.plannedRuns.steerActiveMain(runId, content),
+    });
+    this.recovery = new RunRecoveryService({
+      database: options.database,
+      publisher: options.publisher,
+      createId: this.createId,
+      now: this.now,
     });
     this.compactions = new ConversationCompactionService({
       database: options.database,
@@ -538,218 +543,12 @@ export class DirectRunService {
     });
   }
 
-  public async requestCancellation(runId: string): Promise<RequestRunCancellationResult> {
-    const settled = await this.options.database.transaction(async (transaction) => {
-      const rows = await transaction
-        .select({ status: agentRuns.status })
-        .from(agentRuns)
-        .where(eq(agentRuns.id, runId))
-        .limit(1);
-      const current = rows[0];
-      if (!current) {
-        return { result: { outcome: 'not_found' as const, runId }, events: [] };
-      }
-      if (isTerminalRunStatus(current.status)) {
-        return {
-          result: { outcome: 'already_terminal' as const, runId, status: current.status },
-          events: [],
-        };
-      }
-      if (current.status === 'cancelling') {
-        return {
-          result: { outcome: 'accepted' as const, runId, status: 'cancelling' as const },
-          events: [],
-        };
-      }
-
-      const updated = await transaction
-        .update(agentRuns)
-        .set({
-          status: 'cancelling',
-          updatedAt: this.now(),
-          version: sql`${agentRuns.version} + 1`,
-        })
-        .where(
-          and(
-            eq(agentRuns.id, runId),
-            inArray(agentRuns.status, [
-              'queued',
-              'planning',
-              'running',
-              'waiting_for_approval',
-              'waiting_for_user',
-              'interrupted',
-              'recovering',
-            ]),
-          ),
-        )
-        .returning({ id: agentRuns.id });
-      if (updated.length === 0) {
-        return {
-          result: { outcome: 'already_terminal' as const, runId, status: current.status },
-          events: [],
-        };
-      }
-      const now = this.now();
-      const cancelledTasks = await cancelAgentRunTasks(transaction, { runId, now });
-      const taskEvents: DurableRunEvent[] = [];
-      for (const task of cancelledTasks) {
-        const taskEvent = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'task.cancelled',
-          payload: {
-            taskId: task.taskId,
-            attempt: task.attempt,
-            reason: 'run_cancelled',
-          },
-        });
-        taskEvents.push(toDurableEvent(taskEvent));
-      }
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'run.cancelling',
-        payload: {},
-      });
-      return {
-        result: { outcome: 'accepted' as const, runId, status: 'cancelling' as const },
-        events: [...taskEvents, toDurableEvent(event)],
-      };
-    });
-
-    for (const event of settled.events) {
-      await this.options.publisher.publish({ durable: true, event });
-    }
-    return settled.result;
+  public requestCancellation(runId: string): Promise<RequestRunCancellationResult> {
+    return this.recovery.requestCancellation(runId);
   }
 
-  public async prepareRecovery(runId: string): Promise<boolean> {
-    const result = await this.options.database.transaction(async (transaction) => {
-      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
-      const rows = await transaction
-        .select({ status: agentRuns.status })
-        .from(agentRuns)
-        .where(eq(agentRuns.id, runId))
-        .limit(1);
-      const run = rows[0];
-      if (!run || run.status === 'queued' || run.status === 'recovering') {
-        return { recovered: run?.status === 'recovering', events: [] as DurableRunEvent[] };
-      }
-      if (!isRecoverableRunStatus(run.status)) {
-        return { recovered: false, events: [] as DurableRunEvent[] };
-      }
-      const now = this.now();
-      const recoveredToolChoices = await transaction
-        .update(runToolChoices)
-        .set({
-          status: 'pending',
-          claimToken: null,
-          claimedAt: null,
-          rejectionReason: null,
-          recoveryCount: sql`${runToolChoices.recoveryCount} + 1`,
-        })
-        .where(and(eq(runToolChoices.runId, runId), eq(runToolChoices.status, 'in_flight')))
-        .returning({ id: runToolChoices.id });
-      const executing = await transaction
-        .select({
-          id: toolCalls.id,
-          risk: toolCalls.risk,
-          idempotencyKey: toolCalls.idempotencyKey,
-        })
-        .from(toolCalls)
-        .where(and(eq(toolCalls.runId, runId), eq(toolCalls.status, 'executing')));
-      const events: DurableRunEvent[] = [];
-      const replayReadyToolCalls: string[] = [];
-      for (const call of executing) {
-        const safety = resolveToolReplaySafety({
-          risk: call.risk,
-          // A persisted key proves only that AgentPress can identify the call. It does
-          // not prove the external provider committed that key atomically with its side effect.
-          idempotency: call.risk === 'read_only' && call.idempotencyKey ? 'provider_key' : 'none',
-        });
-        const action = decideToolReplay({
-          status: 'executing',
-          safety,
-          ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}),
-        });
-        if (action === 'resume') {
-          await transaction
-            .update(toolCalls)
-            .set({
-              status: 'approved',
-              failure: null,
-              settledAt: null,
-              updatedAt: now,
-              version: sql`${toolCalls.version} + 1`,
-            })
-            .where(and(eq(toolCalls.id, call.id), eq(toolCalls.status, 'executing')));
-          const toolEvent = await appendRunEvent(transaction, {
-            id: this.createId(),
-            runId,
-            eventType: 'tool.recovery_ready',
-            payload: { toolCallId: call.id, reason: 'worker_lease_lost', action, safety },
-          });
-          events.push(toDurableEvent(toolEvent));
-          replayReadyToolCalls.push(call.id);
-          continue;
-        }
-        const status = 'outcome_unknown' as const;
-        await transaction
-          .update(toolCalls)
-          .set({
-            status,
-            failure: { message: 'Worker lease was lost during tool execution' },
-            settledAt: now,
-            updatedAt: now,
-            version: sql`${toolCalls.version} + 1`,
-          })
-          .where(and(eq(toolCalls.id, call.id), eq(toolCalls.status, 'executing')));
-        const toolEvent = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: `tool.${status}`,
-          payload: { toolCallId: call.id, reason: 'worker_lease_lost', action, safety },
-        });
-        events.push(toDurableEvent(toolEvent));
-      }
-      await transaction
-        .update(agentTasks)
-        .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
-        .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, 'running')));
-      await transaction
-        .update(agentRuns)
-        .set({ status: 'recovering', updatedAt: now, version: sql`${agentRuns.version} + 1` })
-        .where(
-          and(
-            eq(agentRuns.id, runId),
-            inArray(agentRuns.status, ['planning', 'running', 'interrupted']),
-          ),
-        );
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'worker_recovery',
-        state: {
-          previousStatus: run.status,
-          interruptedToolCalls: executing.map(({ id }) => id),
-          replayReadyToolCalls,
-          recoveredToolChoices: recoveredToolChoices.map(({ id }) => id),
-        },
-      });
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'run.recovering',
-        payload: { previousStatus: run.status },
-      });
-      events.push(toDurableEvent(event));
-      return { recovered: true, events };
-    });
-    for (const event of result.events) {
-      await this.options.publisher.publish({ durable: true, event });
-    }
-    return result.recovered;
+  public prepareRecovery(runId: string): Promise<boolean> {
+    return this.recovery.prepare(runId);
   }
 
   /** Executes one persisted detached Specialist Task after a worker claims it. */
@@ -1357,10 +1156,6 @@ async function loadSkillPreselectionCandidates(
       disableModelInvocation: skill.disableModelInvocation === true,
     };
   });
-}
-
-function isRecoverableRunStatus(status: string): status is 'planning' | 'running' | 'interrupted' {
-  return status === 'planning' || status === 'running' || status === 'interrupted';
 }
 
 function findLastAssistantMessage(
