@@ -14,6 +14,7 @@ export * from './direct-run-service.js';
 export * from './direct-run-creation-service.js';
 export * from './planned-run-executor.js';
 export * from './planned-run-protocol.js';
+export * from './planned-run-results.js';
 export * from './planned-run-store.js';
 export * from './persistent-tool-bridge.js';
 export * from './pi-conversation-summary-generator.js';
