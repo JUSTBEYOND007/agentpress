@@ -15,6 +15,7 @@ export * from './planned-run-protocol.js';
 export * from './persistent-tool-bridge.js';
 export * from './pi-conversation-summary-generator.js';
 export * from './run-context-service.js';
+export * from './run-projection-service.js';
 export * from './execution-fact-cache.js';
 export * from './terminal-outcome-policy.js';
 export * from './tool-call-service.js';
