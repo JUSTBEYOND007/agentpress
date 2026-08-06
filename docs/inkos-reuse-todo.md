@@ -141,8 +141,12 @@ TODO：
       `root_requests_branch_idempotency_unique`；Proposal 条件结算并追加一次 `action.confirmed`。并发三次确认、
       串行 replay、单 confirmed Run 和单事件均由 PostgreSQL 集成测试覆盖；ToolCall 副作用继续使用持久
       operation key/arguments hash，不依赖内存 Session。
-- [ ] 相反语义测试至少覆盖：写作后问候不会续写、仅讨论修改不会改文、明确继续写可以创建提案、
+- [x] 相反语义测试至少覆盖：写作后问候不会续写、仅讨论修改不会改文、明确继续写可以创建提案、
       旧确认不能授权新 turn、Skill 不能扩大工具权限、恢复不能重复副作用。
+      `routing-06/07/08/09/10` 固定 greeting、显式继续、当前确认、只讨论和旧确认边界；Action capability
+      测试证明 confirmed grant 不跨 turn，Tool Registry 测试证明 Skill 只能收窄交集，PostgreSQL ToolCall
+      与 Kafka detached Task recovery 测试证明重放不重复成功副作用。Agent Evals 41 个测试、Agent
+      Application 94 个离线测试通过；真实模型语义门禁仍由下一项单独约束。
 - [ ] 真实模型同时验收 greeting-after-writing、proposal-only、confirmed-mutation 和 explicit-continuation。
 
 ## P0：持久会话恢复与 Transcript 修复
@@ -178,7 +182,11 @@ TODO：
       Redis 只通知；API 先订阅缓冲再按 PostgreSQL sequence replay。Web 对 durable 事件只推进 cursor 并刷新
       `RunProjectionService`，不在浏览器重算 RunPart；live delta 是可丢弃瞬时层。API 顺序测试、terminal
       parity、thread snapshot 和 branch selection 测试覆盖重连、刷新与分支恢复。
-- [ ] PostgreSQL 集成测试覆盖部分写入、重复事件、乱序到达、旧 worker 晚到结果、恢复中再次取消。
+- [x] PostgreSQL 集成测试覆盖部分写入、重复事件、乱序到达、旧 worker 晚到结果、恢复中再次取消。
+      Database inbox/domain 同事务、durable event sequence、Task lease fencing/cancel tests，API replay buffer，
+      Agent Application recovery/ToolCall tests 和 Kafka detached Task recovery/cancel-late-command tests 共同
+      覆盖；本地真实 PostgreSQL 14 个 Database、53 个 Agent Application 与真实 Kafka 2 个 recovery
+      integration tests 通过。
 
 ## P0：Multi-Agent 写作流水线
 
@@ -337,6 +345,9 @@ TODO：
 - [x] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
       prompt injection、历史过期和 Skill 越权。
 - [ ] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
+      2026-08-07 已真实运行 5 个固定用例，但目标模型 provider 对全部请求返回
+      `403 AccountOverdueError`；该结果只证明在线链路到达 provider，不构成模型行为通过证据，账户恢复后
+      必须复跑并满足 exact-match 与 forbidden-selection 门禁。
 
 ## P1：Web Research 与 Evidence
 
