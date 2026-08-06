@@ -229,6 +229,9 @@ settlement; its real integration case proves failed-attempt cleanup and fresh re
 
 **Primary reference: [`Narcooo/inkos`](https://github.com/Narcooo/inkos) at release `v1.7.2`, commit `c7851b94ada27f2810b903e96d8fec6f33e5d9bc`.** This is the default upstream to inspect before changing AgentPress conversation-to-writing behavior, long-form writing orchestration, review, recovery, or session restoration. Other repositories in this document remain secondary references for narrower infrastructure concerns.
 
+Executable learning and reuse work is tracked in `docs/inkos-reuse-todo.md`; completed consumer Web
+alignment remains recorded separately in `docs/inkos-web-agent-alignment.md`.
+
 The selection is evidence-based rather than a popularity choice:
 
 - Its product domain is the closest match: a shipped story and long-form content creation application, not a coding-agent shell or framework example.

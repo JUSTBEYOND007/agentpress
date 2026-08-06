@@ -1,0 +1,349 @@
+# InkOS 学习与复用 TODO
+
+本文把 InkOS 中适合 AgentPress 的产品行为拆成可独立验收的工作项。目标不是移植
+InkOS，也不是继续扩张现有协调器，而是在保留 AgentPress PostgreSQL 事实源、官方 Pi
+Runtime、审批和文章版本边界的前提下，优先复用现有依赖、仓库能力和经过测试的上游行为。
+
+Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。本文关注尚需持续审计和
+实施的运行协议、Multi-Agent、Review/Recovery、Context、Skill、Web Research 以及相应的
+产品投影。
+
+## 固定上游与许可边界
+
+- 上游：[`Narcooo/inkos`](https://github.com/Narcooo/inkos)
+- 版本：`v1.7.2`
+- Commit：`c7851b94ada27f2810b903e96d8fec6f33e5d9bc`
+- License：`AGPL-3.0-only`
+- 当前决定：行为和测试参考，不复制 InkOS 源码或测试；若未来决定复制，必须先完成明确的
+  AGPL 分发评估，再更新 `THIRD_PARTY_NOTICES.md` 和本清单。
+- AgentPress Runtime：继续使用 `@earendil-works/pi-agent-core@0.82.1` 和
+  `@earendil-works/pi-ai@0.82.1`，不得引入 InkOS 的旧 Pi Runtime 形成第二套事件模型。
+
+## 强制执行顺序
+
+每个 TODO 行为单元都按以下顺序执行，任何一步没有证据时不得直接编码：
+
+- [ ] 搜索 AgentPress 当前依赖、源码和测试，记录该能力属于“已有、可扩展、缺失、应拒绝”中的哪一类。
+- [ ] 核对固定 commit 下的 InkOS 源码和对应行为测试，记录输入、状态转换、失败语义和可见结果，
+      不只阅读 README、UI 或 Prompt。
+- [ ] 检查官方 Pi、assistant-ui、MCP SDK、Oh My Pi、pi-mcp-adapter、pi-web-access 和
+      `pi-skills` 是否已有许可证兼容的成熟实现。能直接依赖就直接依赖；不能直接依赖时优先扩展
+      仓库现有 Adapter；只有两者都不成立时才允许独立实现。
+- [ ] 在 `docs/references/pi-ecosystem.md` 写清采用或拒绝理由、不可变版本、上游源码/测试路径、
+      本地接口和领域边界。不得以“更容易”或“自己写更快”作为自研理由。
+- [ ] 先建立上游行为对应的契约测试，再实现最小适配；补充 AgentPress 领域边界测试、相反语义
+      回归和 PostgreSQL replay/recovery 测试。
+- [ ] 使用真实 Pi runtime 和目标模型验收语义行为，记录 provider、model、Prompt、Skill、Tool、
+      Context、Runtime 和配置版本；faux runtime 只能证明确定性状态机，不能代替语义验收。
+- [ ] 每个独立行为单元测试通过后单独提交，提交中不得混入无关重构或用户已有修改。
+
+## 禁止 God Code
+
+当前审计显示 `packages/agent-application/src/planned-run-executor.ts` 约 2200 行，
+`packages/agent-application/src/direct-run-service.ts` 约 2080 行。它们已经超过 Agent-facing
+模块 500 行上限，任何 InkOS 行为都不得继续直接堆入这两个文件。
+
+- [ ] 在扩展 Planned Run 前，将计划持久化、Task 调度、Specialist 执行、结果合成、恢复和 transcript
+      记录拆到独立应用服务；`PlannedRunExecutor` 只保留用例编排。
+- [ ] 在扩展 Direct Run 前，将 turn profile、session lifecycle、directive、terminal outcome、proposal
+      settlement 和 transcript 投影拆到独立应用服务；`DirectRunService` 只保留用例编排。
+- [ ] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
+      `utils.ts`、`helpers.ts` 或重新导出文件规避行数检查。
+- [ ] 一个模块只能拥有一种状态转换；跨模块协调通过显式 Port、Command、Event 或 typed result，
+      禁止共享可变上下文对象和隐式回调链。
+- [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
+- [ ] Web renderer 按 `plan/activity/approval/evidence/artifact/article-change/recovery/usage` 分 owner，
+      不把所有 RunPart 分支重新集中到单个消息组件。
+- [ ] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
+      先减少职责和净行数，不允许以“后续再拆分”放行。
+
+建议本地所有权：
+
+| 责任                            | 首选本地落点                                             | 不允许进入               |
+| ------------------------------- | -------------------------------------------------------- | ------------------------ |
+| Action Envelope / capability    | `packages/contracts/`、`packages/agent-application/`     | Prompt、React 组件       |
+| Session / transcript projection | `packages/agent-application/`、`packages/database/`      | Pi session 文件          |
+| Plan / Task / Specialist        | `packages/agent-application/`、`apps/agent-worker/`      | Web store、单体 executor |
+| Review / recovery policy        | 独立 application policy/service                          | editor renderer、Prompt  |
+| Context governance              | `packages/agent-context/`                                | Composer 临时状态        |
+| Tool / MCP execution            | `packages/tool-runtime/`、`packages/mcp-runtime/`        | Specialist 自定义执行器  |
+| Research                        | `packages/web-research/`                                 | 通用 Agent coordinator   |
+| Skill                           | `packages/agent-context/`、`packages/agent-application/` | 可执行脚本目录           |
+| Consumer projection             | `apps/web/src/lib/` 与小型 typed renderer                | PostgreSQL 写模型        |
+
+## P0：结构化意图与工具授权
+
+InkOS 证据起点：
+
+- `packages/core/src/interaction/action-envelope.ts`
+- `packages/core/src/agent/agent-session.ts`
+- `packages/core/src/__tests__/interaction-models.test.ts`
+- `packages/core/src/__tests__/agent-session.test.ts`
+- `packages/core/src/__tests__/instruction-adherence-boundary.test.ts`
+
+TODO：
+
+- [ ] 对照现有 AgentPress Action Envelope 和 Turn Profile，列出相对 InkOS
+      `actionSource/requestedIntent/actionPayload/requestedSkills` 的行为差距，不平行创建第二套协议。
+- [ ] 将用户自然语言、宿主确认动作、历史上下文和系统产生的 wake/recovery 事件保持为不同 typed origin，
+      不能在拼接 Prompt 后丢失来源。
+- [ ] 由宿主根据当前 turn capability 生成精确工具表；普通问候、解释、研究和确认后的文章修改必须拥有
+      不同工具集合。
+- [ ] 所有文章修改、发布、付费媒体和外部副作用都要求当前轮次匹配的结构化能力；模型文本、关键词、
+      历史意图和 Skill 不得授予权限。
+- [ ] 参数 Schema 在宿主边界校验；未知 intent、额外字段、缺失对象、过期 action 和重复确认必须 fail closed。
+- [ ] 已确认动作使用 PostgreSQL Root Request、Action Proposal、capability 和 operation key 保证幂等，
+      不依赖 Pi session 是否仍在内存中。
+- [ ] 相反语义测试至少覆盖：写作后问候不会续写、仅讨论修改不会改文、明确继续写可以创建提案、
+      旧确认不能授权新 turn、Skill 不能扩大工具权限、恢复不能重复副作用。
+- [ ] 真实模型同时验收 greeting-after-writing、proposal-only、confirmed-mutation 和 explicit-continuation。
+
+## P0：持久会话恢复与 Transcript 修复
+
+InkOS 证据起点：
+
+- `packages/core/src/interaction/session-transcript-schema.ts`
+- `packages/core/src/interaction/session-transcript.ts`
+- `packages/core/src/interaction/session-transcript-restore.ts`
+- `packages/core/src/__tests__/session-transcript.test.ts`
+- `packages/core/src/__tests__/session-transcript-restore.test.ts`
+
+TODO：
+
+- [ ] 建立 InkOS restore 行为与现有 PostgreSQL RunEvent/agent transcript projector 的逐项差距表。
+- [ ] 只恢复已经提交的用户请求和完成到有效边界的 attempt；失败前未提交的临时消息不能成为新事实。
+- [ ] 在投影层修复 ToolCall/ToolResult 邻接、缺失结果和重复结果；无法确定的历史必须 fail closed，
+      不能伪造成功 ToolResult。
+- [ ] 历史失败请求、过期 action、旧 Skill 指令和私有 Specialist thinking 不得重新进入当前模型上下文。
+- [ ] Provider/model/Prompt/Tool/Skill/Context revision 变化时明确失效缓存，不能复用不兼容的内存 Agent。
+- [ ] live SSE 与 replay 必须使用同一 projector，并证明刷新、断线恢复、worker 重启和分支切换后 UI 一致。
+- [ ] PostgreSQL 集成测试覆盖部分写入、重复事件、乱序到达、旧 worker 晚到结果、恢复中再次取消。
+
+## P0：Multi-Agent 写作流水线
+
+InkOS 证据起点：
+
+- `packages/core/src/agent/agent-tools.ts` 中的 `sub_agent`
+- `packages/core/src/pipeline/runner.ts`
+- Architect、Writer、Auditor、Reviser、Exporter 对应 pipeline 与测试
+- `packages/studio/src/components/chat/ToolExecutionSteps.tsx`
+- `packages/studio/src/components/chat/__tests__/ToolExecutionSteps.test.ts`
+
+优先复用：现有 AgentPress Execution Plan、Agent Task、Task Attempt、lease、Context Pack、
+TaskResult、Kafka worker、Oh My Pi structured-subagent 行为和 stale-owner tests。不得重新创建另一套
+`sub_agent` 状态机。
+
+TODO：
+
+- [ ] 将 InkOS Architect/Writer/Auditor/Reviser/Exporter 映射为 AgentPress 有限 Specialist catalog，
+      记录采用、合并或拒绝理由；不允许模型动态创建无 owner 的任意角色。
+- [ ] 为每个 Specialist 定义 Task Brief、输入 Schema、输出 Schema、工具 allowlist、预算、超时、
+      最大重试、可见 Artifact 和禁止能力。
+- [ ] Specialist 只获得最小不可变 Context Pack，不继承完整 Conversation；私有 thinking 不投影给 Main
+      或用户，只返回结构化 TaskResult、Evidence、Artifact、Usage 和错误。
+- [ ] Specialist 不直接结算文章正文、Skill、Memory 或外部系统；写作结果进入 Artifact/EditProposal，
+      由 Main 和现有 editor proposal boundary 统一治理。
+- [ ] 写作、审阅和修订使用持久化 DAG，限制深度、宽度、并发和总预算；递归委派默认拒绝。
+- [ ] 每个 Task Attempt 使用 lease/fencing token；旧 worker、过期 attempt 和取消后的结果不能覆盖新结果。
+- [ ] Task 等待、取消、恢复和 synthesis 复用现有 PostgreSQL/Kafka 服务，不在 coordinator 中实现轮询器。
+- [ ] UI 默认展示目标相关的顶层步骤、当前角色、耗时和结果摘要；依赖、重试和技术日志折叠，
+      不展示 Specialist 列表作为产品主导航。
+- [ ] 合约测试覆盖 Schema precedence、工具越权、递归拒绝、预算耗尽、部分成功、并行结算、late result、
+      cancel/recover race 和 private-thinking isolation。
+- [ ] 真实模型验收至少覆盖“研究 -> 写作 -> 审阅 -> 修订 -> 提案”和“审阅认为无需修改”两个相反场景。
+
+## P0：审阅、修订与最佳版本选择
+
+InkOS 证据起点：
+
+- `packages/core/src/pipeline/chapter-review-cycle.ts`
+- `packages/core/src/__tests__/chapter-review-cycle.test.ts`
+
+TODO：
+
+- [ ] 先审计 AgentPress Article Proposal、Batch、Artifact Version 和 Evidence policy，禁止创建平行的
+      chapter truth 或文件 snapshot 体系。
+- [ ] 将 InkOS fiction-specific 检查替换为文章领域的确定性检查：引用完整性、事实声明、链接安全、
+      结构、字数/格式和 stale revision。
+- [ ] 每一轮都先运行确定性检查，再运行可选模型审阅；模型输出 Schema 解析失败时 fail closed。
+- [ ] 限制最大修订轮次、模型调用、Token 和费用；达到上限后返回显式 degraded result，而非无限自我修订。
+- [ ] 每轮保存不可变候选 Artifact Version、review score、问题列表、来源和选择理由。
+- [ ] 最终选择“最佳有效快照”，而不是盲目采用最后一次输出；新版本得分下降或事实校验失败时保留旧版本。
+- [ ] “无需修改”是合法终态，不得为了展示 Agent 工作而强制产生 diff。
+- [ ] 审阅结论只创建修改提案，不自动覆盖 canonical article revision。
+- [ ] 测试覆盖零问题、持续改进、后轮退化、解析失败、确定性检查失败、预算耗尽、stale article、
+      Evidence 丢失和用户拒绝提案。
+
+## P0：状态恢复与降级输出
+
+InkOS 证据起点：
+
+- `packages/core/src/pipeline/chapter-state-recovery.ts`
+- `packages/core/src/__tests__/chapter-state-recovery.test.ts`
+
+TODO：
+
+- [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
+      TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
+- [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
+- [ ] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分。
+- [ ] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
+- [ ] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
+- [ ] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。
+- [ ] 测试覆盖 provider timeout、worker crash、数据库提交前后断线、重复恢复、部分 Artifact、失效引用、
+      stale worker 和恢复期间用户取消。
+
+## P1：Context Governance
+
+InkOS 证据起点：
+
+- `packages/core/src/utils/context-assembly.ts`
+- `packages/core/src/utils/governed-context.ts`
+- `packages/core/src/utils/context-filter.ts`
+- `packages/core/src/__tests__/context-filter.test.ts`
+
+优先复用现有 `packages/agent-context` 的 Context Pack、Context Manifest、compaction、Mention、Skill、
+Evidence 和 token budget 实现。
+
+TODO：
+
+- [ ] 建立 InkOS selection/filter/budget/validation 与 AgentPress Context Pack 的差距表，只补真实缺口。
+- [ ] 每个上下文项携带 typed origin、owner、revision/hash、trust、token cost、选择原因和截断状态。
+- [ ] 用户当前请求、宿主上下文、历史对话、Evidence、Attachment、Skill 和工具输出保持不同来源，
+      禁止把注入上下文伪装成新的 user message。
+- [ ] Context Pack 在 Run/Task 开始时冻结；运行中的 Composer 改动不能回写历史 Context。
+- [ ] 预算策略必须确定性排序并记录被丢弃项；权限和 trust 校验先于 token 裁剪。
+- [ ] 外部网页、附件、Skill、MCP 和 Tool Result 均为 untrusted，不能覆盖 system policy 或 capability。
+- [ ] 测试覆盖超预算、同名冲突、陈旧 revision、跨 workspace 引用、恶意指令、空上下文和恢复 replay。
+
+## P1：Skill 发现、选择与资源加载
+
+InkOS 证据起点：
+
+- `packages/core/src/skills/types.ts`
+- `packages/core/src/skills/registry.ts`
+- `packages/core/src/skills/external-loader.ts`
+- `packages/core/src/agent/skill-tool.ts`
+- `packages/core/src/__tests__/external-skill-loader.test.ts`
+- `packages/core/src/__tests__/skill-registry.test.ts`
+- `packages/core/src/__tests__/skill-agent-tool.test.ts`
+- `packages/studio/src/pages/skill-ui-state.ts`
+- `packages/studio/src/__tests__/skills-endpoint.test.ts`
+
+优先复用现有 AgentPress Skill Revision、Run Skill Binding、`validateSkillConformance`、
+`discoverSkillsWithWarnings`、PiSkillPreselector 和 `badlogic/pi-skills` 格式证据。
+
+TODO：
+
+- [ ] 对照 InkOS registry/loader/use_skill 行为审计当前实现；已有 conformance、冲突诊断、hash 和
+      resource safety 不得重写。
+- [ ] 保留“用户显式选择”和“模型从允许 catalog 选择”两条路径；显式禁用优先级最高。
+- [ ] Skill 只加载 Markdown 指令和声明的静态 regular-file resource；不执行脚本、不扫描系统目录、
+      不隐式发现凭据。
+- [ ] 资源读取复用现有安全路径、symlink、类型、单文件/总量和 UTF-8 限制，不新增第二套文件读取工具。
+- [ ] Skill 只能缩小 Tool allowlist，不能授予平台、Workspace、Agent 或 Task 未拥有的 capability。
+- [ ] Run 固定 Skill revision/hash；历史 Skill instructions 在后续 turn 中过期，除非再次显式绑定。
+- [ ] Composer 只展示 Skill chip、名称和用途；版本、来源、hash、资源和诊断进入详情或管理页。
+- [ ] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
+      prompt injection、历史过期和 Skill 越权。
+- [ ] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
+
+## P1：Web Research 与 Evidence
+
+InkOS 证据起点：
+
+- `packages/core/src/utils/web-search.ts`
+- `packages/core/src/agents/researcher.ts`
+- `packages/core/src/agent/agent-tools.ts` 中的 `research_web`
+- `packages/core/src/__tests__/researcher.test.ts`
+
+InkOS 使用 Tavily、简单 HTML 清洗和本地 Markdown 报告。AgentPress 不复制这些基础设施；优先复用
+现有 `packages/web-research`、SSRF guard、内置 `web_research` MCP、Evidence/Artifact persistence 和
+Tool output guard。
+
+TODO：
+
+- [ ] 将 InkOS `purpose`（worldbuilding/era/profession/market/fact-check/general）和
+      `depth`（quick/standard/deep）评估为 AgentPress Research Brief 的产品级枚举，避免只暴露裸 query。
+- [ ] 研究输出定义为 typed Research Artifact：summary、claims、conflicts、unknowns、implications、
+      sources、confidence、query log、partial failures 和版本信息。
+- [ ] Claim 必须引用 Evidence ID；source count 不能自动等价为事实可信，单来源和抓取失败必须降级。
+- [ ] 搜索、URL 获取、正文抽取和报告合成使用独立 Port，不把 provider-specific Tavily 字段泄漏进领域层。
+- [ ] URL 获取继续复用 DNS/redirect SSRF guard、HTTPS allowlist、媒体类型、大小、超时和 secret redaction；
+      不采用 InkOS 的正则 HTML 去标签作为生产抽取器。
+- [ ] 查询扩展、去重、抓取并发、来源上限和预算由 Research policy 拥有，不写进通用 Agent executor。
+- [ ] 外部内容始终为 untrusted；网页中的指令不能调用工具、改变 Skill、提升权限或直接写文章。
+- [ ] Research Artifact 可打开和继续引用；消息流默认显示“查询数、保留来源数、部分失败、置信度”，
+      Evidence chip/来源抽屉承载来源，不默认展开原始页面正文。
+- [ ] 测试覆盖无凭据、零结果、重复 URL、redirect-to-private、超大响应、非文本、部分 fetch 失败、
+      互相冲突来源、恶意网页指令和全部失败的 degraded report。
+- [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
+
+## P1：MCP 边界
+
+InkOS `v1.7.2` 没有 MCP 子系统，因此不得把 MCP 实现归因于 InkOS，也不得为了“对齐 InkOS”新造
+MCP manager。
+
+- [ ] 继续直接使用官方 MCP TypeScript SDK，并复用现有 `packages/mcp-runtime`、Oh My Pi reconnect
+      行为和 `pi-mcp-adapter` output guard；真实缺口先进入 `docs/oh-my-pi-reuse-todo.md`。
+- [ ] 首版仍只注册 `web_research`、`workspace_knowledge`、`licensed_media` 三个宿主内置 Server。
+- [ ] MCP Tool 必须通过同一 PersistentToolBridge、ToolCallService、capability、approval 和 settlement；
+      不为 Multi-Agent 或 Skill 创建旁路。
+- [ ] UI 显示用户目标和结果摘要，不默认显示 JSON-RPC、Server transport 和原始 JSON；技术详情可审计。
+
+## P1：结果优先的消费者投影
+
+InkOS 证据起点：
+
+- `packages/studio/src/components/ai-elements/reasoning.tsx`
+- `packages/studio/src/components/chat/ToolExecutionSteps.tsx`
+- `packages/studio/src/components/chat/__tests__/ToolExecutionSteps.test.ts`
+
+现有完成项继续以 `docs/inkos-web-agent-alignment.md` 为事实，不重复实现。
+
+- [ ] 每次新增 domain part 前先扩展稳定 RunEvent -> RunPart projector，再添加 renderer；Web 不从文案、
+      timer 或 tool 名推断领域状态。
+- [ ] Product outcome（Research Artifact、Article Proposal、可打开结果）显示在 pipeline/log 前面。
+- [ ] active pipeline 自动展开，完成后折叠；摘要、耗时和终态保持可见。用户手动展开状态不能被 timer 抢夺。
+- [ ] 连续低价值工具操作按语义分组；审批、Ask User、Evidence、Article Change、Artifact、Warning 和
+      Recovery 不能被吞进普通工具组。
+- [ ] 原始结果和日志默认折叠并脱敏；错误显示可操作的公共信息，stack、credential 和私有 thinking 不投影。
+- [ ] 复用 assistant-ui、Streamdown、Lucide 和现有 typed renderer，不复制 InkOS React 组件。
+- [ ] Playwright 覆盖 streaming、自动折叠、用户手动展开、长结果、部分失败、恢复 replay、桌面/移动端
+      溢出和无重叠；截图之外还要断言真实交互和投影事实。
+
+## P2：端到端写作产品行为
+
+- [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
+      用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
+- [ ] 固定“用户只要研究，不要改文”“审阅认为无需修改”“来源冲突导致降级”“恢复后仍等待审批”
+      等相反语义场景。
+- [ ] 每个场景从 PostgreSQL 还原 Root Request、Run、transcript、ToolCall、Task、Artifact/Evidence、
+      Proposal/Batch、settlement 和 Web projection 的完整事件链。
+- [ ] 在线报告记录结果质量、引用准确率、Task/Tool 次数、恢复次数、延迟、Token、费用和重复副作用，
+      并保留版本 manifest。
+- [ ] 未完成真实 Pi/目标模型验收、浏览器验收和 PostgreSQL replay 前，不得把行为项标记为完成。
+
+## 明确不采用
+
+- [ ] 不采用 InkOS file/JSONL session、book truth file 或本地目录作为 AgentPress 事实源。
+- [ ] 不采用 InkOS `@mariozechner/pi-agent-core@0.67.1` 和 `pi-ai@0.67.1` 集成。
+- [ ] 不采用关键词 matcher 作为意图、权限、写作继续或终态判断。
+- [ ] 不向普通聊天 turn 暴露完整文章修改、封面、导入、truth-file 和 `sub_agent` 工具表。
+- [ ] 不把注入的文章/书籍上下文伪装为新的用户消息。
+- [ ] 不复制 InkOS React 组件、默认展开的原始结果、TUI/desktop 偏好或正则 HTML 抽取。
+- [ ] 不允许 Specialist、Skill、MCP 或网页结果绕过 Tool Registry、审批、Proposal 和 settlement。
+- [ ] 不为了表面一致性创建第二套 Plan、Task、Artifact、Evidence、Skill、MCP 或 Transcript 模型。
+
+## 完成定义
+
+一个 TODO 只有同时满足以下条件才允许勾选：
+
+- 已记录现有实现审计、上游固定源码/测试证据和复用决策。
+- 实现位于明确 owner 后，没有扩大 god file、产生平行事实源或跨越领域依赖边界。
+- 上游契约行为、AgentPress 领域边界、相反语义和安全失败测试全部通过。
+- PostgreSQL replay 与 live projection 得到相同业务状态。
+- 真实 Pi runtime/目标模型报告记录完整版本 manifest 并通过预定阈值。
+- 用户可见行为通过 Playwright 桌面/移动端交互、溢出和无重叠检查。
+- `pnpm lint`、`pnpm typecheck`、受影响测试、构建和文件长度/依赖边界检查通过。
+- 独立 Git commit 使用 `<type>: <简短中文说明>`，没有混入无关修改。
