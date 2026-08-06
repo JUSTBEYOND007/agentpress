@@ -50,10 +50,10 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       500 行。
 - [x] 在扩展 Direct Run 前，将 turn profile、session lifecycle、directive、terminal outcome、proposal
       settlement 和 transcript 投影拆到独立应用服务；`DirectRunService` 只保留用例编排。
-      `DirectRunService` 已降至 497 行；创建、分支、消息 codec、交互命令、恢复、结算和消费者投影
-      分别由独立 service/adapter 拥有。`@agentpress/agent-application` lint、typecheck、68 个离线测试
+      `DirectRunService` 当前为 500 行；创建、分支、消息 codec、交互命令、恢复、结算和消费者投影
+      分别由独立 service/adapter 拥有。`@agentpress/agent-application` lint、typecheck、94 个离线测试
       和 build 通过；Web projection 已拆为 246/320 行，91 个 Web 测试和 `pnpm check:file-lengths`
-      通过。需要 PostgreSQL 的 49 个集成测试仍必须在后续数据库门禁中运行。
+      通过。Agent Application 的 55 个 PostgreSQL 集成测试已通过。
 - [x] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
       `utils.ts`、`helpers.ts` 或重新导出文件规避行数检查。
       Context 来源装载已从 `RunContextService` 拆到独立 `run-context-sources.ts`，主服务降至 481 行；
@@ -218,7 +218,9 @@ TODO：
 - [x] 为每个 Specialist 定义 Task Brief、输入 Schema、输出 Schema、工具 allowlist、预算、超时、
       最大重试、可见 Artifact 和禁止能力。
       strict plan/task_complete Schema、角色 capability policy、120 秒 timeout、3 次默认 attempt 和持久 Task
-      Brief 已存在；本轮新增角色 Artifact policy，越权 Artifact 在 Evidence/TaskResult 持久化前拒绝。
+      Brief 已存在；timeout 现在同时约束 Task lease 和真实 Pi Runtime `AbortSignal`，超时持久化为
+      `task_timeout`，父级取消仍保持 `cancelled`。角色 Artifact policy 在 Evidence/TaskResult 持久化前拒绝
+      越权 Artifact。
 - [x] Specialist 只获得最小不可变 Context Pack，不继承完整 Conversation；私有 thinking 不投影给 Main
       或用户，只返回结构化 TaskResult、Evidence、Artifact、Usage 和错误。
       Specialist application turn 只包含 Task Brief 与 accepted upstream summaries，不复制 root request/context；
@@ -287,6 +289,13 @@ TODO：
 `outcome_unknown`，不降格为普通失败或 degraded。5 个纯策略测试已通过；接入 PostgreSQL store、
 Article/Evidence/Artifact validator 和故障注入矩阵前，本节其余集成项仍保持未完成。
 
+运行时故障注入进度：inline 与 detached Specialist 的 timeout 已接入实际 Pi Runtime
+`AbortSignal.timeout`，并与父级取消通过 `AbortSignal.any` 组合；超时结果是 failed `task_timeout`，不会把
+用户取消误报为超时。真实 PostgreSQL 用例证明悬挂 Specialist 会在 deadline 后终止，Run 进入
+`completed_with_degradation`，并且非法 timeout 配置 fail closed。该用例只证明 Specialist deadline 的
+确定性状态转换，不替代真实 provider timeout；provider timeout、worker crash、提交前后断线、重复恢复、
+部分 Artifact、失效 Evidence、stale worker 和恢复期间取消尚未形成完整矩阵，因此总项不勾选。
+
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
 - [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
@@ -350,10 +359,10 @@ TODO：
 - [x] Composer 只展示 Skill chip、名称和用途；版本、来源、hash、资源和诊断进入详情或管理页。
 - [x] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
       prompt injection、历史过期和 Skill 越权。
-- [ ] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
-      2026-08-07 已真实运行 5 个固定用例，但目标模型 provider 对全部请求返回
-      `403 AccountOverdueError`；该结果只证明在线链路到达 provider，不构成模型行为通过证据，账户恢复后
-      必须复跑并满足 exact-match 与 forbidden-selection 门禁。
+- [x] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
+      2026-08-07 使用真实 Pi Runtime 与目标模型 `gpt-5.6-terra` 运行 5 个固定用例：5/5 exact match、
+      0 forbidden selection、0 error。版本化报告为
+      `.agentpress/evals/2026-08-06T21-25-03-167Z-gpt-5.6-terra-skill-selection.json`。
 
 ## P1：Web Research 与 Evidence
 
@@ -427,10 +436,12 @@ timeline/outcome 顺序、折叠控制、错误脱敏和桌面/移动 Playwright
 ## P2：端到端写作产品行为
 
 离线验收契约进度：`workflow-01..05` 已固定完整研究写作链、research-only、no-change review、
-conflict degradation 和 recovery-pending-proposal 五个版本 4 场景；Eval scorer 新增禁止 Artifact 与精确
+conflict degradation 和 recovery-pending-proposal 五个 schema version 4 场景；Eval scorer 新增禁止 Artifact 与精确
 终态断言，防止“只研究”偷偷产生 ArticleDraft/EditProposal，或把来源冲突的普通 completed 误判为降级。
-Agent Evals 42 个测试通过。目标模型 provider 当前因账户欠费拒绝请求，因此以下真实运行与 PostgreSQL
-完整 trace 验收仍保持未完成。
+Agent Evals 42 个测试通过。使用真实 Pi Runtime 与目标模型启动 workflow 在线验收后，Researcher 在
+14 个 ToolCall 已成功结算后仍持续 `running`，由 PostgreSQL 事实链定位到 timeout 仅延长 Task lease、
+没有进入 Runtime `AbortSignal`。该根因已修复并通过 PostgreSQL 悬挂 Specialist 回归，但五个 workflow
+场景尚未在修复后全部复跑，完整 trace、质量指标和浏览器验收仍保持未完成。
 
 - [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
       用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
