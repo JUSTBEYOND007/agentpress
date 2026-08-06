@@ -50,6 +50,7 @@ export function useAgentPressAssistantRuntime(
     readonly contextBindings?: readonly AgentContextBinding[];
     readonly sendingDisabled?: boolean;
     readonly beforeSend?: () => Promise<void>;
+    readonly beforeSendReady?: boolean;
     readonly onArticleReviewChanged?: (articleId?: string) => Promise<void>;
     readonly onBranchForked?: (branchId: string, forkedFromMessageId: string) => void;
   } = {},
@@ -75,6 +76,7 @@ export function useAgentPressAssistantRuntime(
   const lastEventIds = useRef(new Map<string, number>());
   const runModes = useRef(new Map<string, RunProjection['mode']>());
   const notifiedArticleProposals = useRef(new Set<string>());
+  const beforeSendError = useRef<string | undefined>(undefined);
   const onArticleReviewChangedRef = useRef(context.onArticleReviewChanged);
   const threadKey = conversationId && branchId ? `${conversationId}:${branchId}` : undefined;
   const currentThreadKey = useRef(threadKey);
@@ -83,6 +85,23 @@ export function useAgentPressAssistantRuntime(
   useEffect(() => {
     onArticleReviewChangedRef.current = context.onArticleReviewChanged;
   }, [context.onArticleReviewChanged]);
+
+  useEffect(() => {
+    if (!context.beforeSendReady || !beforeSendError.current) return;
+    const recoveredError = beforeSendError.current;
+    beforeSendError.current = undefined;
+    setPanelError((current) => (current === recoveredError ? undefined : current));
+  }, [context.beforeSendReady]);
+
+  const prepareBeforeSend = useCallback(async (): Promise<void> => {
+    try {
+      await context.beforeSend?.();
+      beforeSendError.current = undefined;
+    } catch (error) {
+      beforeSendError.current = error instanceof Error ? error.message : '正文草稿尚未同步';
+      throw error;
+    }
+  }, [context.beforeSend]);
 
   const notifyArticleReviewChanged = useCallback((change: ArticleReviewChange): void => {
     if (!takeUnseenArticleReviewChange(notifiedArticleProposals.current, change)) return;
@@ -200,7 +219,7 @@ export function useAgentPressAssistantRuntime(
       ]);
       setPanelError(undefined);
       try {
-        await context.beforeSend?.();
+        await prepareBeforeSend();
         if (activeProjection && !activeProjection.terminal) {
           await requestAgentApi(
             `${apiUrl}/${runDirectivePath(activeProjection.runId, requestedMode)}`,
@@ -253,8 +272,8 @@ export function useAgentPressAssistantRuntime(
       branchId,
       conversationId,
       contextBindings,
-      context.beforeSend,
       mentionTargetIds,
+      prepareBeforeSend,
       refreshProjection,
       selectedSkills,
     ],
@@ -274,7 +293,7 @@ export function useAgentPressAssistantRuntime(
       if (!source) return;
       setPanelError(undefined);
       try {
-        await context.beforeSend?.();
+        await prepareBeforeSend();
         const fork = await requestAgentApi(
           `${apiUrl}/conversations/${conversationId}/branches/${branchId}/fork`,
           { messageId: parentId },
@@ -297,7 +316,15 @@ export function useAgentPressAssistantRuntime(
         setPanelError(error instanceof Error ? error.message : '重新生成失败');
       }
     },
-    [branchId, context, contextBindings, conversationId, isRunning, stableMessages],
+    [
+      branchId,
+      context,
+      contextBindings,
+      conversationId,
+      isRunning,
+      prepareBeforeSend,
+      stableMessages,
+    ],
   );
 
   const cancelDirective = useCallback(

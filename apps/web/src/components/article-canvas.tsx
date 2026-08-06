@@ -16,6 +16,12 @@ import { ArticleReviewToolbar } from './article-review-toolbar';
 import { readArticleSelection, type ArticleSelectionView } from './article-selection';
 import { acknowledgeAutosave, enqueueAutosave, listPendingAutosaves } from '../lib/autosave-queue';
 import { authenticatedFetch } from '../lib/authenticated-fetch';
+import {
+  createWriterLeaseId,
+  requiresWriterLeaseForAgentSend,
+  WriterLeaseCoordinator,
+  type WriterLeaseState,
+} from '../lib/writer-lease-coordinator';
 import { EditorToolbar, slashCommands } from './editor-toolbar';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1';
@@ -55,6 +61,7 @@ export function ArticleCanvas({
   onReviewVisibleChange,
   onSelectionChange,
   onAgentSendPreparation,
+  onAgentWriterStateChange,
 }: {
   readonly articleId: string;
   readonly baseRevisionId: string;
@@ -67,21 +74,20 @@ export function ArticleCanvas({
   readonly onReviewVisibleChange?: (visible: boolean) => void;
   readonly onSelectionChange?: (selection?: ArticleSelectionView) => void;
   readonly onAgentSendPreparation?: (prepare?: () => Promise<void>) => void;
+  readonly onAgentWriterStateChange?: (connected: boolean) => void;
 }): React.JSX.Element {
   const [saveState, setSaveState] = useState<'connecting' | 'saved' | 'saving' | 'offline'>(
     'connecting',
   );
   const [slashOpen, setSlashOpen] = useState(false);
   const [editorVersion, setEditorVersion] = useState(0);
-  const leaseId = useRef(leaseIdFor(articleId));
-  const leaseOwned = useRef(false);
+  const leaseCoordinator = useRef<WriterLeaseCoordinator | undefined>(undefined);
   const chain = useRef(Promise.resolve());
   const clientSequence = useRef(0);
   const revisionId = useRef(baseRevisionId);
   const commitTimer = useRef<number | undefined>(undefined);
   const latestServerSequence = useRef(0);
   const isRecovering = useRef(false);
-  const leaseGeneration = useRef(0);
   const reviewVisible = useRef(false);
   const selectionGeneration = useRef(0);
   const editor = useEditor(
@@ -144,15 +150,17 @@ export function ArticleCanvas({
               createdAt: Date.now(),
               clientSequence: sequence,
             });
-            if (!leaseOwned.current) {
+            const lease = leaseCoordinator.current;
+            if (!lease?.isOwned) {
               setSaveState('offline');
               return;
             }
-            const response = await sendAutosave(articleId, revisionId.current, leaseId.current, {
+            const response = await sendAutosave(articleId, revisionId.current, lease.id, {
               updateId,
               steps,
             });
             if (!response.ok) {
+              lease.markLost();
               setSaveState('offline');
               return;
             }
@@ -173,19 +181,30 @@ export function ArticleCanvas({
   useEffect(() => {
     if (!editor) return;
     let active = true;
+    const lease = new WriterLeaseCoordinator(
+      async (action, leaseId) => {
+        const response = await writerLeaseRequest(articleId, leaseId, action);
+        if (!response.ok) return false;
+        const result = (await response.json()) as { readonly owned?: unknown };
+        return result.owned === true;
+      },
+      createWriterLeaseId(),
+      (state: WriterLeaseState) => {
+        if (!active) return;
+        const connected = state === 'owned';
+        onAgentWriterStateChange?.(connected);
+        if (state === 'connecting') setSaveState('connecting');
+        if (state === 'lost') {
+          editor.setEditable(false);
+          setSaveState('offline');
+        }
+      },
+    );
+    leaseCoordinator.current = lease;
     const initialize = async (): Promise<void> => {
       setSaveState('connecting');
-      const leaseResponse = await writerLeaseRequest(articleId, leaseId.current, 'acquire');
-      const lease = (await leaseResponse.json()) as { readonly owned?: unknown };
-      if (!leaseResponse.ok || lease.owned !== true) throw new Error('Writer lease is unavailable');
-      leaseOwned.current = true;
-
-      const pending = await listPendingAutosaves(articleId);
-      for (const batch of pending) {
-        const response = await sendAutosave(articleId, revisionId.current, leaseId.current, batch);
-        if (!response.ok) throw new Error(await response.text());
-        await acknowledgeAutosave(batch.updateId);
-      }
+      if (!(await lease.start())) throw new Error('Writer lease is unavailable');
+      await flushPendingAutosaves(lease);
 
       const draftResponse = await authenticatedFetch(`${apiUrl}/articles/${articleId}/draft`);
       if (draftResponse.ok) {
@@ -204,66 +223,69 @@ export function ArticleCanvas({
         throw new Error(await draftResponse.text());
       }
       if (!active) return;
+      if (!lease.isOwned) throw new Error('Writer lease was lost during initialization');
       if (!reviewVisible.current) editor.setEditable(true);
       setSaveState('saved');
     };
-    void initialize().catch(() => {
+    chain.current = chain.current.then(initialize).catch(() => {
       if (!active) return;
-      leaseOwned.current = false;
+      lease.markLost();
       editor.setEditable(false);
       setSaveState('offline');
     });
+    const renewTimer = window.setInterval(() => {
+      void lease
+        .maintain()
+        .then((owned) => {
+          if (!active || !owned) return;
+          if (!reviewVisible.current) editor.setEditable(true);
+          setSaveState((current) => (current === 'offline' ? 'saved' : current));
+        })
+        .catch(() => {
+          lease.markLost();
+        });
+    }, 10_000);
     return () => {
       active = false;
+      window.clearInterval(renewTimer);
       if (commitTimer.current) window.clearTimeout(commitTimer.current);
-      leaseOwned.current = false;
+      if (leaseCoordinator.current === lease) leaseCoordinator.current = undefined;
       editor.setEditable(false);
+      void lease.stop();
     };
-  }, [articleId, editor]);
+  }, [articleId, editor, onAgentWriterStateChange]);
   useEffect(() => {
     if (!onAgentSendPreparation) return;
     const prepare = async (): Promise<void> => {
       if (commitTimer.current) window.clearTimeout(commitTimer.current);
       await chain.current;
-      if (!leaseOwned.current) throw new Error('正文尚未连接，无法启动 Agent 编辑');
-      if (latestServerSequence.current > 0) {
-        await commitDraft(latestServerSequence.current);
+      const pending = await listPendingAutosaves(articleId);
+      if (!requiresWriterLeaseForAgentSend(pending.length, latestServerSequence.current)) return;
+      const lease = leaseCoordinator.current;
+      if (!lease || !(await lease.ensureOwned()))
+        throw new Error('正文草稿尚未同步，连接恢复后再发送');
+      try {
+        setSaveState('saving');
+        await flushPendingAutosaves(lease, pending);
+        if (latestServerSequence.current > 0)
+          await commitDraft(latestServerSequence.current, lease);
+      } catch {
+        lease.markLost();
+        setSaveState('offline');
+        throw new Error('正文草稿尚未同步，连接恢复后再发送');
       }
     };
     onAgentSendPreparation(prepare);
     return () => {
       onAgentSendPreparation(undefined);
     };
-  }, [onAgentSendPreparation]);
+  }, [articleId, onAgentSendPreparation]);
   useEffect(() => {
     if (!editor) return;
     reviewVisible.current = Boolean(review?.visible);
     editor.view.dispatch(editor.state.tr.setMeta(articleReviewPluginKey, review ?? null));
-    editor.setEditable(!review?.visible);
+    editor.setEditable(!review?.visible && Boolean(leaseCoordinator.current?.isOwned));
   }, [editor, review]);
-  useEffect(() => {
-    leaseGeneration.current += 1;
-    const generation = leaseGeneration.current;
-    const timer = window.setInterval(() => {
-      if (!leaseOwned.current) return;
-      void writerLeaseRequest(articleId, leaseId.current, 'renew').then(async (response) => {
-        const result = (await response.json()) as { readonly owned?: unknown };
-        if (result.owned !== true) {
-          leaseOwned.current = false;
-          editor?.setEditable(false);
-          setSaveState('offline');
-        }
-      });
-    }, 10_000);
-    return () => {
-      window.clearInterval(timer);
-      window.setTimeout(() => {
-        if (leaseGeneration.current === generation)
-          void writerLeaseRequest(articleId, leaseId.current, 'release');
-      });
-    };
-  }, [articleId, editor]);
-
   return (
     <section className="article-editor-shell">
       {editor ? <EditorToolbar editor={editor} key={editorVersion} /> : null}
@@ -337,20 +359,23 @@ export function ArticleCanvas({
     if (commitTimer.current) window.clearTimeout(commitTimer.current);
     commitTimer.current = window.setTimeout(() => {
       chain.current = chain.current
-        .then(() => commitDraft(serverSequence))
+        .then(async () => {
+          const lease = leaseCoordinator.current;
+          if (lease?.isOwned) await commitDraft(serverSequence, lease);
+        })
         .catch(() => {
+          leaseCoordinator.current?.markLost();
           setSaveState('offline');
         });
     }, 1_200);
   }
 
-  async function commitDraft(serverSequence: number): Promise<void> {
-    if (!leaseOwned.current) return;
+  async function commitDraft(serverSequence: number, lease: WriterLeaseCoordinator): Promise<void> {
     const response = await authenticatedFetch(`${apiUrl}/articles/${articleId}/draft/commit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        writerLeaseId: leaseId.current,
+        writerLeaseId: lease.id,
         expectedServerSequence: serverSequence,
       }),
     });
@@ -360,6 +385,20 @@ export function ArticleCanvas({
     revisionId.current = committed.revisionId;
     if (editor) await publishSelection(editor, committed.revisionId);
     setSaveState('saved');
+  }
+
+  async function flushPendingAutosaves(
+    lease: WriterLeaseCoordinator,
+    pending?: Awaited<ReturnType<typeof listPendingAutosaves>>,
+  ): Promise<void> {
+    const batches = pending ?? (await listPendingAutosaves(articleId));
+    for (const batch of batches) {
+      const response = await sendAutosave(articleId, revisionId.current, lease.id, batch);
+      if (!response.ok) throw new Error(await response.text());
+      const acknowledgement = (await response.json()) as { readonly serverSequence: number };
+      await acknowledgeAutosave(batch.updateId);
+      latestServerSequence.current = acknowledgement.serverSequence;
+    }
   }
 
   async function publishSelection(
@@ -440,14 +479,4 @@ function sendAutosave(
       steps: batch.steps,
     }),
   });
-}
-
-function leaseIdFor(articleId: string): string {
-  const key = `agentpress:writer-lease:${articleId}`;
-  if (typeof window === 'undefined') return crypto.randomUUID();
-  const existing = window.sessionStorage.getItem(key);
-  if (existing) return existing;
-  const created = crypto.randomUUID();
-  window.sessionStorage.setItem(key, created);
-  return created;
 }

@@ -33,6 +33,7 @@ export function AgentWorkbench({
   pendingReview = false,
   articles,
   beforeSend,
+  beforeSendReady,
 }: {
   readonly conversationId?: string;
   readonly branchId?: string;
@@ -45,6 +46,7 @@ export function AgentWorkbench({
   readonly articleSelection?: ArticleSelectionView;
   readonly pendingReview?: boolean;
   readonly beforeSend?: () => Promise<void>;
+  readonly beforeSendReady?: boolean;
   readonly articles: readonly {
     readonly id: string;
     readonly revisionId: string;
@@ -141,6 +143,7 @@ export function AgentWorkbench({
           sendingDisabled: uploadingAttachments > 0,
           ...(onArticleReviewChanged ? { onArticleReviewChanged } : {}),
           ...(beforeSend ? { beforeSend } : {}),
+          ...(beforeSendReady !== undefined ? { beforeSendReady } : {}),
           onBranchForked: (nextBranchId, forkedFromMessageId) => {
             setSelectedConversation({
               ...selectedConversation,

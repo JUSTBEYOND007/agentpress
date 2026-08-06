@@ -99,6 +99,7 @@ function WorkspacePage(): React.JSX.Element {
   const [publicationHistory, setPublicationHistory] = useState<readonly ArticlePublication[]>([]);
   const [error, setError] = useState<string>();
   const [agentSelection, setAgentSelection] = useState<ArticleSelectionView>();
+  const [agentWriterConnected, setAgentWriterConnected] = useState(false);
   const agentSendPreparation = useRef<(() => Promise<void>) | undefined>(undefined);
   const registerAgentSendPreparation = useCallback((prepare?: () => Promise<void>) => {
     agentSendPreparation.current = prepare;
@@ -527,6 +528,7 @@ function WorkspacePage(): React.JSX.Element {
             initialDocument={activeArticle.document}
             onSelectionChange={setAgentSelection}
             onAgentSendPreparation={registerAgentSendPreparation}
+            onAgentWriterStateChange={setAgentWriterConnected}
             {...(articleReview.review
               ? {
                   review: articleReview.review,
@@ -590,6 +592,7 @@ function WorkspacePage(): React.JSX.Element {
           onArticleReviewChanged={articleReview.reload}
           onOpenArticleProposal={articleReview.openProposal}
           beforeSend={prepareAgentSend}
+          beforeSendReady={agentWriterConnected}
           pendingReview={Boolean(articleReview.review)}
           onClose={() => {
             setAgentOpen(false);
