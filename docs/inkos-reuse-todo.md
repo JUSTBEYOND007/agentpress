@@ -68,12 +68,12 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 - [ ] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
       先减少职责和净行数，不允许以“后续再拆分”放行。
 
-架构门禁实施顺序（2026-08-07 只读审计）：
+架构门禁实施顺序（2026-08-07 更新）：
 
-- [ ] 先拆分核心 Agent 超限 owner：`pi-runtime-adapter.ts` 954 行、`tool-call-service.ts` 760 行、
-      `worker-lifecycle.ts` 629 行、`schema-compatibility.ts` 605 行；文章变更链同时处理
-      `proposal-service.ts` 791 行。按 protocol conversion、execution、settlement、lifecycle、provider
-      compatibility 等真实职责拆分，不创建笼统 helpers。
+- [x] 按 protocol conversion、execution、settlement、lifecycle、provider compatibility 和 proposal
+      workflow 等真实职责拆分核心 Agent owner：`pi-runtime-adapter.ts`、`tool-call-service.ts`、
+      `worker-lifecycle.ts`、`schema-compatibility.ts`、`proposal-service.ts` 均已通过 500 行门禁；
+      拆分没有创建笼统 `helpers.ts` 或第二套状态机。
 - [ ] 将现有 Web walker 提升为根级文件长度命令，为 Agent-facing TS/TSX 建立 500 行硬门禁；普通 Web
       源码的 1000 行规则独立保留。不得对白名单文件、文件名或目录名做例外来隐藏新增职责。
 - [x] 固定并复用 `dependency-cruiser@18.1.1`（MIT）检查源码循环、Workspace deep import 和 Domain
