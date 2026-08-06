@@ -119,6 +119,28 @@ export const evalScenarios: readonly EvalScenario[] = [
     { bindArticle: true, confirmedArticleEdit: true },
   ),
   scenario(
+    'routing-09',
+    'routing',
+    '先只讨论把当前文章开头改得更简洁可能有哪些利弊，不要修改文章，也不要创建修改提案。',
+    expectation(['direct'], [], [], [], 'optional', 'forbidden', undefined, undefined, 'forbidden'),
+    { bindArticle: true },
+  ),
+  scenario(
+    'routing-10',
+    'routing',
+    '你好，先不要继续修改。',
+    expectation(['direct'], [], [], [], 'optional', 'forbidden', undefined, undefined, 'forbidden'),
+    {
+      bindArticle: true,
+      priorTurns: [
+        {
+          user: '确认上一项正文修改',
+          assistant: '上一项确认动作已结算。',
+        },
+      ],
+    },
+  ),
+  scenario(
     'delegation-01',
     'delegation',
     '研究 Kafka 消费者组再均衡的工作机制，基于可引用来源撰写一篇 800 字中文技术解读，并由事实核查角色复核关键声明。',
@@ -147,12 +169,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     'delegation-04',
     'delegation',
     '为当前文章同时交付两项相互独立的成果：将 Kafka exactly-once 段落改成不超过 120 字的准确表述并生成可审阅修改提案；另行制定一份解释 Kafka 事务边界的配图计划，包含构图、尺寸和无障碍替代文本。不联网搜索、导入或生成素材。',
-    expectation(
-      ['planned'],
-      ['editor', 'illustrator'],
-      [],
-      ['EditProposal', 'ImagePlan'],
-    ),
+    expectation(['planned'], ['editor', 'illustrator'], [], ['EditProposal', 'ImagePlan']),
     { bindArticle: true },
   ),
   scenario(
@@ -172,12 +189,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     'parallelism-01',
     'parallelism',
     '并行处理三份给定材料并分别形成 ResearchBrief，最后由写作角色合并为 ArticleDraft。每个 Specialist 的 Task Brief 必须逐字包含它所需的材料，不得只写“材料 A/B/C”：材料 A = “组成员变化会触发分区重新分配”；材料 B = “cooperative rebalance 可渐进转移分区”；材料 C = “消费者协议由 coordinator 计算分配”。不联网检索。',
-    expectation(
-      ['planned'],
-      ['researcher', 'writer'],
-      [],
-      ['ResearchBrief', 'ArticleDraft'],
-    ),
+    expectation(['planned'], ['researcher', 'writer'], [], ['ResearchBrief', 'ArticleDraft']),
   ),
   scenario(
     'parallelism-02',
@@ -218,12 +230,7 @@ export const evalScenarios: readonly EvalScenario[] = [
     'tool',
     '先读取当前文章并由 Editor 生成 exactly-once 段落的可审阅修改提案，同时由 Illustrator 独立输出事务边界配图计划；不联网、导入或生成图片。',
     {
-      ...expectation(
-        ['planned'],
-        ['editor', 'illustrator'],
-        [],
-        ['EditProposal', 'ImagePlan'],
-      ),
+      ...expectation(['planned'], ['editor', 'illustrator'], [], ['EditProposal', 'ImagePlan']),
       requiredToolIds: ['article.read_current', 'article.propose_edits'],
       maxToolCalls: 4,
     },
@@ -310,7 +317,12 @@ export const evalScenarios: readonly EvalScenario[] = [
       ],
     },
   ),
-  scenario('memory-03', 'memory', '解释冲突偏好需要先向用户确认，不要直接修改长期记忆。', expectation(['direct'])),
+  scenario(
+    'memory-03',
+    'memory',
+    '解释冲突偏好需要先向用户确认，不要直接修改长期记忆。',
+    expectation(['direct']),
+  ),
   scenario(
     'approval-01',
     'approval',

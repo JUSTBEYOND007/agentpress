@@ -40,6 +40,29 @@ describe('Agent eval suite', () => {
     });
   });
 
+  it('covers discussion-only and expired confirmation boundaries', () => {
+    const discussionOnly = evalScenarios.find(({ id }) => id === 'agentpress-routing-09');
+    const expiredConfirmation = evalScenarios.find(({ id }) => id === 'agentpress-routing-10');
+
+    expect(discussionOnly).toMatchObject({
+      expected: {
+        allowedModes: ['direct'],
+        approval: 'forbidden',
+        actionProposal: 'forbidden',
+      },
+      setup: { bindArticle: true },
+    });
+    expect(expiredConfirmation).toMatchObject({
+      expected: {
+        allowedModes: ['direct'],
+        approval: 'forbidden',
+        actionProposal: 'forbidden',
+      },
+      setup: { bindArticle: true },
+    });
+    expect(expiredConfirmation?.setup?.priorTurns).toHaveLength(1);
+  });
+
   it('scores only supplied persisted facts and fails missing observations', () => {
     const scenario = evalScenarios[0];
     if (!scenario) throw new Error('Eval fixture is empty');
@@ -92,10 +115,8 @@ describe('Agent eval suite', () => {
 
     expect(evaluatePersistedRuns([scenario], [observedRun])[0]?.delegationCorrect).toBe(false);
     expect(
-      evaluatePersistedRuns(
-        [scenario],
-        [{ ...observedRun, parallelExecutionValid: true }],
-      )[0]?.delegationCorrect,
+      evaluatePersistedRuns([scenario], [{ ...observedRun, parallelExecutionValid: true }])[0]
+        ?.delegationCorrect,
     ).toBe(true);
   });
 
@@ -117,10 +138,8 @@ describe('Agent eval suite', () => {
     };
 
     expect(
-      evaluatePersistedRuns(
-        [noTool],
-        [{ ...base, scenarioId: noTool.id, toolCalls: [] }],
-      )[0]?.delegationCorrect,
+      evaluatePersistedRuns([noTool], [{ ...base, scenarioId: noTool.id, toolCalls: [] }])[0]
+        ?.delegationCorrect,
     ).toBe(true);
     expect(
       evaluatePersistedRuns(

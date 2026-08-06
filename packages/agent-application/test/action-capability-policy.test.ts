@@ -42,4 +42,31 @@ describe('effectiveActionCapabilities', () => {
       ...effectiveActionCapabilities(envelope, ['article.read', 'article.propose', 'web.research']),
     ]).toEqual(['article.read', 'article.propose']);
   });
+
+  it('does not carry a confirmed grant into the next free-text turn', () => {
+    const available = ['article.read', 'article.propose', 'web.research'];
+    const confirmed = {
+      version: 1 as const,
+      source: 'button' as const,
+      requestedIntent: 'article_edit' as const,
+      actionProposalId: '4f1be6d3-99d9-4719-8219-5dd7754a8496',
+      payload: {
+        instruction: '继续上一段',
+        articleId: 'bb09dcbc-7f12-4d3e-bd93-d975d1f16e7f',
+        baseRevisionId: '5724b935-c5c8-4a04-8155-50d911cf60ae',
+        selectedBlocks: [],
+      },
+      grantedCapabilities: ['article.read', 'article.propose'],
+    };
+
+    expect(effectiveActionCapabilities(confirmed, available)).toEqual(
+      new Set(['article.read', 'article.propose']),
+    );
+    expect(
+      effectiveActionCapabilities(
+        { version: 1, source: 'free_text', grantedCapabilities: [] },
+        available,
+      ),
+    ).toEqual(new Set(['article.read', 'web.research']));
+  });
 });
