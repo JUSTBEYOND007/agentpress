@@ -25,7 +25,7 @@
     "build": "turbo run build",
     "benchmark:agent": "pnpm --filter @agentpress/demo-kit benchmark",
     "benchmark:editor": "pnpm --filter @agentpress/web benchmark:editor",
-    "check": "pnpm check:file-lengths && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm check:architecture && pnpm check:file-lengths && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "check:agent-architecture": "node scripts/check-agent-architecture.mjs",
     "check:dependency-architecture": "depcruise packages apps --config .dependency-cruiser.cjs --output-type err",
     "check:package-surfaces": "node scripts/check-package-surfaces.mjs",

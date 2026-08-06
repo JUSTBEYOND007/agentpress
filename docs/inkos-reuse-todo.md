@@ -54,12 +54,12 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       分别由独立 service/adapter 拥有。`@agentpress/agent-application` lint、typecheck、68 个离线测试
       和 build 通过；Web projection 已拆为 246/320 行，91 个 Web 测试和 `pnpm check:file-lengths`
       通过。需要 PostgreSQL 的 49 个集成测试仍必须在后续数据库门禁中运行。
-- [ ] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
+- [x] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
       `utils.ts`、`helpers.ts` 或重新导出文件规避行数检查。
       Context 来源装载已从 `RunContextService` 拆到独立 `run-context-sources.ts`，主服务降至 481 行；
       `schema-compatibility.ts` 已拆为 258/357 行，`pi-runtime-adapter.ts` 已拆为 487/493 行，
-      `worker-lifecycle.ts` 已降至 500 行。仓库级门禁仍需处理 `tool-call-service.ts` 和
-      `proposal-service.ts` 两个超限 owner，不能以白名单掩盖。
+      `worker-lifecycle.ts` 已降至 500 行，`tool-call-service.ts` 已拆为 327/446/56 行，
+      `proposal-service.ts` 已拆为 260/488/43 行。仓库级文件长度门禁已覆盖 Agent-facing 源码。
 - [ ] 一个模块只能拥有一种状态转换；跨模块协调通过显式 Port、Command、Event 或 typed result，
       禁止共享可变上下文对象和隐式回调链。
 - [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
@@ -83,7 +83,7 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       若公共 API 需要防止意外增长，再使用 `@microsoft/api-extractor@7.58.12`（MIT）生成可审查的 API
       report，不用手写 barrel diff，也不用 Knip 代替 API 合同。当前全部 package 打包表面已通过
       `publint --strict`；API report 冻结仍随公共 API 稳定化继续实施。
-- [ ] 新增根 `check:architecture` 聚合上述门禁，并接入根 `pnpm check`；在 CI 中只保留这个统一入口，
+- [x] 新增根 `check:architecture` 聚合上述门禁，并接入根 `pnpm check`；在 CI 中只保留这个统一入口，
       避免 Web 局部检查被误报为全仓通过。
 
 建议本地所有权：
