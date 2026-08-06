@@ -54,6 +54,30 @@ grants or directly settle article changes. PostgreSQL integration tests cover th
 Task, exact confirmed tool table, and pending Proposal result; Action Envelope, capability
 intersection, expiry, replay, and Skill narrowing have separate contract/integration coverage.
 
+InkOS transcript restore decision: the same fixed InkOS commit models append-only
+`request_started -> message* -> request_committed` JSONL events in
+`packages/core/src/interaction/session-transcript-schema.ts` and restores only committed request
+ranges in `session-transcript-restore.ts`. Its tests prove uncommitted exclusion, bounded natural
+history, provider-independent ToolCall folding, old `use_skill` expiry, and model-dialect
+adaptation. AgentPress adopts those behaviors behind PostgreSQL facts rather than copying the AGPL
+JSONL store or its Pi message types.
+
+| InkOS behavior                                                      | AgentPress mapping                                                                   | Decision and evidence                                                                                                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `request_committed` gates replay                                    | `agent_sessions.status = completed` gates transcript projection                      | Completed attempts only; interrupted/failed attempts are excluded.                                                                                            |
+| Monotonic transcript `seq`                                          | `agent_transcript_entries(session_id, sequence)` plus locked `next_sequence`         | PostgreSQL owns ordering; process-local/file locks are rejected.                                                                                              |
+| Raw ToolCall/ToolResult history is repaired before provider replay  | Completed transcript tools fold into a provider-independent historical state summary | Only one-to-one, same-session, same-ID and same-tool pairs are retained; missing, orphan, duplicate and mismatched facts are omitted rather than synthesized. |
+| Old `use_skill` content expires                                     | Current Run Skill Binding owns Skill instructions                                    | Historical Skill output becomes an `expired` status without replaying instructions.                                                                           |
+| Thinking and production UI state are not restored as current intent | Natural assistant projection keeps text and model metadata only                      | Tool blocks, thinking, article-action presentation and Specialist-private attempts are removed.                                                               |
+| Agent cache evicts on model/action/Skill changes                    | Each AgentPress attempt creates a fresh Pi runtime from a frozen Run Context Pack    | No in-memory Agent cache is reused; Run ID plus immutable Prompt/Skill/Context revisions bound projection caches.                                             |
+
+Contract tests exercise the pure projector and PostgreSQL integration writes completed and
+interrupted sessions with out-of-order inserts, valid pairs, orphan results, duplicate results and
+legacy Skill guidance before calling the production restore path. Raw continuation of a currently
+approved tool is a separate path: `PiRuntimeAdapter.validateRuntimeHistory` rejects missing,
+duplicate or mismatched ToolResults before provider I/O, and ToolCall settlement remains owned by
+the PostgreSQL ToolCall ledger.
+
 Eval dashboard boundary decision: the product API never exposes global eval identities. An
 experiment may be attached to `eval_experiments.workspace_id`; report, Trial Trace, and regression
 queries require both authenticated workspace membership and a matching persisted workspace owner.

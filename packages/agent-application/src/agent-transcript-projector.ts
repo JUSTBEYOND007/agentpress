@@ -24,8 +24,12 @@ const emptyUsage = {
 };
 
 type TranscriptEntry = {
+  readonly sessionId?: string;
   readonly sessionStatus: string;
+  readonly sequence?: number;
+  readonly role?: string;
   readonly messageType: string;
+  readonly providerToolCallId?: string | null;
   readonly content: Readonly<Record<string, unknown>>;
 };
 
@@ -52,8 +56,12 @@ export class AgentTranscriptProjector {
   ): Promise<readonly RuntimeTranscriptMessage[]> {
     const rows = await this.database
       .select({
+        sessionId: agentSessions.id,
         sessionStatus: agentSessions.status,
+        sequence: agentTranscriptEntries.sequence,
+        role: agentTranscriptEntries.role,
         messageType: agentTranscriptEntries.messageType,
+        providerToolCallId: agentTranscriptEntries.providerToolCallId,
         content: agentTranscriptEntries.content,
       })
       .from(agentTranscriptEntries)
@@ -155,9 +163,26 @@ export function projectCommittedTranscript(
     readonly content: string;
     readonly isError: boolean;
   }[] = [];
+  const toolProtocols = new Map<
+    string,
+    {
+      callCount: number;
+      resultCount: number;
+      toolName?: string;
+      result?: {
+        readonly toolName: string;
+        readonly content: string;
+        readonly isError: boolean;
+        readonly timestamp: number;
+      };
+      resultOrder?: number;
+    }
+  >();
   let latestTimestamp = 0;
+  let entryOrder = 0;
 
   for (const entry of entries) {
+    entryOrder += 1;
     if (entry.sessionStatus !== 'completed') continue;
     if (entry.messageType === 'message') {
       const message = entry.content.message;
@@ -171,16 +196,56 @@ export function projectCommittedTranscript(
       }
       continue;
     }
+    const providerToolCallId = entry.providerToolCallId;
+    if (entry.messageType === 'tool_call' && providerToolCallId) {
+      const toolName = entry.content.name;
+      if (typeof toolName !== 'string') continue;
+      const key = toolProtocolKey(entry.sessionId, providerToolCallId);
+      const protocol = toolProtocols.get(key) ?? { callCount: 0, resultCount: 0 };
+      protocol.callCount += 1;
+      protocol.toolName ??= toolName;
+      toolProtocols.set(key, protocol);
+      continue;
+    }
     if (entry.messageType === 'tool_result') {
       const result = entry.content.result;
-      if (!isToolSummary(result)) continue;
+      if (
+        !isToolSummary(result) ||
+        !providerToolCallId ||
+        providerToolCallId !== result.toolCallId
+      ) {
+        continue;
+      }
       latestTimestamp = Math.max(latestTimestamp, result.timestamp);
-      toolSummaries.push({
-        toolName: result.toolName,
-        content: result.content.slice(0, 2_000),
-        isError: result.isError,
-      });
+      const key = toolProtocolKey(entry.sessionId, providerToolCallId);
+      const protocol = toolProtocols.get(key) ?? { callCount: 0, resultCount: 0 };
+      protocol.resultCount += 1;
+      protocol.result = result;
+      protocol.resultOrder = entryOrder;
+      toolProtocols.set(key, protocol);
     }
+  }
+
+  for (const protocol of [...toolProtocols.values()].sort(
+    (left, right) => (left.resultOrder ?? 0) - (right.resultOrder ?? 0),
+  )) {
+    if (
+      protocol.callCount !== 1 ||
+      protocol.resultCount !== 1 ||
+      !protocol.result ||
+      protocol.toolName !== protocol.result.toolName
+    ) {
+      continue;
+    }
+    toolSummaries.push(
+      protocol.toolName === 'use_skill'
+        ? { toolName: protocol.toolName, content: 'expired', isError: true }
+        : {
+            toolName: protocol.toolName,
+            content: protocol.result.content.slice(0, 2_000),
+            isError: protocol.result.isError,
+          },
+    );
   }
 
   const bounded = projectConversationHistory(dialogue, dialogueLimit);
@@ -204,7 +269,19 @@ export function withHistoricalIntentBoundary(systemPrompt: string, hasHistory: b
 }
 
 function naturalAssistantMessage(message: RuntimeAssistantMessage): RuntimeAssistantMessage {
-  return { ...message, blocks: [{ type: 'text', text: message.content }], parts: [] };
+  return {
+    role: 'assistant',
+    content: message.content,
+    blocks: [{ type: 'text', text: message.content }],
+    parts: [],
+    provider: message.provider,
+    model: message.model,
+    ...(message.responseId ? { responseId: message.responseId } : {}),
+    stopReason: message.stopReason,
+    ...(message.errorMessage ? { errorMessage: message.errorMessage } : {}),
+    usage: message.usage,
+    timestamp: message.timestamp,
+  };
 }
 
 function isRuntimeMessage(value: unknown): value is RuntimeUserMessage | RuntimeAssistantMessage {
@@ -224,6 +301,7 @@ function isRuntimeMessage(value: unknown): value is RuntimeUserMessage | Runtime
 }
 
 function isToolSummary(value: unknown): value is {
+  readonly toolCallId: string;
   readonly toolName: string;
   readonly content: string;
   readonly isError: boolean;
@@ -231,11 +309,16 @@ function isToolSummary(value: unknown): value is {
 } {
   return (
     isRecord(value) &&
+    typeof value.toolCallId === 'string' &&
     typeof value.toolName === 'string' &&
     typeof value.content === 'string' &&
     typeof value.isError === 'boolean' &&
     typeof value.timestamp === 'number'
   );
+}
+
+function toolProtocolKey(sessionId: string | undefined, providerToolCallId: string): string {
+  return `${sessionId ?? 'unknown-session'}:${providerToolCallId}`;
 }
 
 function isRuntimeAssistantMessage(value: unknown): value is RuntimeAssistantMessage {

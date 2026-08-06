@@ -39,6 +39,11 @@ describe('projectCommittedTranscript', () => {
     const assistant = {
       role: 'assistant' as const,
       content: '自然语言结果',
+      presentation: {
+        kind: 'outcome_receipt' as const,
+        targetType: 'article-change' as const,
+        targetId: 'expired-proposal',
+      },
       blocks: [
         { type: 'thinking' as const, thinking: 'hidden' },
         { type: 'tool_call' as const, id: 'call-1', name: 'read', arguments: {} },
@@ -51,20 +56,31 @@ describe('projectCommittedTranscript', () => {
     };
     const rows = [
       { sessionStatus: 'completed', messageType: 'message', content: { message: assistant } },
-      ...Array.from({ length: 10 }, (_, index) => ({
-        sessionStatus: 'completed',
-        messageType: 'tool_result',
-        content: {
-          result: {
-            role: 'tool',
-            toolCallId: `call-${String(index)}`,
-            toolName: 'read',
-            content: `result-${String(index)}`,
-            isError: false,
-            timestamp: index + 2,
+      ...Array.from({ length: 10 }, (_, index) => [
+        {
+          sessionId: 'session-1',
+          sessionStatus: 'completed',
+          messageType: 'tool_call',
+          providerToolCallId: `call-${String(index)}`,
+          content: { name: 'read', arguments: {} },
+        },
+        {
+          sessionId: 'session-1',
+          sessionStatus: 'completed',
+          messageType: 'tool_result',
+          providerToolCallId: `call-${String(index)}`,
+          content: {
+            result: {
+              role: 'tool',
+              toolCallId: `call-${String(index)}`,
+              toolName: 'read',
+              content: `result-${String(index)}`,
+              isError: false,
+              timestamp: index + 2,
+            },
           },
         },
-      })),
+      ]).flat(),
     ];
 
     const projected = projectCommittedTranscript(rows);
@@ -74,6 +90,9 @@ describe('projectCommittedTranscript', () => {
       blocks: [{ type: 'text', text: '自然语言结果' }],
       parts: [],
     });
+    expect(projected[0]).not.toHaveProperty('presentation');
+    expect(JSON.stringify(projected)).not.toContain('hidden');
+    expect(JSON.stringify(projected)).not.toContain('expired-proposal');
     expect(projected[1]).toMatchObject({
       role: 'assistant',
       provider: 'agentpress',
@@ -82,6 +101,81 @@ describe('projectCommittedTranscript', () => {
     expect(projected[1]?.content).not.toContain('result-0');
     expect(projected[1]?.content).not.toContain('result-1');
     expect(projected[1]?.content).toContain('result-9');
+  });
+
+  it('folds only one-to-one matching ToolCall results and fails closed on damaged history', () => {
+    const call = (id: string, name = 'read') => ({
+      sessionId: 'session-1',
+      sessionStatus: 'completed',
+      messageType: 'tool_call',
+      providerToolCallId: id,
+      content: { name, arguments: {} },
+    });
+    const result = (id: string, content: string, name = 'read') => ({
+      sessionId: 'session-1',
+      sessionStatus: 'completed',
+      messageType: 'tool_result',
+      providerToolCallId: id,
+      content: {
+        result: {
+          role: 'tool',
+          toolCallId: id,
+          toolName: name,
+          content,
+          isError: false,
+          timestamp: 1,
+        },
+      },
+    });
+    const projected = projectCommittedTranscript([
+      call('valid'),
+      result('valid', 'verified-result'),
+      result('orphan', 'orphan-result'),
+      call('missing'),
+      call('duplicate'),
+      result('duplicate', 'first-result'),
+      result('duplicate', 'second-result'),
+      call('mismatch', 'read'),
+      result('mismatch', 'mismatched-result', 'write'),
+    ]);
+    const body = JSON.stringify(projected);
+    expect(body).toContain('verified-result');
+    expect(body).not.toContain('orphan-result');
+    expect(body).not.toContain('first-result');
+    expect(body).not.toContain('second-result');
+    expect(body).not.toContain('mismatched-result');
+  });
+
+  it('expires historical Skill activation without replaying its instructions', () => {
+    const projected = projectCommittedTranscript([
+      {
+        sessionId: 'session-1',
+        sessionStatus: 'completed',
+        messageType: 'tool_call',
+        providerToolCallId: 'skill-1',
+        content: { name: 'use_skill', arguments: { skillId: 'legacy' } },
+      },
+      {
+        sessionId: 'session-1',
+        sessionStatus: 'completed',
+        messageType: 'tool_result',
+        providerToolCallId: 'skill-1',
+        content: {
+          result: {
+            role: 'tool',
+            toolCallId: 'skill-1',
+            toolName: 'use_skill',
+            content: 'LEGACY_PRIVATE_SKILL_GUIDANCE',
+            isError: false,
+            timestamp: 1,
+          },
+        },
+      },
+    ]);
+    const body = JSON.stringify(projected);
+    expect(body).toContain('use_skill');
+    expect(body).toContain('expired');
+    expect(body).not.toContain('LEGACY_PRIVATE_SKILL_GUIDANCE');
   });
 });
 

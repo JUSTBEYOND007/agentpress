@@ -135,12 +135,23 @@ InkOS 证据起点：
 
 TODO：
 
-- [ ] 建立 InkOS restore 行为与现有 PostgreSQL RunEvent/agent transcript projector 的逐项差距表。
-- [ ] 只恢复已经提交的用户请求和完成到有效边界的 attempt；失败前未提交的临时消息不能成为新事实。
-- [ ] 在投影层修复 ToolCall/ToolResult 邻接、缺失结果和重复结果；无法确定的历史必须 fail closed，
+- [x] 建立 InkOS restore 行为与现有 PostgreSQL RunEvent/agent transcript projector 的逐项差距表。
+      `docs/references/pi-ecosystem.md` 已记录 commit、源码/测试路径、六项行为映射、拒绝 JSONL/Pi 类型的
+      适配边界和本地验证落点。
+- [x] 只恢复已经提交的用户请求和完成到有效边界的 attempt；失败前未提交的临时消息不能成为新事实。
+      PostgreSQL projector 仅接纳 `agent_sessions.status=completed`；interrupted/failed attempt 被排除，
+      单元和真实数据库测试均覆盖 completed 与未提交消息的相反场景。
+- [x] 在投影层修复 ToolCall/ToolResult 邻接、缺失结果和重复结果；无法确定的历史必须 fail closed，
       不能伪造成功 ToolResult。
-- [ ] 历史失败请求、过期 action、旧 Skill 指令和私有 Specialist thinking 不得重新进入当前模型上下文。
-- [ ] Provider/model/Prompt/Tool/Skill/Context revision 变化时明确失效缓存，不能复用不兼容的内存 Agent。
+      同 session 的显式 ToolCall/ToolResult 必须 ID、tool name 一致且各只有一条才折叠为历史状态；missing、
+      orphan、duplicate 和 mismatch 全部省略。当前批准工具的 raw continuation 仍由 Runtime history validator
+      fail closed。单元与 PostgreSQL 乱序插入回归均覆盖。
+- [x] 历史失败请求、过期 action、旧 Skill 指令和私有 Specialist thinking 不得重新进入当前模型上下文。
+      非 completed session 不投影；自然 assistant 历史移除 ToolCall/thinking/presentation；旧 `use_skill`
+      只留下 expired 状态而不含指令。历史文本不携带当前 Action Envelope 或 capability。
+- [x] Provider/model/Prompt/Tool/Skill/Context revision 变化时明确失效缓存，不能复用不兼容的内存 Agent。
+      `AgentSessionRunner` 每个 attempt 创建新 Pi Runtime，不保留内存 Agent；Context Pack 固定 Prompt、Skill、
+      Tool capability 和 Context revision。投影 cache key 包含 Run/Task 与事实行，跨 Run revision 不复用。
 - [ ] live SSE 与 replay 必须使用同一 projector，并证明刷新、断线恢复、worker 重启和分支切换后 UI 一致。
 - [ ] PostgreSQL 集成测试覆盖部分写入、重复事件、乱序到达、旧 worker 晚到结果、恢复中再次取消。
 

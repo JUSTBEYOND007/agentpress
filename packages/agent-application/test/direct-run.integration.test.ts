@@ -57,6 +57,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ActionProposalService,
   AgentSessionCompactionService,
+  AgentTranscriptProjector,
   ContextGovernanceService,
   DirectRunService,
   PersistentToolBridge,
@@ -2175,6 +2176,154 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(entries.map(({ sequence }) => sequence).sort((left, right) => left - right)).toEqual([
       1, 2, 3, 4,
     ]);
+  });
+
+  it('restores only committed one-to-one ToolCall facts from PostgreSQL transcripts', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '恢复可信历史',
+      idempotencyKey: randomUUID(),
+    });
+    const completedSessionId = randomUUID();
+    const interruptedSessionId = randomUUID();
+    await connection.db.insert(agentSessions).values([
+      {
+        id: completedSessionId,
+        runId: run.runId,
+        kind: 'main',
+        attempt: 1,
+        logicalKey: `${run.runId}:main:1`,
+        model: 'old-model',
+        status: 'completed',
+      },
+      {
+        id: interruptedSessionId,
+        runId: run.runId,
+        kind: 'main',
+        attempt: 2,
+        logicalKey: `${run.runId}:main:2`,
+        model: 'old-model',
+        status: 'interrupted',
+      },
+    ]);
+    const toolResult = (toolCallId: string, toolName: string, content: string) => ({
+      result: {
+        role: 'tool',
+        toolCallId,
+        toolName,
+        content,
+        isError: false,
+        timestamp: 10,
+      },
+    });
+    await connection.db.insert(agentTranscriptEntries).values([
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 3,
+        role: 'tool',
+        messageType: 'tool_result',
+        providerToolCallId: 'valid-call',
+        content: toolResult('valid-call', 'read', 'verified-result'),
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 1,
+        role: 'user',
+        messageType: 'message',
+        content: { message: { role: 'user', content: 'committed-request', timestamp: 1 } },
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 2,
+        role: 'assistant',
+        messageType: 'tool_call',
+        providerToolCallId: 'valid-call',
+        content: { name: 'read', arguments: {} },
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 4,
+        role: 'tool',
+        messageType: 'tool_result',
+        providerToolCallId: 'orphan-call',
+        content: toolResult('orphan-call', 'read', 'orphan-result'),
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 5,
+        role: 'assistant',
+        messageType: 'tool_call',
+        providerToolCallId: 'duplicate-call',
+        content: { name: 'read', arguments: {} },
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 6,
+        role: 'tool',
+        messageType: 'tool_result',
+        providerToolCallId: 'duplicate-call',
+        content: toolResult('duplicate-call', 'read', 'duplicate-result-1'),
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 7,
+        role: 'tool',
+        messageType: 'tool_result',
+        providerToolCallId: 'duplicate-call',
+        content: toolResult('duplicate-call', 'read', 'duplicate-result-2'),
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 8,
+        role: 'assistant',
+        messageType: 'tool_call',
+        providerToolCallId: 'skill-call',
+        content: { name: 'use_skill', arguments: { skillId: 'legacy' } },
+      },
+      {
+        id: randomUUID(),
+        sessionId: completedSessionId,
+        sequence: 9,
+        role: 'tool',
+        messageType: 'tool_result',
+        providerToolCallId: 'skill-call',
+        content: toolResult('skill-call', 'use_skill', 'LEGACY_PRIVATE_SKILL_GUIDANCE'),
+      },
+      {
+        id: randomUUID(),
+        sessionId: interruptedSessionId,
+        sequence: 1,
+        role: 'user',
+        messageType: 'message',
+        content: { message: { role: 'user', content: 'uncommitted-request', timestamp: 20 } },
+      },
+    ]);
+
+    const restored = await new AgentTranscriptProjector(connection.db).restoreCommitted(run.runId);
+    const body = JSON.stringify(restored);
+    expect(body).toContain('committed-request');
+    expect(body).toContain('verified-result');
+    expect(body).toContain('use_skill');
+    expect(body).toContain('expired');
+    expect(body).not.toContain('uncommitted-request');
+    expect(body).not.toContain('orphan-result');
+    expect(body).not.toContain('duplicate-result');
+    expect(body).not.toContain('LEGACY_PRIVATE_SKILL_GUIDANCE');
   });
 
   it('resumes an approved provider Tool Call and continues the real Pi transcript', async () => {
