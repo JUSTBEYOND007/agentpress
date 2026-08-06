@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { ModelPolicyCatalog } from '@agentpress/agent-context';
 
 import {
   AGENT_RUN_CANCEL_CHANNEL,
@@ -7,7 +6,6 @@ import {
   AGENT_RUN_COMMAND_TOPIC,
   AGENT_TASK_COMMAND_TOPIC,
   DirectRunService,
-  StaleWorkerSettlementError,
   type LiveRunEvent,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
@@ -42,7 +40,14 @@ import {
 } from './kafka-topics.js';
 import { RedisRunLeaseManager } from './redis-run-lease.js';
 import { handleAgentTaskCommand, parseAgentTaskCommandPayload } from './task-command-handler.js';
-
+import {
+  createModelPolicies,
+  parseIndexCommand,
+  parseRunCommand,
+  parseSteeringCommand,
+} from './worker-protocol.js';
+import { acknowledgeWorkerCommand } from './worker-inbox.js';
+import { isStaleWorkerSettlementError } from './worker-errors.js';
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
 const CONSUMER_GROUP = 'agentpress-agent-worker-v1';
 const INDEX_CONSUMER_GROUP = 'agentpress-knowledge-worker-v1';
@@ -332,8 +337,9 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       this.logger.info({ runId: command.runId, status: result.status }, 'Agent Run settled');
     } catch (error) {
       if (isStaleWorkerSettlementError(error)) {
-        const inbox = await acknowledgeRunCommand(
+        const inbox = await acknowledgeWorkerCommand(
           this.database.db,
+          CONSUMER_GROUP,
           command.messageId,
           topic,
           partition,
@@ -491,138 +497,4 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       );
     }
   }
-}
-
-export function isStaleWorkerSettlementError(error: unknown): error is StaleWorkerSettlementError {
-  return error instanceof StaleWorkerSettlementError;
-}
-
-async function acknowledgeRunCommand(
-  database: Parameters<typeof processInboxMessage>[0],
-  messageId: string,
-  topic: string,
-  partition: number,
-  offset: number,
-  rawPayload: string | undefined,
-): Promise<'processed' | 'duplicate'> {
-  return processInboxMessage(
-    database,
-    {
-      consumerGroup: CONSUMER_GROUP,
-      messageId,
-      topic,
-      partition,
-      offset,
-      payloadHash: createHash('sha256')
-        .update(rawPayload ?? '')
-        .digest('hex'),
-    },
-    () => Promise.resolve(),
-  );
-}
-
-type RunCommand = {
-  readonly command: 'run.execute';
-  readonly messageId: string;
-  readonly runId: string;
-};
-
-function parseRunCommand(payload: string | undefined): RunCommand | undefined {
-  if (!payload) {
-    return undefined;
-  }
-  try {
-    const value: unknown = JSON.parse(payload);
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      !('command' in value) ||
-      value.command !== 'run.execute' ||
-      !('messageId' in value) ||
-      typeof value.messageId !== 'string' ||
-      !('runId' in value) ||
-      typeof value.runId !== 'string'
-    ) {
-      return undefined;
-    }
-    return value as RunCommand;
-  } catch {
-    return undefined;
-  }
-}
-
-type SteeringCommand = {
-  readonly runId: string;
-  readonly directiveId: string;
-  readonly content: string;
-};
-
-function parseSteeringCommand(payload: string | undefined): SteeringCommand | undefined {
-  if (!payload) return undefined;
-  try {
-    const value: unknown = JSON.parse(payload);
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      !('runId' in value) ||
-      typeof value.runId !== 'string' ||
-      !('directiveId' in value) ||
-      typeof value.directiveId !== 'string' ||
-      !('content' in value) ||
-      typeof value.content !== 'string'
-    )
-      return undefined;
-    return value as SteeringCommand;
-  } catch {
-    return undefined;
-  }
-}
-
-type IndexCommand = {
-  readonly command: 'article.index';
-  readonly messageId: string;
-  readonly revisionId: string;
-};
-
-function parseIndexCommand(payload: string | undefined): IndexCommand | undefined {
-  if (!payload) return undefined;
-  try {
-    const value: unknown = JSON.parse(payload);
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      !('command' in value) ||
-      value.command !== 'article.index' ||
-      !('messageId' in value) ||
-      typeof value.messageId !== 'string' ||
-      !('revisionId' in value) ||
-      typeof value.revisionId !== 'string'
-    )
-      return undefined;
-    return value as IndexCommand;
-  } catch {
-    return undefined;
-  }
-}
-
-function createModelPolicies(proModel: string, turboModel?: string): ModelPolicyCatalog {
-  const fastModel = turboModel ?? proModel;
-  const policy = (task: string, primary: string, fallbacks: readonly string[]) => ({
-    task,
-    primary,
-    fallbacks,
-    embeddingModel: 'configured-by-rag-provider',
-    rerankModel: 'configured-by-rag-provider',
-    imageModel: 'configured-by-media-provider',
-  });
-  return new ModelPolicyCatalog([
-    policy('main', proModel, fastModel === proModel ? [] : [fastModel]),
-    policy('direct', proModel, fastModel === proModel ? [] : [fastModel]),
-    policy('researcher', fastModel, fastModel === proModel ? [] : [proModel]),
-    policy('fact_checker', fastModel, fastModel === proModel ? [] : [proModel]),
-    policy('writer', proModel, fastModel === proModel ? [] : [fastModel]),
-    policy('editor', proModel, fastModel === proModel ? [] : [fastModel]),
-    policy('illustrator', proModel, fastModel === proModel ? [] : [fastModel]),
-    policy('synthesis', proModel, fastModel === proModel ? [] : [fastModel]),
-  ]);
 }

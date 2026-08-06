@@ -1,7 +1,7 @@
 import { StaleWorkerSettlementError } from '@agentpress/agent-application';
 import { describe, expect, it } from 'vitest';
 
-import { isStaleWorkerSettlementError } from '../src/worker-lifecycle.js';
+import { isStaleWorkerSettlementError } from '../src/worker-errors.js';
 
 describe('Agent Run worker settlement boundary', () => {
   it('recognizes only the typed stale lease outcome', () => {
