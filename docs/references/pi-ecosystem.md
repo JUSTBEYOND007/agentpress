@@ -27,6 +27,33 @@ records a versioned snapshot of template and variable-schema versions plus order
 the Run Context Pack continues to pin that immutable revision. Snapshot hashes detect composition
 drift but do not grant capabilities, drive runtime state, or count as model-behavior evidence.
 
+InkOS Action Envelope/tool-table decision: at fixed commit
+`c7851b94ada27f2810b903e96d8fec6f33e5d9bc`,
+`packages/core/src/interaction/action-envelope.ts` defines typed `actionSource`,
+`requestedIntent`, `actionPayload`, and requested Skill IDs. The authorization behavior is in
+`packages/core/src/agent/agent-session.ts:createModeTools`; matching button/slash confirmations
+replace the ordinary tool table with the single intent-specific production tool. Exact tool-table
+contracts are in `packages/core/src/__tests__/agent-session.test.ts` (including confirmed book,
+short-run, cover, and play cases). The Prompt-only checks in
+`packages/core/src/__tests__/instruction-adherence-boundary.test.ts` are not treated as
+authorization evidence.
+
+AgentPress adopts that exact-table behavior without copying AGPL source. Its deliberately smaller
+Action Envelope supports only `free_text` and server-built `button/article_edit`; InkOS slash,
+quick-action, and fiction-specific intents are rejected because AgentPress has no corresponding
+host surfaces. InkOS `requestedSkills` maps to immutable PostgreSQL Run Skill Bindings rather than
+becoming an action capability. `AgentTurnProfile` intersects confirmed grants with the host Tool
+Registry, workspace role, frozen article binding, and every pinned Skill allowlist.
+`PlannedRunExecutor` maps a confirmed article turn deterministically to one bounded Editor Task;
+the Specialist receives only `article.read_current`, `article.propose_edits`, and the closed
+`task_complete` protocol tool, with no Main planning, research, Skill-selection, or arbitrary
+control tool. The result remains an expiring EditProposal behind the editor settlement boundary
+and never mutates the canonical Article Revision directly. Free-text article turns may create the
+same reviewable proposal when the host has an editable article binding, but cannot carry confirmed
+grants or directly settle article changes. PostgreSQL integration tests cover the single persisted
+Task, exact confirmed tool table, and pending Proposal result; Action Envelope, capability
+intersection, expiry, replay, and Skill narrowing have separate contract/integration coverage.
+
 Eval dashboard boundary decision: the product API never exposes global eval identities. An
 experiment may be attached to `eval_experiments.workspace_id`; report, Trial Trace, and regression
 queries require both authenticated workspace membership and a matching persisted workspace owner.

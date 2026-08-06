@@ -90,16 +90,23 @@ InkOS 证据起点：
 
 TODO：
 
-- [ ] 对照现有 AgentPress Action Envelope 和 Turn Profile，列出相对 InkOS
+- [x] 对照现有 AgentPress Action Envelope 和 Turn Profile，列出相对 InkOS
       `actionSource/requestedIntent/actionPayload/requestedSkills` 的行为差距，不平行创建第二套协议。
+      差距与拒绝项已记录在 `docs/references/pi-ecosystem.md`：AgentPress 只保留实际宿主表面需要的
+      `free_text/button + article_edit`，Skill 走不可变 Run Skill Binding，拒绝 slash、quick-action 和
+      fiction-specific intents，未创建第二套协议。
 - [x] 将用户自然语言、宿主确认动作、历史上下文和系统产生的 wake/recovery 事件保持为不同 typed origin，
       不能在拼接 Prompt 后丢失来源。
       `RuntimeCurrentTurn.source` 区分 `user/application/recovery`，Action Envelope 独立区分
       `free_text/button`；queued Run 保持 user origin，持久 Run 恢复使用 recovery origin，内部 Main/Specialist
       轮次使用 application origin。Context Pack 和 committed history 仍是独立 typed 字段/消息，不伪装为
       当前用户请求。Runtime converter、validator、Turn Profile 和 queued/recovery source tests 已覆盖。
-- [ ] 由宿主根据当前 turn capability 生成精确工具表；普通问候、解释、研究和确认后的文章修改必须拥有
+- [x] 由宿主根据当前 turn capability 生成精确工具表；普通问候、解释、研究和确认后的文章修改必须拥有
       不同工具集合。
+      `AgentTurnProfile + PlannedRunExecutor + PersistentToolBridge` 共同生成工具表：无文章会话只有控制工具，
+      研究通过受限 Plan/Specialist capability 委派，文章自由文本只有宿主授权的提案工具；确认修改确定性
+      映射为单个 Editor Task，只暴露 `article.read_current/article.propose_edits/task_complete`，没有 Main
+      plan/research/Skill 选择工具。契约测试和 PostgreSQL confirmed-turn exact-table 集成测试覆盖该边界。
 - [ ] 所有文章修改、发布、付费媒体和外部副作用都要求当前轮次匹配的结构化能力；模型文本、关键词、
       历史意图和 Skill 不得授予权限。
 - [ ] 参数 Schema 在宿主边界校验；未知 intent、额外字段、缺失对象、过期 action 和重复确认必须 fail closed。

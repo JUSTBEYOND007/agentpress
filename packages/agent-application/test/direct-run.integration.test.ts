@@ -756,6 +756,86 @@ describeWithDatabase('Direct Run application flow', () => {
     ]);
   });
 
+  it('exposes only host-granted article tools to a confirmed article edit turn', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Confirmed direct article editing',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const registry = new ToolRegistry();
+    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const toolCallsService = new ToolCallService({ database: connection.db, publisher, registry });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: toolCallsService,
+    });
+    const delegate = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse(runtimeToolName('article.propose_edits', '1.1.0'), {
+          operations: [
+            {
+              kind: 'replace',
+              blockId: 'mention-block',
+              block: {
+                type: 'paragraph',
+                attrs: { blockId: 'mention-block' },
+                content: [{ type: 'text', text: 'Confirmed edit content' }],
+              },
+            },
+          ],
+        }),
+        taskCompleteResponse('已生成确认动作对应的正文修改提案。'),
+      ],
+    });
+    let exposedToolNames: readonly string[] = [];
+    const confirmedRuntime: AgentRuntime = {
+      execute(request, onEvent, signal) {
+        exposedToolNames = (request.tools ?? []).map(({ name }) => name);
+        return delegate.execute(request, onEvent, signal);
+      },
+    };
+    const confirmedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => confirmedRuntime },
+      runtimeToolFactory: bridge,
+      systemPrompt: 'You are AgentPress.',
+      dispatchCommands: false,
+    });
+    const run = await confirmedService.createConfirmedAction({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      proposalId: randomUUID(),
+      instruction: '把正文改得更直接',
+      articleId: ids.article,
+      baseRevisionId: ids.articleRevision,
+      selectedBlocks: [],
+      grantedCapabilities: ['article.read', 'article.propose'],
+    });
+
+    await expect(confirmedService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'completed',
+    });
+    expect(exposedToolNames).toEqual([
+      runtimeToolName('article.read_current', '1.0.0'),
+      runtimeToolName('article.propose_edits', '1.1.0'),
+      'task_complete',
+    ]);
+    await expect(
+      connection.db.select().from(editProposals).where(eq(editProposals.runId, run.runId)),
+    ).resolves.toMatchObject([{ status: 'pending' }]);
+    await expect(
+      connection.db.select().from(executionPlans).where(eq(executionPlans.runId, run.runId)),
+    ).resolves.toHaveLength(1);
+  });
+
   it('loads only the requested persisted artifact version for its owning Run', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
