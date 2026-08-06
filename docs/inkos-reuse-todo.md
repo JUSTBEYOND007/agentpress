@@ -40,16 +40,20 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 ## 禁止 God Code
 
 初始审计显示 `packages/agent-application/src/planned-run-executor.ts` 约 2200 行，
-`packages/agent-application/src/direct-run-service.ts` 约 2080 行。Direct Run 已完成第一轮拆分并
-降到 500 行以内；Planned Run 仍超过上限，任何 InkOS 行为都不得继续直接堆入该文件。
+`packages/agent-application/src/direct-run-service.ts` 约 2080 行。两者均已完成第一轮拆分并降到
+500 行以内；后续行为必须继续进入已建立的单一职责 owner，不能重新堆回 facade。
 
-- [ ] 在扩展 Planned Run 前，将计划持久化、Task 调度、Specialist 执行、结果合成、恢复和 transcript
+- [x] 在扩展 Planned Run 前，将计划持久化、Task 调度、Specialist 执行、结果合成、恢复和 transcript
       记录拆到独立应用服务；`PlannedRunExecutor` 只保留用例编排。
+      `PlannedRunExecutor` 已降至 476 行；Main Control、DAG scheduler、plan revision、Task executor、
+      plan/task store、Specialist result store、协议和结果策略分别拥有独立模块，所有新增模块均低于
+      500 行。
 - [x] 在扩展 Direct Run 前，将 turn profile、session lifecycle、directive、terminal outcome、proposal
       settlement 和 transcript 投影拆到独立应用服务；`DirectRunService` 只保留用例编排。
       `DirectRunService` 已降至 497 行；创建、分支、消息 codec、交互命令、恢复、结算和消费者投影
       分别由独立 service/adapter 拥有。`@agentpress/agent-application` lint、typecheck、68 个离线测试
-      和 build 通过；需要 PostgreSQL 的 49 个集成测试仍必须在后续数据库门禁中运行。
+      和 build 通过；Web projection 已拆为 246/320 行，91 个 Web 测试和 `pnpm check:file-lengths`
+      通过。需要 PostgreSQL 的 49 个集成测试仍必须在后续数据库门禁中运行。
 - [ ] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
       `utils.ts`、`helpers.ts` 或重新导出文件规避行数检查。
 - [ ] 一个模块只能拥有一种状态转换；跨模块协调通过显式 Port、Command、Event 或 typed result，
