@@ -127,9 +127,19 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       `streamSimple(maxTokens)`；同时保证 Provider wire schema 与 canonical 本地 Schema 的差异可审计，
       不能因 wire 降级跳过 Evidence 引用、置信度或数组边界校验。
 - [x] **P0：接通研究执行预算。** `researchExecutionPolicy('deep')` 的 8 次 query 上限进入真实 Specialist
-      Pi Runtime；每次搜索最多保留 3 条结果，Researcher 总量上限为 24 条 Evidence；并行批次中的超额
+      Pi Runtime；连续 24 条 Evidence 载荷超时后，每次搜索上限收紧为 2 条（总量 <=16，canonical
+      Schema 仍保留 <=24 的兼容上限）；并行批次中的超额
       调用被拒绝后仍允许同批 `task_complete` 结算。该行为由 Web Research、MCP、Pi Runtime 和 Agent
       Application 分层测试覆盖，提交为 `f7281ab`。
+- [ ] **P0：闭合研究 Evidence 事实链。** Researcher submission 不重复填写 Artifact 外层
+      `evidenceIds`，宿主从 canonical `content.sources[].evidenceId` 确定性生成关联边；Claim 只能引用
+      Source 子集，Source 集合与 Artifact Evidence 集合必须精确相等，之后再验证每个 UUID 属于当前
+      Run/Task。下一步为 `evidence_records` 增加强类型 `source_tool_call_id`，通过 ToolCall 关联 attempt，
+      消除 metadata JSON 软关联、旧 attempt 混入和 ToolCall succeeded 后 Evidence 另事务写入的崩溃窗口。
+- [ ] **P0：闭合研究来源 provenance。** Provider/adapter revision 必须由 Tool Definition 明确声明并
+      快照到 ToolCall，不能由模型填写或把 `source_revision` 内容哈希冒充 Provider revision；oversized
+      ToolOutput Artifact 路径也必须产生与 inline output 相同的 Evidence。完成前不得让宿主从不完整 facts
+      自动组装 `sources/queryLog/providerRevision`。
 - [ ] **P0：复跑最小在线闭环。** 只运行 `workflow-02`，要求 Researcher 在 120 秒内结算、ToolCall <= 8、
       Evidence <= 24、ResearchBrief 结构与引用合法、无证据 Claim 为 0，并从 PostgreSQL 核对 Root
       Request、Run、transcript、ToolCall、Task、Evidence、Artifact 和 terminal projection。
@@ -534,6 +544,19 @@ completed 误判为降级。Agent Evals 42 个测试通过。
 - `.agentpress/evals/2026-08-06T22-41-23-136Z-gpt-5.6-terra-workflow-02.json`：将自定义
   `agentpress-eval` 强制视为 OpenAI strict 的实验导致搜索参数上限从 wire schema 被移除、optional
   字段 required-nullable 与本地 validator 不对称，最终 0 Evidence；该实验已撤销，不能作为采用方案。
+
+2026-08-07 的后续在线事实：
+
+- `.agentpress/evals/2026-08-06T23-06-34-240Z-gpt-5.6-terra-workflow-02.json`：旧 MCP dist 仍产生
+  22 条 Evidence；模型在 deadline 到达时才生成完成调用，因此 Task timeout。该报告同时证明在线门禁
+  必须先 build 依赖包，不能把 typecheck 当运行产物。
+- `.agentpress/evals/2026-08-06T23-10-01-359Z-gpt-5.6-terra-workflow-02.json`：新 MCP dist 将 Evidence
+  降至 8；首次 `task_complete` 的 7 个 Source 与 6 个外层 Evidence ID 不一致，宿主闭包正确拒绝。
+  Researcher submission 已移除重复外层字段，由宿主从 Source 目录生成关联边。
+- `.agentpress/evals/2026-08-06T23-14-49-233Z-gpt-5.6-terra-workflow-02.json`：AnySearch 返回 402，
+  0 Evidence；模型随后虚构非 UUID 引用。ResearchBrief Schema 已将 Evidence ID 固定为 UUID。Provider
+  原始错误正文曾包含自动生成凭据，现已改为不保留响应正文；MCP `isError=true` 也改为失败结算，不能再
+  作为 succeeded ToolCall 投影。该场景受外部搜索额度阻塞，不能标记为真实在线成功。
 
 因此当前未完成项不仅是 ResearchBrief canonical Schema，还包括 Provider wire capability 与双向适配。
 在这两项同时通过真实 provider contract 前，不得把 role-specific completion、研究输出预算或
