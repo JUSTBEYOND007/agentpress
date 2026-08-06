@@ -16,6 +16,7 @@ export * from './planned-run-executor.js';
 export * from './planned-run-protocol.js';
 export * from './planned-run-results.js';
 export * from './planned-run-store.js';
+export * from './planned-task-executor.js';
 export * from './persistent-tool-bridge.js';
 export * from './pi-conversation-summary-generator.js';
 export * from './run-context-service.js';

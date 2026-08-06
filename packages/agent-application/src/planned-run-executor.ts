@@ -6,16 +6,12 @@ import type {
   RuntimeCurrentTurn,
   RuntimeResult,
   RuntimeTool,
-  RuntimeTranscriptMessage,
-  RuntimeUsage,
 } from '@agentpress/agent-runtime';
 import {
   agentRuns,
-  agentTasks,
   appendCheckpoint,
   appendRunEvent,
   type AgentPressDatabase,
-  contextPacks,
   type DatabaseTransaction,
   executionPlans,
   editProposals,
@@ -23,12 +19,9 @@ import {
   planRevisionTasks,
   planRevisions,
   runDirectives,
-  toolCalls,
-  claimAgentTask,
-  releaseAgentTaskLease,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -46,50 +39,36 @@ import {
   selectMainControlTools,
   type AgentTurnProfile,
 } from './agent-turn-profile.js';
+import { specialistConcurrencyLimit } from './specialist-task-contract.js';
 import {
-  parseSpecialistTaskRequest,
-  specialistConcurrencyLimit,
-  type SpecialistRole,
-} from './specialist-task-contract.js';
-import {
-  assertStrictSchema,
   mainCompletionPrompt,
   mainPlanningPrompt,
   mainRevisionPrompt,
   planRevisionSchema,
   planSubmitSchema,
-  specialistApplicationTurn,
-  specialistPrompt,
-  taskCompleteSchema,
   validateSubmittedPlan as validatePlan,
   type PlannedTaskSpec,
   type SettledTask,
-  type StructuredArtifact,
   type SubmittedPlan,
 } from './planned-run-protocol.js';
 import { PlannedRunStore } from './planned-run-store.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
+import { PlannedTaskExecutor } from './planned-task-executor.js';
 import {
   applicationTurn,
   articleEditResult,
   confirmedArticleEditPlan,
-  decodePersistedArtifacts,
   emptyUsage,
   findAssistant,
   protocolFailure,
   publicTask,
   requiredTaskFailure,
-  staleTaskSettlement,
-  taskResultFailure,
   terminalProductionResult,
 } from './planned-run-results.js';
 import { toDurableEvent } from './run-projection-service.js';
 
-export {
-  mainPlanningPrompt,
-  specialistApplicationTurn,
-  validateSubmittedPlan,
-} from './planned-run-protocol.js';
+export { mainPlanningPrompt, validateSubmittedPlan } from './planned-run-protocol.js';
+export { specialistApplicationTurn } from './planned-run-protocol.js';
 export type { PlannedTaskSpec } from './planned-run-protocol.js';
 
 type ControlDecision =
@@ -115,9 +94,6 @@ type PlannedRunExecutorOptions = {
   readonly maxProviderConcurrency?: number;
 };
 
-const INLINE_TASK_TIMEOUT_MS = 120_000;
-const TASK_LEASE_GRACE_MS = 30_000;
-
 export class PlannedRunExecutor {
   private readonly now: () => Date;
   private readonly createId: () => string;
@@ -127,6 +103,7 @@ export class PlannedRunExecutor {
   private readonly taskWaits: AgentTaskWaitService;
   private readonly store: PlannedRunStore;
   private readonly results: SpecialistResultStore;
+  private readonly tasks: PlannedTaskExecutor;
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
@@ -158,79 +135,29 @@ export class PlannedRunExecutor {
       createId: this.createId,
       now: this.now,
     });
+    this.tasks = new PlannedTaskExecutor({
+      database: options.database,
+      publisher: options.publisher,
+      sessions: this.sessions,
+      transcripts: this.transcripts,
+      taskWaits: this.taskWaits,
+      results: this.results,
+      createId: this.createId,
+      now: this.now,
+      ...(options.runtimeToolFactory ? { runtimeToolFactory: options.runtimeToolFactory } : {}),
+    });
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
     return this.sessions.steerActiveMain(runId, content);
   }
 
-  public async executeDetachedTask(
+  public executeDetachedTask(
     runId: string,
     taskId: string,
     signal?: AbortSignal,
   ): Promise<'succeeded' | 'failed' | 'cancelled' | 'skipped' | 'not_found'> {
-    const row = await this.options.database
-      .select({
-        id: agentTasks.id,
-        owner: agentTasks.owner,
-        objective: agentTasks.objective,
-        criticality: agentTasks.criticality,
-        acceptanceCriteria: agentTasks.acceptanceCriteria,
-        toolPolicy: agentTasks.toolPolicy,
-        context: contextPacks.content,
-      })
-      .from(agentTasks)
-      .leftJoin(contextPacks, eq(contextPacks.taskId, agentTasks.id))
-      .where(and(eq(agentTasks.id, taskId), eq(agentTasks.runId, runId)))
-      .limit(1);
-    const persisted = row[0];
-    if (!persisted || typeof persisted.context !== 'string') return 'not_found';
-    const request = parseSpecialistTaskRequest(persisted.toolPolicy.request);
-    if (!request?.detached) return 'skipped';
-    let envelope: { readonly rootRequest?: RuntimeCurrentTurn };
-    try {
-      envelope = JSON.parse(persisted.context) as { readonly rootRequest?: RuntimeCurrentTurn };
-    } catch {
-      return 'failed';
-    }
-    if (!envelope.rootRequest) {
-      return 'failed';
-    }
-    const task: PlannedTaskSpec = {
-      id: persisted.id,
-      clientKey: persisted.id,
-      owner: persisted.owner as SpecialistRole,
-      objective: persisted.objective,
-      criticality: persisted.criticality,
-      acceptanceCriteria: persisted.acceptanceCriteria,
-      dependencyIds: [],
-      capabilities: request.capabilities,
-      detached: true,
-    };
-    const claim = await this.claimTaskAttempt(
-      runId,
-      task,
-      request.timeoutMs,
-      `task:${String(process.pid)}`,
-    );
-    if (!claim) return 'skipped';
-    try {
-      const result = await this.executeTask(
-        runId,
-        task,
-        envelope.rootRequest,
-        new Map(),
-        claim.claim.attempt,
-        signal,
-      );
-      return result.status;
-    } finally {
-      await releaseAgentTaskLease(this.options.database, {
-        leaseToken: claim.claim.lease.leaseToken,
-        workerId: claim.claim.lease.workerId,
-        now: this.now(),
-      });
-    }
+    return this.tasks.executeDetached(runId, taskId, signal);
   }
 
   public async execute(
@@ -942,250 +869,23 @@ export class PlannedRunExecutor {
     return { retainedTaskIds: retained, newTasks: submitted.tasks };
   }
 
-  private async executeTask(
-    runId: string,
-    task: PlannedTaskSpec,
-    rootPrompt: RuntimeCurrentTurn,
-    settled: ReadonlyMap<string, SettledTask>,
-    attempt: number,
-    signal?: AbortSignal,
-  ): Promise<SettledTask> {
-    let completion:
-      | {
-          readonly status: 'succeeded' | 'failed';
-          readonly summary: string;
-          readonly artifacts: readonly StructuredArtifact[];
-          readonly warnings: readonly string[];
-          readonly failure?: string;
-        }
-      | undefined;
-    const taskComplete: RuntimeTool = {
-      name: 'task_complete',
-      label: 'Complete specialist task',
-      description:
-        'Submit the validated specialist result. This is the only valid completion path.',
-      parameters: taskCompleteSchema,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
-      executionMode: 'sequential',
-      terminateOnSuccess: true,
-      execute: async (arguments_) => {
-        assertStrictSchema(taskCompleteSchema, arguments_, 'task_complete');
-        const submitted = arguments_ as typeof completion & {};
-        const evidenceIds = submitted.artifacts.flatMap((artifact) => artifact.evidenceIds);
-        await this.assertTaskEvidence(runId, task.id, evidenceIds);
-        completion = submitted;
-        return Promise.resolve({ accepted: true });
-      },
-    };
-    const domainTools = this.options.runtimeToolFactory
-      ? await this.options.runtimeToolFactory.createForRun(
-          runId,
-          task.capabilities,
-          task.id,
-          attempt,
-        )
-      : [];
-    const upstream = task.dependencyIds.flatMap((id) => {
-      const dependency = settled.get(id);
-      return dependency
-        ? [{ taskId: id, status: dependency.status, summary: dependency.summary }]
-        : [];
-    });
-    const recoveredHistory = await this.loadApprovedToolContinuation(runId, task.id);
-    const immutableTaskContext = JSON.stringify({
-      task: {
-        id: task.id,
-        owner: task.owner,
-        objective: task.objective,
-        acceptanceCriteria: task.acceptanceCriteria,
-        capabilities: task.capabilities,
-      },
-      upstream,
-    });
-    let result = recoveredHistory
-      ? await this.sessions.execute(
-          runId,
-          task.id,
-          'specialist',
-          2,
-          task.owner,
-          specialistPrompt(task.owner),
-          recoveredHistory,
-          specialistApplicationTurn(rootPrompt, ''),
-          [...domainTools, taskComplete],
-          signal,
-          true,
-        )
-      : await this.sessions.execute(
-          runId,
-          task.id,
-          'specialist',
-          1,
-          task.owner,
-          specialistPrompt(task.owner),
-          [],
-          specialistApplicationTurn(rootPrompt, immutableTaskContext),
-          [...domainTools, taskComplete],
-          signal,
-        );
-    for (let repair = 1; !completion && result.status !== 'cancelled' && repair <= 2; repair += 1) {
-      result = await this.sessions.execute(
-        runId,
-        task.id,
-        'specialist',
-        (recoveredHistory ? 2 : 1) + repair,
-        task.owner,
-        specialistPrompt(task.owner),
-        [],
-        specialistApplicationTurn(
-          rootPrompt,
-          `${immutableTaskContext}\n\nProtocol repair: call task_complete exactly once with a schema-valid result. Preserve the Task Brief above. evidenceIds may contain only EvidenceRecord UUIDs produced by this task; use [] when none exist.`,
-        ),
-        [...domainTools, taskComplete],
-        signal,
-      );
-    }
-    const assistant = findAssistant(result);
-    if (!completion) {
-      const failed: SettledTask = {
-        ...task,
-        status: result.status === 'cancelled' ? 'cancelled' : 'failed',
-        artifacts: [],
-        warnings: [],
-        failure: result.status === 'failed' ? result.error.code : 'protocol_error',
-        ...(assistant ? { usage: assistant.usage } : {}),
-      };
-      return (await this.persistTaskResult(runId, failed, attempt))
-        ? failed
-        : staleTaskSettlement(task);
-    }
-    const taskResult: SettledTask = {
-      ...task,
-      status: completion.status,
-      summary: completion.summary,
-      artifacts: completion.artifacts,
-      warnings: completion.warnings,
-      ...(completion.failure ? { failure: completion.failure } : {}),
-      ...(assistant ? { usage: assistant.usage } : {}),
-    };
-    return (await this.persistTaskResult(runId, taskResult, attempt))
-      ? taskResult
-      : staleTaskSettlement(task);
-  }
-
-  private async executeInlineTask(
+  private executeInlineTask(
     runId: string,
     task: PlannedTaskSpec,
     rootPrompt: RuntimeCurrentTurn,
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
-    const claim = await this.claimTaskAttempt(
-      runId,
-      task,
-      INLINE_TASK_TIMEOUT_MS,
-      `planned:${String(process.pid)}`,
-    );
-    if (!claim) {
-      return {
-        ...task,
-        status: 'failed',
-        artifacts: [],
-        warnings: [],
-        failure: 'attempt_budget_exhausted',
-      };
-    }
-    try {
-      return await this.executeTask(runId, task, rootPrompt, settled, claim.claim.attempt, signal);
-    } finally {
-      await releaseAgentTaskLease(this.options.database, {
-        leaseToken: claim.claim.lease.leaseToken,
-        workerId: claim.claim.lease.workerId,
-        now: this.now(),
-      });
-    }
-  }
-
-  private async claimTaskAttempt(
-    runId: string,
-    task: PlannedTaskSpec,
-    timeoutMs: number,
-    workerId: string,
-  ) {
-    const result = await this.options.database.transaction(async (transaction) => {
-      const claim = await claimAgentTask(transaction, {
-        taskId: task.id,
-        workerId,
-        leaseId: this.createId(),
-        leaseToken: this.createId(),
-        leaseMs: timeoutMs + TASK_LEASE_GRACE_MS,
-        now: this.now(),
-      });
-      if (!claim) return undefined;
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'task.started',
-        payload: {
-          taskId: task.id,
-          owner: task.owner,
-          criticality: task.criticality,
-          attempt: claim.attempt,
-        },
-      });
-      return { claim, event };
-    });
-    if (result) {
-      await this.options.publisher.publish({ durable: true, event: toDurableEvent(result.event) });
-    }
-    return result;
+    return this.tasks.executeInline(runId, task, rootPrompt, settled, signal);
   }
 
   /** Waits on the durable TaskResult produced by a detached worker. */
-  private async waitForDetachedTask(
+  private waitForDetachedTask(
     runId: string,
     task: PlannedTaskSpec,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
-    let waited;
-    try {
-      waited = await this.taskWaits.waitForAny({
-        runId,
-        taskIds: [task.id],
-        timeoutMs: 10 * 60_000,
-        pollIntervalMs: 250,
-        ...(signal ? { signal } : {}),
-      });
-    } catch (error) {
-      if (!signal?.aborted) throw error;
-      return {
-        ...task,
-        status: 'cancelled',
-        artifacts: [],
-        warnings: [],
-        failure: 'run_cancelled',
-      };
-    }
-    const result = waited.settled[0];
-    if (!result || waited.timedOut) {
-      return {
-        ...task,
-        status: 'failed',
-        artifacts: [],
-        warnings: [],
-        failure: 'detached_task_timeout',
-      };
-    }
-    const failure = taskResultFailure(result.failure);
-    return {
-      ...task,
-      status: result.status,
-      ...('summary' in result ? { summary: result.summary } : {}),
-      artifacts: decodePersistedArtifacts(result.artifacts),
-      ...('summary' in result ? { usage: result.usage as RuntimeUsage } : {}),
-      warnings: result.warnings,
-      ...(failure ? { failure } : {}),
-    };
+    return this.tasks.waitForDetached(runId, task, signal);
   }
 
   private claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
@@ -1232,47 +932,6 @@ export class PlannedRunExecutor {
     return this.store.loadPersistedTaskResults(tasks);
   }
 
-  private async loadApprovedToolContinuation(
-    runId: string,
-    taskId: string,
-  ): Promise<readonly RuntimeTranscriptMessage[] | undefined> {
-    const callRows = await this.options.database
-      .select({ providerToolCallId: toolCalls.providerToolCallId })
-      .from(toolCalls)
-      .where(
-        and(
-          eq(toolCalls.runId, runId),
-          eq(toolCalls.taskId, taskId),
-          inArray(toolCalls.status, ['approved', 'succeeded', 'denied', 'expired']),
-        ),
-      )
-      .orderBy(desc(toolCalls.createdAt))
-      .limit(1);
-    const providerToolCallId = callRows[0]?.providerToolCallId;
-    if (!providerToolCallId) return undefined;
-    const message = await this.transcripts.restoreApprovedToolCall(
-      runId,
-      taskId,
-      providerToolCallId,
-    );
-    if (!message) return undefined;
-    const toolResult = await this.options.runtimeToolFactory?.resumeApprovedToolCall?.(
-      runId,
-      taskId,
-      providerToolCallId,
-    );
-    if (!toolResult) return undefined;
-    return [message, toolResult];
-  }
-
-  private persistTaskResult(
-    runId: string,
-    result: SettledTask,
-    expectedAttempt: number,
-  ): Promise<boolean> {
-    return this.results.persistTaskResult(runId, result, expectedAttempt);
-  }
-
   private updateTaskStatus(
     runId: string,
     task: PlannedTaskSpec,
@@ -1288,14 +947,6 @@ export class PlannedRunExecutor {
     evidenceIds: readonly string[],
   ): Promise<void> {
     return this.results.assertRunReferences(runId, artifactIds, evidenceIds);
-  }
-
-  private assertTaskEvidence(
-    runId: string,
-    taskId: string,
-    evidenceIds: readonly string[],
-  ): Promise<void> {
-    return this.results.assertTaskEvidence(runId, taskId, evidenceIds);
   }
 
   private async publishRuntimeEvent(runId: string, event: RuntimeEvent): Promise<void> {
