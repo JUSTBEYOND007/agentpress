@@ -20,6 +20,7 @@ import { AgentTaskWaitService } from './agent-task-wait-service.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import type { RunEventPublisher, RuntimeToolFactory } from './contracts.js';
 import {
+  assertSpecialistArtifactPolicy,
   assertStrictSchema,
   specialistApplicationTurn,
   specialistPrompt,
@@ -231,6 +232,7 @@ export class PlannedTaskExecutor {
       execute: async (arguments_) => {
         assertStrictSchema(taskCompleteSchema, arguments_, 'task_complete');
         const submitted = arguments_ as typeof completion & {};
+        assertSpecialistArtifactPolicy(task.owner, submitted.artifacts);
         const evidenceIds = submitted.artifacts.flatMap((artifact) => artifact.evidenceIds);
         await this.options.results.assertTaskEvidence(runId, task.id, evidenceIds);
         completion = submitted;

@@ -6,6 +6,7 @@ import {
   AGENT_TASK_COMMAND_TOPIC,
   parseAgentTaskExecuteCommand,
   AgentApplicationError,
+  assertSpecialistArtifactPolicy,
   createSpecialistTaskRequest,
   parseSpecialistTaskRequest,
   assertSpecialistOutputSchema,
@@ -247,6 +248,30 @@ describe('agent application contracts', () => {
       }),
     ).toThrow(/depth/u);
     expect(specialistConcurrencyLimit(8, 1)).toBe(1);
+  });
+
+  it('restricts visible Artifact types to the owning Specialist role', () => {
+    expect(() => {
+      assertSpecialistArtifactPolicy('researcher', [{ type: 'ResearchBrief' }]);
+    }).not.toThrow();
+    expect(() => {
+      assertSpecialistArtifactPolicy('writer', [{ type: 'ArticleDraft' }]);
+    }).not.toThrow();
+    expect(() => {
+      assertSpecialistArtifactPolicy('editor', [{ type: 'EditProposal' }]);
+    }).not.toThrow();
+    expect(() => {
+      assertSpecialistArtifactPolicy('fact_checker', [{ type: 'ClaimReview' }]);
+    }).not.toThrow();
+    expect(() => {
+      assertSpecialistArtifactPolicy('illustrator', [{ type: 'ImagePlan' }]);
+    }).not.toThrow();
+    expect(() => {
+      assertSpecialistArtifactPolicy('researcher', [{ type: 'EditProposal' }]);
+    }).toThrow(/researcher cannot submit EditProposal/u);
+    expect(() => {
+      assertSpecialistArtifactPolicy('writer', [{ type: 'AssetProposal' }]);
+    }).toThrow(/writer cannot submit AssetProposal/u);
   });
 
   it('strips Main action capabilities from the Specialist model-visible turn', () => {

@@ -78,6 +78,38 @@ approved tool is a separate path: `PiRuntimeAdapter.validateRuntimeHistory` reje
 duplicate or mismatched ToolResults before provider I/O, and ToolCall settlement remains owned by
 the PostgreSQL ToolCall ledger.
 
+InkOS pipeline/Specialist decision: InkOS `packages/core/src/agent/agent-tools.ts` exposes a
+`sub_agent` facade over Architect, Writer, Auditor, Reviser, and Exporter pipeline owners. AgentPress
+does not copy that process-local dispatcher. It maps the product behaviors into its existing
+PostgreSQL Execution Plan and bounded Specialist catalog:
+
+| InkOS owner                | AgentPress owner                     | Adoption boundary                                                                                     |
+| -------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Architect                  | Main Agent plus strict `plan_submit` | Architecture is Run-level planning, not a recursively spawnable Specialist.                           |
+| Writer                     | `writer`                             | Produces only `Outline` or `ArticleDraft`; article writes remain proposals.                           |
+| Auditor                    | `fact_checker` plus `editor`         | Fact/citation review and prose/structure review are split so each receives narrower capabilities.     |
+| Reviser                    | `editor`                             | May return only an `EditProposal`; canonical Article Revision settlement stays in editor-application. |
+| Exporter                   | publication-application              | Export/publish is a deterministic application boundary, not a model-created Specialist.               |
+| No direct InkOS equivalent | `researcher`, `illustrator`          | Retained for source-backed research and governed media workflows.                                     |
+
+All roles are host enums. `plan_submit` limits a DAG to 12 tasks and validates unique keys,
+dependencies, acyclicity, current-turn capabilities and per-role capability policy. Persisted Task
+Briefs carry owner, objective, acceptance criteria, immutable dependency summaries, capability
+allowlist, timeout, attempts and detached policy. `task_complete` has a strict global schema and a
+second host-owned role-to-Artifact policy: Researcher=`ResearchBrief`,
+Writer=`Outline|ArticleDraft`, Editor=`EditProposal`, Fact Checker=`ClaimReview`, and
+Illustrator=`ImagePlan|AssetProposal`. A mismatched Artifact fails before Evidence validation or
+TaskResult persistence.
+
+Specialists receive no full Conversation or root request text. `specialistApplicationTurn` creates
+an application-origin turn from only the persisted Task Brief and accepted upstream summaries;
+article/tool access resolves through frozen Run bindings. Thinking stays in the private Specialist
+transcript and only TaskResult, Evidence, Artifact, Usage, warnings or typed failure reach Main and
+the consumer projection. Task attempts are fenced by PostgreSQL attempt plus lease token; waits,
+cancellation, expired-worker requeue and synthesis use the existing Task/Outbox services. This
+retains Oh My Pi's already-adopted lifecycle contracts and rejects a second InkOS `sub_agent` state
+machine.
+
 Eval dashboard boundary decision: the product API never exposes global eval identities. An
 experiment may be attached to `eval_experiments.workspace_id`; report, Trial Trace, and regression
 queries require both authenticated workspace membership and a matching persisted workspace owner.

@@ -84,6 +84,15 @@ export const specialistCapabilityPolicy: Readonly<Record<SpecialistRole, Readonl
   ]),
 };
 
+export const specialistArtifactPolicy: Readonly<Record<SpecialistRole, ReadonlySet<ArtifactType>>> =
+  {
+    researcher: new Set(['ResearchBrief']),
+    writer: new Set(['Outline', 'ArticleDraft']),
+    editor: new Set(['EditProposal']),
+    fact_checker: new Set(['ClaimReview']),
+    illustrator: new Set(['ImagePlan', 'AssetProposal']),
+  };
+
 const specialistResponsibilities: Readonly<Record<SpecialistRole, string>> = {
   researcher: 'Collect and synthesize source-backed information.',
   writer: 'Create new outlines and article drafts from supplied context and upstream results.',
@@ -215,6 +224,17 @@ export function assertStrictSchema(
   if (validation.valid) return;
   const detail = validation.failures.map(({ path, message }) => `${path}: ${message}`).join('; ');
   throw new Error(`${protocol} returned schema-invalid output: ${detail}`);
+}
+
+export function assertSpecialistArtifactPolicy(
+  owner: SpecialistRole,
+  artifacts: readonly Pick<StructuredArtifact, 'type'>[],
+): void {
+  const allowed = specialistArtifactPolicy[owner];
+  const forbidden = artifacts.find(({ type }) => !allowed.has(type));
+  if (forbidden) {
+    throw new Error(`Specialist ${owner} cannot submit ${forbidden.type}`);
+  }
 }
 
 function assertAcyclic(tasks: readonly PlannedTaskSpec[]): void {

@@ -152,7 +152,10 @@ TODO：
 - [x] Provider/model/Prompt/Tool/Skill/Context revision 变化时明确失效缓存，不能复用不兼容的内存 Agent。
       `AgentSessionRunner` 每个 attempt 创建新 Pi Runtime，不保留内存 Agent；Context Pack 固定 Prompt、Skill、
       Tool capability 和 Context revision。投影 cache key 包含 Run/Task 与事实行，跨 Run revision 不复用。
-- [ ] live SSE 与 replay 必须使用同一 projector，并证明刷新、断线恢复、worker 重启和分支切换后 UI 一致。
+- [x] live SSE 与 replay 必须使用同一 projector，并证明刷新、断线恢复、worker 重启和分支切换后 UI 一致。
+      Redis 只通知；API 先订阅缓冲再按 PostgreSQL sequence replay。Web 对 durable 事件只推进 cursor 并刷新
+      `RunProjectionService`，不在浏览器重算 RunPart；live delta 是可丢弃瞬时层。API 顺序测试、terminal
+      parity、thread snapshot 和 branch selection 测试覆盖重连、刷新与分支恢复。
 - [ ] PostgreSQL 集成测试覆盖部分写入、重复事件、乱序到达、旧 worker 晚到结果、恢复中再次取消。
 
 ## P0：Multi-Agent 写作流水线
@@ -171,19 +174,34 @@ TaskResult、Kafka worker、Oh My Pi structured-subagent 行为和 stale-owner t
 
 TODO：
 
-- [ ] 将 InkOS Architect/Writer/Auditor/Reviser/Exporter 映射为 AgentPress 有限 Specialist catalog，
+- [x] 将 InkOS Architect/Writer/Auditor/Reviser/Exporter 映射为 AgentPress 有限 Specialist catalog，
       记录采用、合并或拒绝理由；不允许模型动态创建无 owner 的任意角色。
-- [ ] 为每个 Specialist 定义 Task Brief、输入 Schema、输出 Schema、工具 allowlist、预算、超时、
+      完整映射表已写入 `docs/references/pi-ecosystem.md`：Architect 归 Main planner，Auditor 拆为
+      fact_checker/editor，Exporter 归确定性 publication application，Writer/Reviser 最小映射，并保留
+      AgentPress researcher/illustrator；角色均为宿主 enum。
+- [x] 为每个 Specialist 定义 Task Brief、输入 Schema、输出 Schema、工具 allowlist、预算、超时、
       最大重试、可见 Artifact 和禁止能力。
-- [ ] Specialist 只获得最小不可变 Context Pack，不继承完整 Conversation；私有 thinking 不投影给 Main
+      strict plan/task_complete Schema、角色 capability policy、120 秒 timeout、3 次默认 attempt 和持久 Task
+      Brief 已存在；本轮新增角色 Artifact policy，越权 Artifact 在 Evidence/TaskResult 持久化前拒绝。
+- [x] Specialist 只获得最小不可变 Context Pack，不继承完整 Conversation；私有 thinking 不投影给 Main
       或用户，只返回结构化 TaskResult、Evidence、Artifact、Usage 和错误。
-- [ ] Specialist 不直接结算文章正文、Skill、Memory 或外部系统；写作结果进入 Artifact/EditProposal，
+      Specialist application turn 只包含 Task Brief 与 accepted upstream summaries，不复制 root request/context；
+      私有 thinking 隔离由 PostgreSQL 集成测试覆盖，Main 只接收 closed TaskResult envelope。
+- [x] Specialist 不直接结算文章正文、Skill、Memory 或外部系统；写作结果进入 Artifact/EditProposal，
       由 Main 和现有 editor proposal boundary 统一治理。
+      角色 capability 与 Artifact policy 不含 canonical settlement；Editor 只能产生 EditProposal，Writer 只能
+      产生 Outline/ArticleDraft，外部副作用继续走 ToolCall/Approval ledger 与领域 application。
 - [ ] 写作、审阅和修订使用持久化 DAG，限制深度、宽度、并发和总预算；递归委派默认拒绝。
-- [ ] 每个 Task Attempt 使用 lease/fencing token；旧 worker、过期 attempt 和取消后的结果不能覆盖新结果。
-- [ ] Task 等待、取消、恢复和 synthesis 复用现有 PostgreSQL/Kafka 服务，不在 coordinator 中实现轮询器。
-- [ ] UI 默认展示目标相关的顶层步骤、当前角色、耗时和结果摘要；依赖、重试和技术日志折叠，
+- [x] 每个 Task Attempt 使用 lease/fencing token；旧 worker、过期 attempt 和取消后的结果不能覆盖新结果。
+      `claim/settleAgentTaskAttempt` 绑定 attempt 与 lease token，取消释放 lease，过期重排同事务写 Event/Outbox；
+      stale-owner、late result、cancel race 的数据库/Kafka 测试已存在。
+- [x] Task 等待、取消、恢复和 synthesis 复用现有 PostgreSQL/Kafka 服务，不在 coordinator 中实现轮询器。
+      `AgentTaskWaitService`、Task lease store、Outbox/Kafka handler、DAG scheduler 和 Main synthesis 各自拥有
+      单一职责；PlannedRunExecutor 只编排，不持有第二套轮询状态。
+- [x] UI 默认展示目标相关的顶层步骤、当前角色、耗时和结果摘要；依赖、重试和技术日志折叠，
       不展示 Specialist 列表作为产品主导航。
+      RunPart server projector 折叠 Task lifecycle 并计算 duration，Web typed renderer 展示 plan/activity；
+      Specialist registry 只作为运行详情事实，不是工作区导航。现有 projection/renderer 测试覆盖。
 - [ ] 合约测试覆盖 Schema precedence、工具越权、递归拒绝、预算耗尽、部分成功、并行结算、late result、
       cancel/recover race 和 private-thinking isolation。
 - [ ] 真实模型验收至少覆盖“研究 -> 写作 -> 审阅 -> 修订 -> 提案”和“审阅认为无需修改”两个相反场景。
