@@ -820,6 +820,58 @@ describeWithDatabase('Direct Run application flow', () => {
     });
   });
 
+  it('projects an EditProposal artifact association without exposing its content', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: '修改正文',
+      idempotencyKey: randomUUID(),
+    });
+    const artifactId = randomUUID();
+    const proposalId = randomUUID();
+    await connection.db.insert(artifacts).values({
+      id: artifactId,
+      runId: run.runId,
+      type: 'EditProposal',
+      title: '正文修改',
+      currentVersion: 1,
+    });
+    await connection.db.insert(artifactVersions).values({
+      id: randomUUID(),
+      artifactId,
+      version: 1,
+      summary: '已创建待审阅修改',
+      content: { proposalId, expectedHash: 'internal-hash' },
+      contentHash: createHash('sha256').update(proposalId).digest('hex'),
+    });
+
+    const projection = await service.getProjection(run.runId);
+    expect(projection?.artifacts).toEqual([
+      {
+        id: artifactId,
+        type: 'EditProposal',
+        title: '正文修改',
+        version: 1,
+        summary: '已创建待审阅修改',
+        presentation: {
+          kind: 'outcome_artifact',
+          targetType: 'article-change',
+          targetId: proposalId,
+        },
+      },
+    ]);
+    expect(projection?.parts.find(({ type }) => type === 'artifact')?.payload).not.toHaveProperty(
+      'content',
+    );
+    expect(JSON.stringify(projection)).not.toContain('internal-hash');
+  });
+
   it('confirms a persisted action proposal idempotently into one authorized run', async () => {
     const conversationId = randomUUID();
     const branchId = randomUUID();

@@ -50,7 +50,11 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
-import { articleOutcomeReceipt, articleOutcomeReceiptFromArtifact } from './outcome-receipt.js';
+import {
+  articleOutcomeReceipt,
+  articleOutcomeReceiptFromArtifact,
+  withArticleOutcomeReceipt,
+} from './outcome-receipt.js';
 import { AGENT_RUN_COMMAND_TOPIC, AGENT_TASK_COMMAND_TOPIC } from './contracts.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { AgentSessionRunner } from './agent-session-runner.js';
@@ -611,7 +615,10 @@ export class PlannedRunExecutor {
     }
     const completion = await this.runCompletionMain(runId, prompt, settled, signal);
     return {
-      result: completion,
+      result: withArticleOutcomeReceipt(
+        completion,
+        settled.flatMap(({ artifacts }) => artifacts),
+      ),
       degraded: settled.some(({ status }) => status !== 'succeeded'),
     };
   }

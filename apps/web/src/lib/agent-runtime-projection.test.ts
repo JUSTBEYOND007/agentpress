@@ -35,7 +35,56 @@ describe('run presentation projection', () => {
     );
 
     expect(texts(content)).toEqual(['已生成修改，等待审阅。']);
-    expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-process']);
+    expect(names(content)).toEqual(['agentpress-article-outcome']);
+  });
+
+  it('attaches process disclosure to an article outcome even without a receipt marker', () => {
+    const content = projectionContent(projection([articleChange('proposal-1', 1), usage(2)]));
+
+    expect(names(content)).toEqual(['agentpress-article-outcome']);
+  });
+
+  it('merges only a structurally matching EditProposal artifact into the article outcome', () => {
+    const content = projectionContent(
+      projection([
+        articleChange('proposal-1', 1),
+        artifact('EditProposal', 'proposal-1', 2),
+        artifact('EditProposal', 'proposal-other', 3),
+        artifact('ResearchBrief', undefined, 4),
+        artifact('EditProposal', undefined, 5),
+        usage(6),
+      ]),
+    );
+
+    expect(names(content)).toEqual([
+      'agentpress-article-outcome',
+      'agentpress-run-part',
+      'agentpress-run-part',
+      'agentpress-run-part',
+    ]);
+    expect(JSON.stringify(content)).not.toContain('artifact-2');
+    expect(JSON.stringify(content)).toContain('artifact-3');
+    expect(JSON.stringify(content)).toContain('artifact-4');
+    expect(JSON.stringify(content)).toContain('artifact-5');
+  });
+
+  it('filters matching artifacts inside an aggregate without removing other deliverables', () => {
+    const content = projectionContent(
+      projection([
+        articleChange('proposal-1', 1),
+        part('artifact', 'artifact.available', 2, {
+          artifacts: [
+            artifactPayload('EditProposal', 'proposal-1', 'matching'),
+            artifactPayload('EditProposal', 'proposal-2', 'other-proposal'),
+            artifactPayload('ArticleDraft', undefined, 'draft'),
+          ],
+        }),
+      ]),
+    );
+
+    expect(JSON.stringify(content)).not.toContain('matching');
+    expect(JSON.stringify(content)).toContain('other-proposal');
+    expect(JSON.stringify(content)).toContain('draft');
   });
 
   it('keeps an ordinary answer with a separately disclosed reasoning summary', () => {
@@ -248,6 +297,36 @@ function receipt(targetId: string, sequence: number): RunPart {
       presentation: { kind: 'outcome_receipt', targetType: 'article-change', targetId },
     },
   });
+}
+
+function artifact(type: string, targetId: string | undefined, sequence: number): RunPart {
+  return part(
+    'artifact',
+    'artifact.available',
+    sequence,
+    artifactPayload(type, targetId, `artifact-${String(sequence)}`),
+  );
+}
+
+function artifactPayload(
+  type: string,
+  targetId: string | undefined,
+  id: string,
+): Readonly<Record<string, unknown>> {
+  return {
+    id,
+    type,
+    title: id,
+    ...(targetId
+      ? {
+          presentation: {
+            kind: 'outcome_artifact',
+            targetType: 'article-change',
+            targetId,
+          },
+        }
+      : {}),
+  };
 }
 
 function text(content: string, sequence: number): RunPart {

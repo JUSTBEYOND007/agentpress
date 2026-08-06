@@ -61,6 +61,7 @@ import {
   type SkillPreselectionCandidate,
   type SkillPreselector,
 } from './contracts.js';
+import { articleOutcomeArtifactPresentation } from './outcome-receipt.js';
 import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import {
@@ -1062,7 +1063,7 @@ export class DirectRunService {
     if (!run) return undefined;
     const [
       events,
-      artifactRows,
+      artifactVersionRows,
       evidenceRows,
       questionRows,
       approvalRows,
@@ -1081,6 +1082,7 @@ export class DirectRunService {
           title: artifacts.title,
           version: artifactVersions.version,
           summary: artifactVersions.summary,
+          content: artifactVersions.content,
         })
         .from(artifacts)
         .innerJoin(
@@ -1169,6 +1171,10 @@ export class DirectRunService {
         .limit(1),
       this.registry.listForRun(runId),
     ]);
+    const artifactRows = artifactVersionRows.map(({ content, ...artifact }) => {
+      const presentation = articleOutcomeArtifactPresentation({ type: artifact.type, content });
+      return { ...artifact, ...(presentation ? { presentation } : {}) };
+    });
     const question = questionRows[0];
     const proposalStatuses = new Map<string, ProposalProjectionStatus>(
       proposalRows.map((proposal) => [

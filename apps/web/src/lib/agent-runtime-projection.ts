@@ -131,8 +131,7 @@ export function projectionContent(
       continue;
     }
     if (part.type === 'article-change') {
-      const proposalId = proposalIdFromPart(part);
-      if (!processAttached && proposalId && attachedReceiptIds.has(proposalId)) {
+      if (!processAttached) {
         parts.push({
           type: 'data',
           name: 'agentpress-article-outcome',
@@ -141,6 +140,12 @@ export function projectionContent(
         processAttached = true;
         continue;
       }
+    }
+    if (part.type === 'artifact') {
+      const visiblePart = visibleArtifactPart(part, articleProposalIds);
+      if (!visiblePart) continue;
+      parts.push({ type: 'data', name: 'agentpress-run-part', data: visiblePart });
+      continue;
     }
     parts.push({ type: 'data', name: 'agentpress-run-part', data: part });
   }
@@ -503,4 +508,31 @@ function receiptTargetId(part: RunPart): string | undefined {
   return presentation.kind === 'outcome_receipt' && presentation.targetType === 'article-change'
     ? stringValue(presentation.targetId) || undefined
     : undefined;
+}
+
+function artifactTargetId(artifact: Readonly<Record<string, unknown>>): string | undefined {
+  if (stringValue(artifact.type) !== 'EditProposal') return undefined;
+  const presentation = recordValue(artifact.presentation);
+  return presentation.kind === 'outcome_artifact' && presentation.targetType === 'article-change'
+    ? stringValue(presentation.targetId) || undefined
+    : undefined;
+}
+
+function visibleArtifactPart(
+  part: RunPart,
+  articleProposalIds: ReadonlySet<string>,
+): RunPart | undefined {
+  const targetId = artifactTargetId(part.payload);
+  if (targetId && articleProposalIds.has(targetId)) return undefined;
+
+  const artifacts = Array.isArray(part.payload.artifacts) ? part.payload.artifacts : undefined;
+  if (!artifacts) return part;
+  const visibleArtifacts = artifacts.filter((artifact) => {
+    const record = recordValue(artifact);
+    const artifactProposalId = artifactTargetId(record);
+    return !artifactProposalId || !articleProposalIds.has(artifactProposalId);
+  });
+  if (visibleArtifacts.length === 0) return undefined;
+  if (visibleArtifacts.length === artifacts.length) return part;
+  return { ...part, payload: { ...part.payload, artifacts: visibleArtifacts } };
 }
