@@ -29,7 +29,17 @@ describe('AgentTurnProfile', () => {
     expect(profile).toMatchObject({
       kind: 'conversation_chat',
       sessionKind: 'conversation',
+      turnSource: 'user',
       controlToolNames: ['plan_submit', 'user_request_input'],
+    });
+  });
+
+  it('keeps recovery provenance distinct from the original user action source', () => {
+    const turn = { ...freeTextTurn(), source: 'recovery' as const };
+    expect(createAgentTurnProfile(turn, ['web.research'])).toMatchObject({
+      turnSource: 'recovery',
+      actionSource: 'free_text',
+      allowedCapabilities: ['web.research'],
     });
   });
 

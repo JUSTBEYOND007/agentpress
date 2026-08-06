@@ -16,7 +16,7 @@ export type RuntimeContextPack = {
 export type RuntimeCurrentTurn = {
   readonly type: 'agentpress_current_turn';
   readonly version: typeof RUNTIME_CURRENT_TURN_VERSION;
-  readonly source: 'user' | 'application';
+  readonly source: 'user' | 'application' | 'recovery';
   readonly request: string;
   readonly actionEnvelope: ActionEnvelopeV1;
   readonly context?: RuntimeContextPack;
@@ -64,7 +64,9 @@ export function isRuntimeCurrentTurn(message: unknown): message is RuntimeCurren
   return (
     message.type === 'agentpress_current_turn' &&
     message.version === RUNTIME_CURRENT_TURN_VERSION &&
-    (message.source === 'user' || message.source === 'application') &&
+    (message.source === 'user' ||
+      message.source === 'application' ||
+      message.source === 'recovery') &&
     typeof message.request === 'string' &&
     typeof message.timestamp === 'number' &&
     isRecord(message.actionEnvelope)

@@ -92,8 +92,12 @@ TODO：
 
 - [ ] 对照现有 AgentPress Action Envelope 和 Turn Profile，列出相对 InkOS
       `actionSource/requestedIntent/actionPayload/requestedSkills` 的行为差距，不平行创建第二套协议。
-- [ ] 将用户自然语言、宿主确认动作、历史上下文和系统产生的 wake/recovery 事件保持为不同 typed origin，
+- [x] 将用户自然语言、宿主确认动作、历史上下文和系统产生的 wake/recovery 事件保持为不同 typed origin，
       不能在拼接 Prompt 后丢失来源。
+      `RuntimeCurrentTurn.source` 区分 `user/application/recovery`，Action Envelope 独立区分
+      `free_text/button`；queued Run 保持 user origin，持久 Run 恢复使用 recovery origin，内部 Main/Specialist
+      轮次使用 application origin。Context Pack 和 committed history 仍是独立 typed 字段/消息，不伪装为
+      当前用户请求。Runtime converter、validator、Turn Profile 和 queued/recovery source tests 已覆盖。
 - [ ] 由宿主根据当前 turn capability 生成精确工具表；普通问候、解释、研究和确认后的文章修改必须拥有
       不同工具集合。
 - [ ] 所有文章修改、发布、付费媒体和外部副作用都要求当前轮次匹配的结构化能力；模型文本、关键词、

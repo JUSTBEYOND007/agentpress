@@ -7,6 +7,7 @@ export type MainControlToolName = 'action_propose' | 'plan_submit' | 'user_reque
 export type AgentTurnProfile = {
   readonly kind: AgentTurnKind;
   readonly sessionKind: 'conversation' | 'article';
+  readonly turnSource: RuntimeCurrentTurn['source'];
   readonly actionSource: RuntimeCurrentTurn['actionEnvelope']['source'];
   readonly requestedIntent?: 'article_edit';
   readonly hasArticleContext: boolean;
@@ -31,6 +32,7 @@ export function createAgentTurnProfile(
     return withProfileHash({
       kind: 'confirmed_article_edit',
       sessionKind: 'article',
+      turnSource: turn.source,
       actionSource: 'button',
       requestedIntent: 'article_edit',
       hasArticleContext: true,
@@ -47,6 +49,7 @@ export function createAgentTurnProfile(
   return withProfileHash({
     kind: hasArticleContext ? 'article_agent' : 'conversation_chat',
     sessionKind: hasArticleContext ? 'article' : 'conversation',
+    turnSource: turn.source,
     actionSource: 'free_text',
     hasArticleContext,
     ...(articleBinding ? { articleBinding } : {}),

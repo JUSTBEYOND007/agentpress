@@ -49,6 +49,7 @@ import { RunInteractionService } from './run-interaction-service.js';
 import { RunRecoveryService } from './run-recovery-service.js';
 import { RunSettlementService } from './run-settlement-service.js';
 import { DirectRunCreationService } from './direct-run-creation-service.js';
+import { currentTurnSourceForRunStatus } from './run-current-turn.js';
 
 export { isTerminalRunStatus } from './run-projection-service.js';
 
@@ -196,7 +197,7 @@ export class DirectRunService {
     const currentTurn = {
       type: 'agentpress_current_turn' as const,
       version: RUNTIME_CURRENT_TURN_VERSION,
-      source: 'user' as const,
+      source: currentTurnSourceForRunStatus(context.status),
       request: context.prompt,
       actionEnvelope: context.actionEnvelope,
       context: context.contextPack,

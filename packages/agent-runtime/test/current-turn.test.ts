@@ -45,4 +45,23 @@ describe('isRuntimeCurrentTurn', () => {
   it('does not treat arbitrary custom messages as AgentPress current turns', () => {
     expect(isRuntimeCurrentTurn({ type: 'unrelated' })).toBe(false);
   });
+
+  it('preserves recovery as a typed host origin and rejects unknown origins', () => {
+    const recovery: RuntimeCurrentTurn = {
+      type: 'agentpress_current_turn',
+      version: 1,
+      source: 'recovery',
+      request: '继续已持久化的任务',
+      actionEnvelope: { version: 1, source: 'free_text', grantedCapabilities: [] },
+      timestamp: 43,
+    };
+
+    expect(isRuntimeCurrentTurn(recovery)).toBe(true);
+    expect(isRuntimeCurrentTurn({ ...recovery, source: 'wake' })).toBe(false);
+    const converted = convertAgentPressMessages([recovery]);
+    const content = converted[0]?.content;
+    expect(typeof content).toBe('string');
+    if (typeof content !== 'string') throw new Error('Expected JSON string content');
+    expect(JSON.parse(content)).toMatchObject({ source: 'recovery' });
+  });
 });
