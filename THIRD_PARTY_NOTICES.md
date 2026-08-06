@@ -20,7 +20,6 @@ recorded in `pnpm-lock.yaml`; reviewed Pi ecosystem sources and immutable pins a
 - Model Context Protocol TypeScript SDK — MIT
 - YAML — ISC
 - unpdf — MIT; used as a pinned dependency for bounded server-side PDF text extraction
-- fast-xml-parser 4.5.7 — MIT; used directly to parse bounded Google News RSS responses
 
 ### Official Pi Runtime
 
@@ -62,6 +61,25 @@ with tests in `packages/agent-evals/test/sandbox-trial-runner.test.ts` and
   untrusted prompt projection, tool allowlist narrowing, and prompt-injection fixtures.
 
 ## Adapted Behavior And Source References
+
+### Pi Web Access AnySearch Adapter
+
+- Upstream: `https://github.com/nicobailon/pi-web-access`
+- Commit: `b537183632d555d1b2e61cb8f6bdf585766f2380` (`v0.15.0`)
+- Source: `anysearch.ts`
+- Tests: `test/anysearch-provider.test.mjs`
+- Local: `packages/runtime-tools/src/web-search.ts`,
+  `packages/runtime-tools/test/web-search.test.ts`
+- License: MIT, Copyright (c) 2026 Nico Bailon
+- Changes: retained the explicit anonymous AnySearch HTTP contract, bounded result count, strict
+  response validation, cancellation, optional bearer credential, and credential redaction. Removed
+  Pi Coding Agent configuration, command-based credential execution, activity monitoring, inline
+  page content, search routing, and all other providers. The adapter remains behind AgentPress's
+  built-in MCP, Tool Registry, PersistentToolBridge, PostgreSQL ToolCall, output guard, and
+  provider-neutral Research failure policy.
+- Verification: copied behavior tests for anonymous/keyed requests, malformed envelopes, HTTP
+  errors, cancellation, secret redaction, bounded result mapping, and explicit zero-result output;
+  target-model workflow Eval remains a separate gate.
 
 ### Oh My Pi Provider Schema Behavior Fixtures
 

@@ -31,7 +31,6 @@
     "@agentpress/tool-runtime": "workspace:*",
     "@agentpress/web-research": "workspace:*",
     "@sinclair/typebox": "catalog:",
-    "drizzle-orm": "catalog:",
-    "fast-xml-parser": "4.5.7"
+    "drizzle-orm": "catalog:"
   }
 }
