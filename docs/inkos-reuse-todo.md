@@ -109,9 +109,16 @@ TODO：
       plan/research/Skill 选择工具。契约测试和 PostgreSQL confirmed-turn exact-table 集成测试覆盖该边界。
 - [ ] 所有文章修改、发布、付费媒体和外部副作用都要求当前轮次匹配的结构化能力；模型文本、关键词、
       历史意图和 Skill 不得授予权限。
-- [ ] 参数 Schema 在宿主边界校验；未知 intent、额外字段、缺失对象、过期 action 和重复确认必须 fail closed。
-- [ ] 已确认动作使用 PostgreSQL Root Request、Action Proposal、capability 和 operation key 保证幂等，
+- [x] 参数 Schema 在宿主边界校验；未知 intent、额外字段、缺失对象、过期 action 和重复确认必须 fail closed。
+      `ActionEnvelopeV1` 和 payload 使用 TypeBox strict object；契约测试覆盖未知 intent、顶层/payload
+      额外字段和缺失对象。Action Proposal 过期在事务中持久化 `expired + action.expired` 后拒绝，重复确认
+      不创建 Run 或事件；PostgreSQL 回归已覆盖。
+- [x] 已确认动作使用 PostgreSQL Root Request、Action Proposal、capability 和 operation key 保证幂等，
       不依赖 Pi session 是否仍在内存中。
+      confirmed Run 使用 `action:<proposalId>` 幂等键、branch-scoped advisory transaction lock 和
+      `root_requests_branch_idempotency_unique`；Proposal 条件结算并追加一次 `action.confirmed`。并发三次确认、
+      串行 replay、单 confirmed Run 和单事件均由 PostgreSQL 集成测试覆盖；ToolCall 副作用继续使用持久
+      operation key/arguments hash，不依赖内存 Session。
 - [ ] 相反语义测试至少覆盖：写作后问候不会续写、仅讨论修改不会改文、明确继续写可以创建提案、
       旧确认不能授权新 turn、Skill 不能扩大工具权限、恢复不能重复副作用。
 - [ ] 真实模型同时验收 greeting-after-writing、proposal-only、confirmed-mutation 和 explicit-continuation。

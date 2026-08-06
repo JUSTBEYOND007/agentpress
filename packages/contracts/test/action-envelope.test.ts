@@ -67,4 +67,31 @@ describe('ActionEnvelopeV1', () => {
       }),
     ).toThrow(/Invalid ActionEnvelopeV1/);
   });
+
+  it('rejects additional fields at every host action boundary', () => {
+    expect(() =>
+      parseActionEnvelope({
+        version: 1,
+        source: 'free_text',
+        grantedCapabilities: [],
+        inheritedIntent: 'article_edit',
+      }),
+    ).toThrow(/Invalid ActionEnvelopeV1/);
+    expect(() =>
+      parseActionEnvelope({
+        version: 1,
+        source: 'button',
+        requestedIntent: 'article_edit',
+        actionProposalId: ids.action,
+        payload: {
+          instruction: '续写当前文章的下一段',
+          articleId: ids.article,
+          baseRevisionId: ids.revision,
+          selectedBlocks: [],
+          applyImmediately: true,
+        },
+        grantedCapabilities: ['article.propose'],
+      }),
+    ).toThrow(/Invalid ActionEnvelopeV1/);
+  });
 });

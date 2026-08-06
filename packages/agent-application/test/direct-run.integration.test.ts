@@ -946,7 +946,7 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(JSON.stringify(projection)).not.toContain('internal-hash');
   });
 
-  it('confirms a persisted action proposal idempotently into one authorized run', async () => {
+  it('confirms a persisted action proposal concurrently into one authorized run', async () => {
     const conversationId = randomUUID();
     const branchId = randomUUID();
     await connection.db.insert(conversations).values({
@@ -975,15 +975,30 @@ describeWithDatabase('Direct Run application flow', () => {
       summary: '继续写作',
       selectedBlocks: [],
     });
-    const confirmed = await actions.confirm(proposal.id, ids.user, service);
+    const confirmations = await Promise.all([
+      actions.confirm(proposal.id, ids.user, service),
+      actions.confirm(proposal.id, ids.user, service),
+      actions.confirm(proposal.id, ids.user, service),
+    ]);
+    const confirmed = confirmations[0];
     const replay = await actions.confirm(proposal.id, ids.user, service);
     expect(confirmed).toMatchObject({ status: 'confirmed' });
+    expect(new Set(confirmations.map(({ confirmedRunId }) => confirmedRunId))).toEqual(
+      new Set([confirmed.confirmedRunId]),
+    );
     expect(replay.confirmedRunId).toBe(confirmed.confirmedRunId);
-    const confirmedRuns = await connection.db
-      .select({ id: agentRuns.id })
-      .from(agentRuns)
-      .where(eq(agentRuns.branchId, branchId));
+    const [confirmedRuns, confirmedEvents] = await Promise.all([
+      connection.db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(eq(agentRuns.branchId, branchId)),
+      connection.db
+        .select({ eventType: runEvents.eventType })
+        .from(runEvents)
+        .where(and(eq(runEvents.runId, source.runId), eq(runEvents.eventType, 'action.confirmed'))),
+    ]);
     expect(confirmedRuns).toHaveLength(2);
+    expect(confirmedEvents).toHaveLength(1);
   });
 
   it('persists action proposal expiration and rejects repeated confirmation without creating a run', async () => {
