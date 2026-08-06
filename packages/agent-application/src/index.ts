@@ -19,6 +19,7 @@ export * from './run-context-service.js';
 export * from './run-interaction-service.js';
 export * from './run-projection-service.js';
 export * from './run-recovery-service.js';
+export * from './run-settlement-service.js';
 export * from './runtime-message-codec.js';
 export * from './execution-fact-cache.js';
 export * from './terminal-outcome-policy.js';

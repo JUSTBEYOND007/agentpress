@@ -1,19 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type {
-  RuntimeAssistantMessage,
-  RuntimeEvent,
-  RuntimeMessage,
-  RuntimeResult,
-} from '@agentpress/agent-runtime';
+import type { RuntimeEvent, RuntimeMessage, RuntimeResult } from '@agentpress/agent-runtime';
 import { RUNTIME_CURRENT_TURN_VERSION } from '@agentpress/agent-runtime';
 import { loadSkill } from '@agentpress/agent-context';
 import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {
   agentRuns,
-  appendCheckpoint,
   appendRunEvent,
-  cancelAgentRunTasks,
   type AgentPressDatabase,
   type DatabaseTransaction,
   conversationBranches,
@@ -23,18 +16,15 @@ import {
   rootRequests,
   queuedFollowups,
   runQuestions,
-  runDirectives,
   runEvents,
-  runToolChoices,
   skillRevisions,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, desc, eq, gte, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, max, sql } from 'drizzle-orm';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
   AgentApplicationError,
-  StaleWorkerSettlementError,
   type AgentRuntimeFactory,
   type CreateDirectRunInput,
   type CreateDirectRunResult,
@@ -49,7 +39,6 @@ import {
   type SkillPreselectionCandidate,
   type SkillPreselector,
 } from './contracts.js';
-import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import {
   projectConversationHistory,
@@ -67,6 +56,7 @@ import { ConversationBranchService } from './conversation-branch-service.js';
 import { decodeRuntimeMessage, encodeRuntimeMessage } from './runtime-message-codec.js';
 import { RunInteractionService } from './run-interaction-service.js';
 import { RunRecoveryService } from './run-recovery-service.js';
+import { RunSettlementService } from './run-settlement-service.js';
 
 export { isTerminalRunStatus } from './run-projection-service.js';
 
@@ -97,6 +87,7 @@ export class DirectRunService {
   private readonly branches: ConversationBranchService;
   private readonly interactions: RunInteractionService;
   private readonly recovery: RunRecoveryService;
+  private readonly settlements: RunSettlementService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
@@ -123,6 +114,15 @@ export class DirectRunService {
       database: options.database,
       runtimeFactory: options.runtimeFactory,
       createId: this.createId,
+    });
+    this.settlements = new RunSettlementService({
+      database: options.database,
+      publisher: options.publisher,
+      createId: this.createId,
+      now: this.now,
+      compactConversation: (branchId) =>
+        this.compactions.compact({ branchId, reason: 'automatic' }),
+      activateNextFollowUp: (branchId) => this.activateNextFollowUp(branchId),
     });
     this.contexts = new RunContextService(
       options.database,
@@ -754,273 +754,13 @@ export class DirectRunService {
     }
   }
 
-  private async settleRun(
+  private settleRun(
     branchId: string,
     runId: string,
     result: RuntimeResult,
     completedWithDegradation = false,
   ): Promise<ExecuteDirectRunResult> {
-    const terminalOutcome = classifyTerminalOutcome(result);
-    const durableEvents = await this.options.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${conversationBranches} where id = ${branchId} for update`,
-      );
-      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
-      const statusRows = await transaction
-        .select({ status: agentRuns.status })
-        .from(agentRuns)
-        .where(eq(agentRuns.id, runId))
-        .limit(1);
-      const currentStatus = statusRows[0]?.status;
-      const now = this.now();
-      const events: DurableRunEvent[] = [];
-
-      if (currentStatus === 'recovering' || currentStatus === 'interrupted') {
-        throw new StaleWorkerSettlementError(runId);
-      }
-
-      if (terminalOutcome === 'completed' && currentStatus === 'running') {
-        const assistant = findLastAssistantMessage(result.messages);
-        if (!assistant) {
-          throw new Error(`Pi completed Agent Run ${runId} without a stable assistant message`);
-        }
-        const sequenceRows = await transaction
-          .select({ sequence: max(conversationMessages.sequence) })
-          .from(conversationMessages)
-          .where(eq(conversationMessages.branchId, branchId));
-        await transaction.insert(conversationMessages).values({
-          id: this.createId(),
-          branchId,
-          runId,
-          role: 'assistant',
-          sequence: (sequenceRows[0]?.sequence ?? 0) + 1,
-          content: encodeRuntimeMessage(assistant),
-          stable: true,
-          createdAt: now,
-        });
-        await transaction
-          .update(runToolChoices)
-          .set({
-            status: 'cancelled',
-            rejectionReason: 'run_settled',
-            settledAt: now,
-          })
-          .where(
-            and(
-              eq(runToolChoices.runId, runId),
-              inArray(runToolChoices.status, ['pending', 'in_flight']),
-            ),
-          );
-        await transaction
-          .update(agentRuns)
-          .set({
-            status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
-            finalOutcome: { usage: assistant.usage },
-            completedAt: now,
-            updatedAt: now,
-            version: sql`${agentRuns.version} + 1`,
-          })
-          .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
-        await appendCheckpoint(transaction, {
-          id: this.createId(),
-          runId,
-          reason: 'run_settled',
-          state: {
-            status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
-            stableAssistantMessage: assistant,
-          },
-        });
-        const messageEvent = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'message.completed',
-          payload: { message: assistant },
-        });
-        events.push(toDurableEvent(messageEvent));
-        const completedEvent = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: completedWithDegradation ? 'run.completed_with_degradation' : 'run.completed',
-          payload: { usage: assistant.usage, degraded: completedWithDegradation },
-        });
-        events.push(toDurableEvent(completedEvent));
-        return events;
-      }
-
-      if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
-        const cancelledTasks = await cancelAgentRunTasks(transaction, { runId, now });
-        for (const task of cancelledTasks) {
-          const taskEvent = await appendRunEvent(transaction, {
-            id: this.createId(),
-            runId,
-            eventType: 'task.cancelled',
-            payload: {
-              taskId: task.taskId,
-              attempt: task.attempt,
-              reason: 'run_cancelled',
-            },
-          });
-          events.push(toDurableEvent(taskEvent));
-        }
-        await transaction
-          .update(runToolChoices)
-          .set({
-            status: 'cancelled',
-            rejectionReason: 'cancelled',
-            settledAt: now,
-          })
-          .where(
-            and(
-              eq(runToolChoices.runId, runId),
-              inArray(runToolChoices.status, ['pending', 'in_flight']),
-            ),
-          );
-        await transaction
-          .update(runDirectives)
-          .set({ status: 'cancelled' })
-          .where(and(eq(runDirectives.runId, runId), eq(runDirectives.status, 'pending')));
-        await transaction
-          .update(queuedFollowups)
-          .set({ status: 'cancelled' })
-          .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')));
-        await transaction
-          .update(agentRuns)
-          .set({
-            status: 'cancelled',
-            completedAt: now,
-            updatedAt: now,
-            version: sql`${agentRuns.version} + 1`,
-          })
-          .where(
-            and(eq(agentRuns.id, runId), inArray(agentRuns.status, ['running', 'cancelling'])),
-          );
-        await appendCheckpoint(transaction, {
-          id: this.createId(),
-          runId,
-          reason: 'run_settled',
-          state: { status: 'cancelled' },
-        });
-        const event = await appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'run.cancelled',
-          payload: {},
-        });
-        events.push(toDurableEvent(event));
-        return events;
-      }
-
-      if (result.status !== 'failed') {
-        throw new Error(`Agent Run ${runId} reached an invalid settlement branch`);
-      }
-
-      await transaction
-        .update(runToolChoices)
-        .set({
-          status: 'cancelled',
-          rejectionReason: 'run_failed',
-          settledAt: now,
-        })
-        .where(
-          and(
-            eq(runToolChoices.runId, runId),
-            inArray(runToolChoices.status, ['pending', 'in_flight']),
-          ),
-        );
-      await transaction
-        .update(agentRuns)
-        .set({
-          status: 'failed',
-          finalOutcome: { error: result.error },
-          completedAt: now,
-          updatedAt: now,
-          version: sql`${agentRuns.version} + 1`,
-        })
-        .where(
-          and(
-            eq(agentRuns.id, runId),
-            inArray(agentRuns.status, [
-              'queued',
-              'planning',
-              'running',
-              'waiting_for_approval',
-              'waiting_for_user',
-            ]),
-          ),
-        );
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'run_settled',
-        state: { status: 'failed', error: result.error },
-      });
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'run.failed',
-        payload: { error: result.error },
-      });
-      events.push(toDurableEvent(event));
-      return events;
-    });
-
-    const terminal = durableEvents.at(-1)?.eventType;
-    const compactionEvent =
-      terminal === 'run.cancelled' ? undefined : await this.compactAfterSettlement(branchId, runId);
-    if (terminal !== 'run.cancelled') await this.activateNextFollowUp(branchId);
-    for (const event of durableEvents) {
-      await this.options.publisher.publish({ durable: true, event });
-    }
-    if (compactionEvent) {
-      await this.options.publisher.publish({ durable: true, event: compactionEvent });
-    }
-    const response: ExecuteDirectRunResult = {
-      runId,
-      status:
-        terminal === 'run.completed' || terminal === 'run.completed_with_degradation'
-          ? terminal === 'run.completed_with_degradation'
-            ? 'completed_with_degradation'
-            : 'completed'
-          : terminal === 'run.cancelled'
-            ? 'cancelled'
-            : 'failed',
-    };
-    return response;
-  }
-
-  private async compactAfterSettlement(
-    branchId: string,
-    runId: string,
-  ): Promise<DurableRunEvent | undefined> {
-    try {
-      const result = await this.compactions.compact({ branchId, reason: 'automatic' });
-      if (result.status === 'not_needed') return undefined;
-      const persisted = await this.options.database.transaction((transaction) =>
-        appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType:
-            result.status === 'completed'
-              ? 'conversation.compaction_completed'
-              : 'conversation.compaction_failed',
-          payload: { compactionId: result.compactionId, version: result.version },
-        }),
-      );
-      return toDurableEvent(persisted);
-    } catch (error) {
-      const persisted = await this.options.database.transaction((transaction) =>
-        appendRunEvent(transaction, {
-          id: this.createId(),
-          runId,
-          eventType: 'conversation.compaction_failed',
-          payload: {
-            code: 'persistence_error',
-            message: error instanceof Error ? error.message : 'Conversation compaction failed',
-          },
-        }),
-      );
-      return toDurableEvent(persisted);
-    }
+    return this.settlements.settle(branchId, runId, result, completedWithDegradation);
   }
 
   private async activateNextFollowUp(branchId: string): Promise<void> {
@@ -1156,14 +896,6 @@ async function loadSkillPreselectionCandidates(
       disableModelInvocation: skill.disableModelInvocation === true,
     };
   });
-}
-
-function findLastAssistantMessage(
-  messages: readonly RuntimeMessage[],
-): RuntimeAssistantMessage | undefined {
-  return messages.findLast(
-    (message): message is RuntimeAssistantMessage => message.role === 'assistant',
-  );
 }
 
 function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {

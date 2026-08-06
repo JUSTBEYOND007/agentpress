@@ -1,0 +1,309 @@
+import type {
+  RuntimeAssistantMessage,
+  RuntimeMessage,
+  RuntimeResult,
+} from '@agentpress/agent-runtime';
+import {
+  agentRuns,
+  appendCheckpoint,
+  appendRunEvent,
+  cancelAgentRunTasks,
+  type AgentPressDatabase,
+  conversationBranches,
+  conversationMessages,
+  queuedFollowups,
+  runDirectives,
+  runToolChoices,
+} from '@agentpress/database';
+import { and, eq, inArray, max, sql } from 'drizzle-orm';
+
+import {
+  StaleWorkerSettlementError,
+  type DurableRunEvent,
+  type ExecuteDirectRunResult,
+  type RunEventPublisher,
+} from './contracts.js';
+import { encodeRuntimeMessage } from './runtime-message-codec.js';
+import { toDurableEvent } from './run-projection-service.js';
+import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
+
+type CompactionResult =
+  | { readonly status: 'not_needed' }
+  | {
+      readonly status: 'completed' | 'failed';
+      readonly compactionId: string;
+      readonly version: number;
+    };
+
+type RunSettlementServiceOptions = {
+  readonly database: AgentPressDatabase;
+  readonly publisher: RunEventPublisher;
+  readonly createId: () => string;
+  readonly now: () => Date;
+  readonly compactConversation: (branchId: string) => Promise<CompactionResult>;
+  readonly activateNextFollowUp: (branchId: string) => Promise<void>;
+};
+
+export class RunSettlementService {
+  public constructor(private readonly options: RunSettlementServiceOptions) {}
+
+  public async settle(
+    branchId: string,
+    runId: string,
+    result: RuntimeResult,
+    completedWithDegradation = false,
+  ): Promise<ExecuteDirectRunResult> {
+    const terminalOutcome = classifyTerminalOutcome(result);
+    const durableEvents = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select id from ${conversationBranches} where id = ${branchId} for update`,
+      );
+      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
+      const statusRows = await transaction
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, runId))
+        .limit(1);
+      const currentStatus = statusRows[0]?.status;
+      const now = this.options.now();
+      const events: DurableRunEvent[] = [];
+
+      if (currentStatus === 'recovering' || currentStatus === 'interrupted') {
+        throw new StaleWorkerSettlementError(runId);
+      }
+
+      if (terminalOutcome === 'completed' && currentStatus === 'running') {
+        const assistant = findLastAssistantMessage(result.messages);
+        if (!assistant) {
+          throw new Error(`Pi completed Agent Run ${runId} without a stable assistant message`);
+        }
+        const sequenceRows = await transaction
+          .select({ sequence: max(conversationMessages.sequence) })
+          .from(conversationMessages)
+          .where(eq(conversationMessages.branchId, branchId));
+        await transaction.insert(conversationMessages).values({
+          id: this.options.createId(),
+          branchId,
+          runId,
+          role: 'assistant',
+          sequence: (sequenceRows[0]?.sequence ?? 0) + 1,
+          content: encodeRuntimeMessage(assistant),
+          stable: true,
+          createdAt: now,
+        });
+        await transaction
+          .update(runToolChoices)
+          .set({ status: 'cancelled', rejectionReason: 'run_settled', settledAt: now })
+          .where(
+            and(
+              eq(runToolChoices.runId, runId),
+              inArray(runToolChoices.status, ['pending', 'in_flight']),
+            ),
+          );
+        await transaction
+          .update(agentRuns)
+          .set({
+            status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
+            finalOutcome: { usage: assistant.usage },
+            completedAt: now,
+            updatedAt: now,
+            version: sql`${agentRuns.version} + 1`,
+          })
+          .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')));
+        await appendCheckpoint(transaction, {
+          id: this.options.createId(),
+          runId,
+          reason: 'run_settled',
+          state: {
+            status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
+            stableAssistantMessage: assistant,
+          },
+        });
+        const messageEvent = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'message.completed',
+          payload: { message: assistant },
+        });
+        events.push(toDurableEvent(messageEvent));
+        const completedEvent = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: completedWithDegradation ? 'run.completed_with_degradation' : 'run.completed',
+          payload: { usage: assistant.usage, degraded: completedWithDegradation },
+        });
+        events.push(toDurableEvent(completedEvent));
+        return events;
+      }
+
+      if (terminalOutcome === 'cancelled' || currentStatus === 'cancelling') {
+        const cancelledTasks = await cancelAgentRunTasks(transaction, { runId, now });
+        for (const task of cancelledTasks) {
+          const taskEvent = await appendRunEvent(transaction, {
+            id: this.options.createId(),
+            runId,
+            eventType: 'task.cancelled',
+            payload: { taskId: task.taskId, attempt: task.attempt, reason: 'run_cancelled' },
+          });
+          events.push(toDurableEvent(taskEvent));
+        }
+        await transaction
+          .update(runToolChoices)
+          .set({ status: 'cancelled', rejectionReason: 'cancelled', settledAt: now })
+          .where(
+            and(
+              eq(runToolChoices.runId, runId),
+              inArray(runToolChoices.status, ['pending', 'in_flight']),
+            ),
+          );
+        await transaction
+          .update(runDirectives)
+          .set({ status: 'cancelled' })
+          .where(and(eq(runDirectives.runId, runId), eq(runDirectives.status, 'pending')));
+        await transaction
+          .update(queuedFollowups)
+          .set({ status: 'cancelled' })
+          .where(and(eq(queuedFollowups.runId, runId), eq(queuedFollowups.status, 'pending')));
+        await transaction
+          .update(agentRuns)
+          .set({
+            status: 'cancelled',
+            completedAt: now,
+            updatedAt: now,
+            version: sql`${agentRuns.version} + 1`,
+          })
+          .where(
+            and(eq(agentRuns.id, runId), inArray(agentRuns.status, ['running', 'cancelling'])),
+          );
+        await appendCheckpoint(transaction, {
+          id: this.options.createId(),
+          runId,
+          reason: 'run_settled',
+          state: { status: 'cancelled' },
+        });
+        const event = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'run.cancelled',
+          payload: {},
+        });
+        events.push(toDurableEvent(event));
+        return events;
+      }
+
+      if (result.status !== 'failed') {
+        throw new Error(`Agent Run ${runId} reached an invalid settlement branch`);
+      }
+
+      await transaction
+        .update(runToolChoices)
+        .set({ status: 'cancelled', rejectionReason: 'run_failed', settledAt: now })
+        .where(
+          and(
+            eq(runToolChoices.runId, runId),
+            inArray(runToolChoices.status, ['pending', 'in_flight']),
+          ),
+        );
+      await transaction
+        .update(agentRuns)
+        .set({
+          status: 'failed',
+          finalOutcome: { error: result.error },
+          completedAt: now,
+          updatedAt: now,
+          version: sql`${agentRuns.version} + 1`,
+        })
+        .where(
+          and(
+            eq(agentRuns.id, runId),
+            inArray(agentRuns.status, [
+              'queued',
+              'planning',
+              'running',
+              'waiting_for_approval',
+              'waiting_for_user',
+            ]),
+          ),
+        );
+      await appendCheckpoint(transaction, {
+        id: this.options.createId(),
+        runId,
+        reason: 'run_settled',
+        state: { status: 'failed', error: result.error },
+      });
+      const event = await appendRunEvent(transaction, {
+        id: this.options.createId(),
+        runId,
+        eventType: 'run.failed',
+        payload: { error: result.error },
+      });
+      events.push(toDurableEvent(event));
+      return events;
+    });
+
+    const terminal = durableEvents.at(-1)?.eventType;
+    const compactionEvent =
+      terminal === 'run.cancelled' ? undefined : await this.compactAfterSettlement(branchId, runId);
+    if (terminal !== 'run.cancelled') await this.options.activateNextFollowUp(branchId);
+    for (const event of durableEvents) {
+      await this.options.publisher.publish({ durable: true, event });
+    }
+    if (compactionEvent) {
+      await this.options.publisher.publish({ durable: true, event: compactionEvent });
+    }
+    return {
+      runId,
+      status:
+        terminal === 'run.completed' || terminal === 'run.completed_with_degradation'
+          ? terminal === 'run.completed_with_degradation'
+            ? 'completed_with_degradation'
+            : 'completed'
+          : terminal === 'run.cancelled'
+            ? 'cancelled'
+            : 'failed',
+    };
+  }
+
+  private async compactAfterSettlement(
+    branchId: string,
+    runId: string,
+  ): Promise<DurableRunEvent | undefined> {
+    try {
+      const result = await this.options.compactConversation(branchId);
+      if (result.status === 'not_needed') return undefined;
+      const persisted = await this.options.database.transaction((transaction) =>
+        appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType:
+            result.status === 'completed'
+              ? 'conversation.compaction_completed'
+              : 'conversation.compaction_failed',
+          payload: { compactionId: result.compactionId, version: result.version },
+        }),
+      );
+      return toDurableEvent(persisted);
+    } catch (error) {
+      const persisted = await this.options.database.transaction((transaction) =>
+        appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'conversation.compaction_failed',
+          payload: {
+            code: 'persistence_error',
+            message: error instanceof Error ? error.message : 'Conversation compaction failed',
+          },
+        }),
+      );
+      return toDurableEvent(persisted);
+    }
+  }
+}
+
+function findLastAssistantMessage(
+  messages: readonly RuntimeMessage[],
+): RuntimeAssistantMessage | undefined {
+  return messages.findLast(
+    (message): message is RuntimeAssistantMessage => message.role === 'assistant',
+  );
+}
