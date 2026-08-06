@@ -6,6 +6,7 @@ export * from './conversation-compaction-service.js';
 export * from './agent-session-compaction-service.js';
 export * from './action-capability-policy.js';
 export * from './agent-turn-profile.js';
+export * from './main-control-service.js';
 export * from './agent-session-runner.js';
 export * from './agent-transcript-projector.js';
 export * from './action-proposal-service.js';

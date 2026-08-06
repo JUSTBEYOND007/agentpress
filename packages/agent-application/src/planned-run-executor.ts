@@ -12,14 +12,11 @@ import {
   appendCheckpoint,
   appendRunEvent,
   type AgentPressDatabase,
-  type DatabaseTransaction,
   executionPlans,
-  editProposals,
-  editProposalBatches,
   planRevisions,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, eq, or, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -32,16 +29,9 @@ import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { AgentSessionRunner } from './agent-session-runner.js';
 import { ActionProposalService } from './action-proposal-service.js';
 import { AgentTaskWaitService } from './agent-task-wait-service.js';
-import {
-  createAgentTurnProfile,
-  selectMainControlTools,
-  type AgentTurnProfile,
-} from './agent-turn-profile.js';
+import type { AgentTurnProfile } from './agent-turn-profile.js';
 import {
   mainCompletionPrompt,
-  mainPlanningPrompt,
-  planSubmitSchema,
-  validateSubmittedPlan as validatePlan,
   type PlannedTaskSpec,
   type SettledTask,
   type SubmittedPlan,
@@ -51,9 +41,9 @@ import { SpecialistResultStore } from './specialist-result-store.js';
 import { PlannedTaskExecutor } from './planned-task-executor.js';
 import { PlanRevisionService } from './plan-revision-service.js';
 import { PlannedDagScheduler } from './planned-dag-scheduler.js';
+import { MainControlService } from './main-control-service.js';
 import {
   applicationTurn,
-  articleEditResult,
   confirmedArticleEditPlan,
   emptyUsage,
   findAssistant,
@@ -67,11 +57,6 @@ import { toDurableEvent } from './run-projection-service.js';
 export { mainPlanningPrompt, validateSubmittedPlan } from './planned-run-protocol.js';
 export { specialistApplicationTurn } from './planned-run-protocol.js';
 export type { PlannedTaskSpec } from './planned-run-protocol.js';
-
-type ControlDecision =
-  | { readonly kind: 'direct'; readonly result: RuntimeResult }
-  | { readonly kind: 'plan'; readonly plan: SubmittedPlan; readonly result: RuntimeResult }
-  | { readonly kind: 'question'; readonly question: string; readonly options: readonly string[] };
 
 export type PlannedExecutionOutcome = {
   readonly result: RuntimeResult;
@@ -103,6 +88,7 @@ export class PlannedRunExecutor {
   private readonly tasks: PlannedTaskExecutor;
   private readonly revisions: PlanRevisionService;
   private readonly scheduler: PlannedDagScheduler;
+  private readonly mainControl: MainControlService;
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
@@ -165,6 +151,13 @@ export class PlannedRunExecutor {
         ? { maxProviderConcurrency: options.maxProviderConcurrency }
         : {}),
     });
+    this.mainControl = new MainControlService({
+      database: options.database,
+      sessions: this.sessions,
+      actionProposals: this.actionProposals,
+      createId: this.createId,
+      ...(options.runtimeToolFactory ? { runtimeToolFactory: options.runtimeToolFactory } : {}),
+    });
   }
 
   public steerActiveMain(runId: string, content: string): boolean {
@@ -185,7 +178,7 @@ export class PlannedRunExecutor {
     history: readonly RuntimeMessage[] = [],
     signal?: AbortSignal,
   ): Promise<PlannedExecutionOutcome | undefined> {
-    if (!(await this.claimPlanning(runId, 'queued'))) return undefined;
+    if (!(await this.store.claimPlanning(runId, 'queued'))) return undefined;
     const profile = await this.createTurnProfile(runId, turn);
     if (profile.kind === 'confirmed_article_edit') {
       return this.persistAndExecutePlan(
@@ -197,11 +190,11 @@ export class PlannedRunExecutor {
     }
     const control = await this.runMainControl(runId, turn, profile, history, signal);
     if (control.kind === 'direct') {
-      await this.enterRunning(runId, 'direct');
+      await this.store.enterRunning(runId, 'direct');
       return { result: control.result, degraded: false };
     }
     if (control.kind === 'question') {
-      await this.persistQuestion(runId, control.question, control.options);
+      await this.store.persistQuestion(runId, control.question, control.options);
       return undefined;
     }
     return this.persistAndExecutePlan(runId, turn, control.plan, signal);
@@ -222,7 +215,7 @@ export class PlannedRunExecutor {
     const run = rows[0];
     if (!run) return undefined;
     if (!run.revisionId || run.mode === 'direct') {
-      if (!(await this.claimPlanning(runId, 'recovering'))) return undefined;
+      if (!(await this.store.claimPlanning(runId, 'recovering'))) return undefined;
       const profile = await this.createTurnProfile(runId, turn);
       if (profile.kind === 'confirmed_article_edit') {
         return this.persistAndExecutePlan(
@@ -234,137 +227,33 @@ export class PlannedRunExecutor {
       }
       const control = await this.runMainControl(runId, turn, profile, history, signal);
       if (control.kind === 'direct') {
-        await this.enterRunning(runId, 'direct');
+        await this.store.enterRunning(runId, 'direct');
         return { result: control.result, degraded: false };
       }
       if (control.kind === 'question') {
-        await this.persistQuestion(runId, control.question, control.options);
+        await this.store.persistQuestion(runId, control.question, control.options);
         return undefined;
       }
       return this.persistAndExecutePlan(runId, turn, control.plan, signal);
     }
-    const tasks = await this.loadPlanTasks(runId, run.revisionId);
-    const settled = await this.loadPersistedTaskResults(tasks);
-    await this.enterRunning(runId, 'planned');
+    const tasks = await this.store.loadPlanTasks(runId, run.revisionId);
+    const settled = await this.store.loadPersistedTaskResults(tasks);
+    await this.store.enterRunning(runId, 'planned');
     return this.executePlannedWork(runId, turn, tasks, signal, settled);
   }
 
-  private async runMainControl(
+  private runMainControl(
     runId: string,
     turn: RuntimeCurrentTurn,
     profile: AgentTurnProfile,
     history: readonly RuntimeMessage[],
     signal?: AbortSignal,
-  ): Promise<ControlDecision> {
-    const availableCapabilities = profile.allowedCapabilities;
-    let submittedPlan: SubmittedPlan | undefined;
-    let requestedQuestion:
-      | { readonly question: string; readonly options: readonly string[] }
-      | undefined;
-    const tools: RuntimeTool[] = [
-      this.actionProposals.createRuntimeTool(runId),
-      {
-        name: 'plan_submit',
-        label: 'Submit execution plan',
-        description:
-          'Submit a concrete task DAG only when the authoritative current request needs specialist work or tools.',
-        parameters: planSubmitSchema,
-        constrainedSampling: { type: 'json_schema', strict: 'require' },
-        executionMode: 'sequential',
-        terminateOnSuccess: true,
-        execute: (arguments_) => {
-          submittedPlan = validatePlan(arguments_, availableCapabilities, this.createId);
-          return Promise.resolve({ accepted: true, taskCount: submittedPlan.tasks.length });
-        },
-      },
-      {
-        name: 'user_request_input',
-        label: 'Request user input',
-        description: 'Pause only when required business information is missing.',
-        parameters: Type.Object(
-          {
-            question: Type.String({ minLength: 1, maxLength: 2_000 }),
-            options: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
-              minItems: 2,
-              maxItems: 4,
-            }),
-          },
-          { additionalProperties: false },
-        ),
-        constrainedSampling: { type: 'json_schema', strict: 'require' },
-        executionMode: 'sequential',
-        terminateOnSuccess: true,
-        execute: (arguments_) => {
-          requestedQuestion = {
-            question: String(arguments_.question),
-            options: arguments_.options as readonly string[],
-          };
-          return Promise.resolve({ accepted: true });
-        },
-      },
-    ];
-    const currentTurnTools = selectMainControlTools(profile, tools);
-    const articleCapabilities = profile.allowedCapabilities.filter(
-      (capability) => capability === 'article.read' || capability === 'article.propose',
-    );
-    const domainTools =
-      profile.kind === 'article_agent' && this.options.runtimeToolFactory
-        ? await this.options.runtimeToolFactory.createForRun(runId, articleCapabilities)
-        : [];
-    const mainTools = [
-      ...currentTurnTools,
-      ...domainTools.map((tool) => ({
-        ...tool,
-        ...(tool.label === 'article.propose_edits' ? { terminateOnSuccess: true } : {}),
-      })),
-    ];
-    const result = await this.sessions.execute(
-      runId,
-      undefined,
-      'main',
-      1,
-      'main',
-      mainPlanningPrompt(availableCapabilities, turn.actionEnvelope.source),
-      history,
-      turn,
-      mainTools,
-      signal,
-    );
-    const editRows = await this.options.database
-      .select({
-        id: editProposals.id,
-        operations: editProposals.operations,
-        reviewMode: editProposals.reviewMode,
-      })
-      .from(editProposals)
-      .leftJoin(editProposalBatches, eq(editProposalBatches.proposalId, editProposals.id))
-      .where(
-        and(
-          eq(editProposals.status, 'pending'),
-          or(eq(editProposals.runId, runId), eq(editProposalBatches.runId, runId)),
-        ),
-      )
-      .limit(1);
-    if (editRows[0]) return { kind: 'direct', result: articleEditResult(result, editRows[0]) };
-    if (await this.actionProposals.getBySourceRun(runId)) return { kind: 'direct', result };
-    if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
-    if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
-    if (result.status === 'failed') return { kind: 'direct', result };
-    if (result.status === 'completed' && findAssistant(result)) return { kind: 'direct', result };
-    return {
-      kind: 'direct',
-      result: protocolFailure(result.messages, 'Main Agent returned no valid control decision'),
-    };
+  ) {
+    return this.mainControl.run(runId, turn, profile, history, signal);
   }
 
-  private async createTurnProfile(
-    runId: string,
-    turn: RuntimeCurrentTurn,
-  ): Promise<AgentTurnProfile> {
-    const capabilities = this.options.runtimeToolFactory
-      ? await this.options.runtimeToolFactory.listCapabilities(runId)
-      : [];
-    return createAgentTurnProfile(turn, capabilities);
+  private createTurnProfile(runId: string, turn: RuntimeCurrentTurn): Promise<AgentTurnProfile> {
+    return this.mainControl.createTurnProfile(runId, turn);
   }
 
   private async persistAndExecutePlan(
@@ -393,7 +282,7 @@ export class PlannedRunExecutor {
           version: sql`${agentRuns.version} + 1`,
         })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'planning')));
-      await this.persistRevisionTasks(transaction, runId, revisionId, plan.tasks, prompt);
+      await this.store.persistRevisionTasks(transaction, runId, revisionId, plan.tasks, prompt);
       await appendCheckpoint(transaction, {
         id: this.createId(),
         runId,
@@ -435,7 +324,7 @@ export class PlannedRunExecutor {
     signal?: AbortSignal,
     initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
   ): Promise<PlannedExecutionOutcome> {
-    const settled = await this.executeDag(runId, tasks, prompt, signal, initialSettled);
+    const settled = await this.scheduler.execute(runId, tasks, prompt, signal, initialSettled);
     if (signal?.aborted || settled.some(({ status }) => status === 'cancelled')) {
       return { degraded: false, result: { status: 'cancelled', messages: [] } };
     }
@@ -484,7 +373,7 @@ export class PlannedRunExecutor {
       executionMode: 'sequential',
       terminateOnSuccess: true,
       execute: async (arguments_) => {
-        await this.assertRunReferences(
+        await this.results.assertRunReferences(
           runId,
           arguments_.artifactIds as readonly string[],
           arguments_.evidenceIds as readonly string[],
@@ -566,68 +455,6 @@ export class PlannedRunExecutor {
         },
       ],
     };
-  }
-
-  private executeDag(
-    runId: string,
-    tasks: readonly PlannedTaskSpec[],
-    rootPrompt: RuntimeCurrentTurn,
-    signal?: AbortSignal,
-    initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
-  ): Promise<readonly SettledTask[]> {
-    return this.scheduler.execute(runId, tasks, rootPrompt, signal, initialSettled);
-  }
-
-  private claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
-    return this.store.claimPlanning(runId, from);
-  }
-
-  private enterRunning(runId: string, mode: 'direct' | 'planned'): Promise<void> {
-    return this.store.enterRunning(runId, mode);
-  }
-
-  private persistQuestion(
-    runId: string,
-    question: string,
-    options: readonly string[],
-  ): Promise<void> {
-    return this.store.persistQuestion(runId, question, options);
-  }
-
-  private persistRevisionTasks(
-    transaction: DatabaseTransaction,
-    runId: string,
-    revisionId: string,
-    tasks: readonly PlannedTaskSpec[],
-    prompt: RuntimeCurrentTurn,
-    positionOffset = 0,
-  ): Promise<void> {
-    return this.store.persistRevisionTasks(
-      transaction,
-      runId,
-      revisionId,
-      tasks,
-      prompt,
-      positionOffset,
-    );
-  }
-
-  private loadPlanTasks(runId: string, revisionId: string): Promise<readonly PlannedTaskSpec[]> {
-    return this.store.loadPlanTasks(runId, revisionId);
-  }
-
-  private loadPersistedTaskResults(
-    tasks: readonly PlannedTaskSpec[],
-  ): Promise<ReadonlyMap<string, SettledTask>> {
-    return this.store.loadPersistedTaskResults(tasks);
-  }
-
-  private assertRunReferences(
-    runId: string,
-    artifactIds: readonly string[],
-    evidenceIds: readonly string[],
-  ): Promise<void> {
-    return this.results.assertRunReferences(runId, artifactIds, evidenceIds);
   }
 
   private async publishRuntimeEvent(runId: string, event: RuntimeEvent): Promise<void> {
