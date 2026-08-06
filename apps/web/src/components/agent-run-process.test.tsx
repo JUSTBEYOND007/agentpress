@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AgentRunProcess, parseProcessPresentation, processSummary } from './agent-run-process';
 
 describe('Agent run process disclosure', () => {
-  it('renders one collapsed disclosure for diagnostic-only process data', () => {
+  it('reduces diagnostic-only process data to one thinking line', () => {
     const data = {
       runId: 'run-1',
       status: 'completed',
@@ -35,7 +35,10 @@ describe('Agent run process disclosure', () => {
     };
     const markup = renderToStaticMarkup(<AgentRunProcess data={data} />);
 
-    expect(markup).toContain('过程详情');
+    expect(markup).toContain('思考了 7 秒');
+    expect(markup).not.toContain('<details');
+    expect(markup).not.toContain('agent-model');
+    expect(markup).not.toContain('token');
     const process = parseProcessPresentation(data);
     expect(process).toBeDefined();
     if (!process) return;

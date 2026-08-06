@@ -106,12 +106,6 @@
   overflow-wrap: anywhere;
 }
 
-.run-process-sections {
-  display: grid;
-  gap: 8px;
-  padding: 3px 0 8px 12px;
-}
-
 .execution-duration {
   color: #999a94;
   font-size: 10px;

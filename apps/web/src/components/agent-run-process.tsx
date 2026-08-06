@@ -10,11 +10,7 @@ import type {
   RunProcessPresentation,
 } from '../lib/agent-runtime-contracts';
 import { consumerTaskLabel, parseRunPart, statusLabel } from './agent-view-model';
-import { ContextSourcesPart } from './agent-context-sources';
 import { ReasoningPart } from './agent-reasoning-part';
-import { PlanPart } from './agent-plan-part';
-import { AgentProgressPart } from './agent-progress-part';
-import { AgentUsagePart } from './agent-usage-part';
 
 const toolLabels: Readonly<Record<string, string>> = {
   'article.read_current': '读取正文',
@@ -27,6 +23,7 @@ const toolLabels: Readonly<Record<string, string>> = {
 };
 
 export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX.Element | null {
+  const [open, setOpen] = useState(false);
   const process = parseProcessPresentation(data);
   if (!process) return null;
   const view = processSummary(process);
@@ -41,10 +38,19 @@ export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX
       </div>
     );
   }
-  if (process.items.length === 0 && process.parts.length === 0) return null;
+  if (process.items.length === 0) {
+    const reasoning = process.parts.findLast((part) => part.type === 'reasoning');
+    return reasoning ? <ReasoningPart part={reasoning} embedded /> : null;
+  }
 
   return (
-    <details className="run-process-details">
+    <details
+      className="run-process-details"
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+    >
       <summary className="run-process-heading">
         <span>{view.label}</span>
         {process.durationMs > 0 ? (
@@ -57,27 +63,7 @@ export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX
           <ExecutionItemView item={item} key={item.id} />
         ))}
       </div>
-      <ProcessSections parts={process.parts} />
     </details>
-  );
-}
-
-function ProcessSections({ parts }: { readonly parts: readonly RunPart[] }): React.JSX.Element {
-  const latest = (type: RunPart['type']): RunPart | undefined =>
-    parts.findLast((part) => part.type === type);
-  const context = latest('context');
-  const reasoning = latest('reasoning');
-  const plan = latest('plan');
-  const progress = latest('progress');
-  const usage = latest('usage');
-  return (
-    <div className="run-process-sections">
-      {reasoning ? <ReasoningPart part={reasoning} embedded /> : null}
-      {progress ? <AgentProgressPart part={progress} embedded /> : null}
-      {plan ? <PlanPart part={plan} embedded /> : null}
-      {context ? <ContextSourcesPart part={context} embedded /> : null}
-      {usage ? <AgentUsagePart part={usage} embedded /> : null}
-    </div>
   );
 }
 
