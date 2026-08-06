@@ -10,7 +10,10 @@ export type FaqEntry = {
   readonly acl: readonly string[];
 };
 
-export type FaqMatch = FaqEntry & { readonly confidence: number; readonly match: 'exact' | 'semantic' };
+export type FaqMatch = FaqEntry & {
+  readonly confidence: number;
+  readonly match: 'exact' | 'semantic';
+};
 
 export type FaqSearchResult =
   | { readonly source: 'faq'; readonly match: FaqMatch }
@@ -28,8 +31,7 @@ export function matchFaq(
   if (!normalized) return undefined;
   const permitted = entries.filter(
     (entry) =>
-      entry.workspaceId === workspaceId &&
-      entry.acl.some((principal) => allowedAcl.has(principal)),
+      entry.workspaceId === workspaceId && entry.acl.some((principal) => allowedAcl.has(principal)),
   );
   const exact = permitted.find((entry) => normalize(entry.question) === normalized);
   if (exact) return { ...exact, confidence: 1, match: 'exact' };

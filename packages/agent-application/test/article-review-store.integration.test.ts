@@ -101,10 +101,9 @@ describeWithDatabase('Article review PostgreSQL store', () => {
       reason: 'main_agent',
       summary: 'Review an immutable draft',
     });
-    await connection.db.insert(agentTasks).values([
-      task(ids.writerTask, ids, 'writer'),
-      task(ids.reviewTask, ids, 'fact_checker'),
-    ]);
+    await connection.db
+      .insert(agentTasks)
+      .values([task(ids.writerTask, ids, 'writer'), task(ids.reviewTask, ids, 'fact_checker')]);
     await connection.db.insert(artifacts).values({
       id: ids.artifact,
       runId: ids.run,
@@ -113,10 +112,12 @@ describeWithDatabase('Article review PostgreSQL store', () => {
       title: 'Draft',
       currentVersion: 2,
     });
-    await connection.db.insert(artifactVersions).values([
-      artifactVersion(ids.version1, ids.artifact, 1),
-      artifactVersion(ids.version2, ids.artifact, 2),
-    ]);
+    await connection.db
+      .insert(artifactVersions)
+      .values([
+        artifactVersion(ids.version1, ids.artifact, 1),
+        artifactVersion(ids.version2, ids.artifact, 2),
+      ]);
   });
 
   afterAll(async () => {

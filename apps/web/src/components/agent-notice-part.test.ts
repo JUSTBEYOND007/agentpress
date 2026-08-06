@@ -28,9 +28,7 @@ describe('noticeMessage', () => {
 
   it('maps terminal failures to explicit regenerate actions', () => {
     expect(recoveryAction(part('run.failed'), 'provider_error')?.label).toBe('重试');
-    expect(recoveryAction(part('article.stale'), 'stale_revision')?.label).toBe(
-      '基于最新正文重试',
-    );
+    expect(recoveryAction(part('article.stale'), 'stale_revision')?.label).toBe('基于最新正文重试');
     expect(recoveryAction(part('run.cancelled'), '')?.label).toBe('重新开始');
     expect(recoveryAction(part('run.completed_with_degradation'), '')?.label).toBe(
       '重新生成完整结果',

@@ -199,8 +199,7 @@ function createDatabaseHarness(): OrchestratorEvalHarness {
             memoryFixtures.map((fixture, index) => {
               const memoryId = memoryFixtureIds[index];
               if (!memoryId) throw new Error('Memory fixture ID was not allocated');
-              const memoryWorkspaceId =
-                fixture.scope === 'other' ? otherWorkspaceId : workspaceId;
+              const memoryWorkspaceId = fixture.scope === 'other' ? otherWorkspaceId : workspaceId;
               if (!memoryWorkspaceId) throw new Error('Other memory workspace was not allocated');
               return {
                 id: memoryId,

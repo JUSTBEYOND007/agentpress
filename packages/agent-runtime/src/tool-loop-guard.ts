@@ -52,7 +52,8 @@ function canonicalJson(value: unknown): string {
     return JSON.stringify(value);
   }
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new TypeError('Tool arguments cannot contain non-finite numbers');
+    if (!Number.isFinite(value))
+      throw new TypeError('Tool arguments cannot contain non-finite numbers');
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;

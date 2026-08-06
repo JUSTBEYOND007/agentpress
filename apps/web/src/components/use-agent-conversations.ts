@@ -67,9 +67,7 @@ export function useAgentConversations(input: {
     setSelected(next);
     resolvedSelection.current = {
       articleId,
-      ...(next
-        ? { selection: { conversationId: next.id, branchId: next.branchId } }
-        : {}),
+      ...(next ? { selection: { conversationId: next.id, branchId: next.branchId } } : {}),
     };
     if (next) {
       writeConversationSelection(articleId, {

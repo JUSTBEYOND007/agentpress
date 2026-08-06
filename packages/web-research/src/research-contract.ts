@@ -51,7 +51,15 @@ export function assertResearchBriefContent(value: unknown): asserts value is Res
       throw new TypeError(`ResearchBrief ${key} is required`);
     }
   }
-  for (const key of ['claims', 'conflicts', 'unknowns', 'implications', 'sources', 'queryLog', 'partialFailures'] as const) {
+  for (const key of [
+    'claims',
+    'conflicts',
+    'unknowns',
+    'implications',
+    'sources',
+    'queryLog',
+    'partialFailures',
+  ] as const) {
     if (!Array.isArray(value[key])) throw new TypeError(`ResearchBrief ${key} must be an array`);
   }
   assertConfidence(value.confidence, 'ResearchBrief confidence');
@@ -62,10 +70,15 @@ export function assertResearchBriefContent(value: unknown): asserts value is Res
   const conflicts = value.conflicts as readonly unknown[];
   const partialFailures = value.partialFailures as readonly unknown[];
   for (const source of sources) {
-    if (!isRecord(source) || typeof source.evidenceId !== 'string' || source.evidenceId.length === 0) {
+    if (
+      !isRecord(source) ||
+      typeof source.evidenceId !== 'string' ||
+      source.evidenceId.length === 0
+    ) {
       throw new TypeError('ResearchBrief sources require Evidence IDs');
     }
-    if (sourceIds.has(source.evidenceId)) throw new TypeError('ResearchBrief sources must be unique');
+    if (sourceIds.has(source.evidenceId))
+      throw new TypeError('ResearchBrief sources must be unique');
     sourceIds.add(source.evidenceId);
   }
   for (const claim of claims) {
@@ -81,7 +94,9 @@ export function assertResearchBriefContent(value: unknown): asserts value is Res
     assertConfidence(claim.confidence, 'ResearchBrief claim confidence');
   }
   if ((conflicts.length > 0 || partialFailures.length > 0) && confidence >= 1) {
-    throw new TypeError('ResearchBrief with conflicts or partial failures cannot claim full confidence');
+    throw new TypeError(
+      'ResearchBrief with conflicts or partial failures cannot claim full confidence',
+    );
   }
 }
 

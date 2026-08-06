@@ -11,9 +11,7 @@ describe('article selection hashing', () => {
       attrs: { level: null, blockId: 'block-1' },
       content: [{ marks: [{ type: 'bold' }], text: 'Selected text', type: 'text' }],
     };
-    const serverEquivalent = createHash('sha256')
-      .update(canonicalArticleJson(block))
-      .digest('hex');
+    const serverEquivalent = createHash('sha256').update(canonicalArticleJson(block)).digest('hex');
 
     await expect(hashArticleSelectionBlock(block)).resolves.toBe(serverEquivalent);
   });

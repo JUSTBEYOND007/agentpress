@@ -69,8 +69,18 @@ export async function judgePair(
   if (input.rubric.length === 0) throw new Error('Judge rubric cannot be empty');
   const swap = hashParity(`${input.caseId}:${input.seed}`) === 1;
   const displayed = swap
-    ? { a: input.candidateB, b: input.candidateA, displayedA: 'candidateB' as const, displayedB: 'candidateA' as const }
-    : { a: input.candidateA, b: input.candidateB, displayedA: 'candidateA' as const, displayedB: 'candidateB' as const };
+    ? {
+        a: input.candidateB,
+        b: input.candidateA,
+        displayedA: 'candidateB' as const,
+        displayedB: 'candidateA' as const,
+      }
+    : {
+        a: input.candidateA,
+        b: input.candidateB,
+        displayedA: 'candidateA' as const,
+        displayedB: 'candidateB' as const,
+      };
   let completion: JudgeCompletion | undefined;
   const model = `${runtime.identity?.provider ?? 'unknown'}/${runtime.identity?.model ?? 'unknown'}`;
   const tool: RuntimeTool = {
@@ -102,7 +112,11 @@ export async function judgePair(
         type: 'agentpress_current_turn',
         version: RUNTIME_CURRENT_TURN_VERSION,
         source: 'application',
-        request: JSON.stringify({ rubric: input.rubric, candidateA: displayed.a, candidateB: displayed.b }),
+        request: JSON.stringify({
+          rubric: input.rubric,
+          candidateA: displayed.a,
+          candidateB: displayed.b,
+        }),
         actionEnvelope: { version: 1, source: 'free_text', grantedCapabilities: [] },
         timestamp: Date.now(),
       },

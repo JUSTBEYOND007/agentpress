@@ -1,9 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import {
-  reviewRounds,
-  type AgentPressDatabase,
-} from '@agentpress/database';
+import { reviewRounds, type AgentPressDatabase } from '@agentpress/database';
 import { and, eq } from 'drizzle-orm';
 
 import type {
@@ -29,7 +26,9 @@ export class ArticleReviewStore implements Pick<
   public async recordRound(round: PersistedArticleReviewRound): Promise<void> {
     const candidate = round.candidate;
     const inputHash = createHash('sha256')
-      .update(`${candidate.candidate.baseRevisionId}:${JSON.stringify(candidate.candidate.document)}`)
+      .update(
+        `${candidate.candidate.baseRevisionId}:${JSON.stringify(candidate.candidate.document)}`,
+      )
       .digest('hex');
     const outputHash = createHash('sha256')
       .update(JSON.stringify(candidate.candidate.document))
@@ -48,7 +47,10 @@ export class ArticleReviewStore implements Pick<
       inputHash,
       outputHash,
       artifactVersionId: candidate.candidate.artifactVersionId,
-      score: Math.min(100, Math.max(0, Math.round(candidate.modelScore ?? candidate.deterministic.score))),
+      score: Math.min(
+        100,
+        Math.max(0, Math.round(candidate.modelScore ?? candidate.deterministic.score)),
+      ),
       modelParseFailed: round.modelParseFailed,
       deterministicIssues: candidate.deterministic.issues,
       modelIssues: candidate.modelIssues,

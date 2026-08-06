@@ -32,4 +32,3 @@ export function composePromptBlocks(blocks: readonly PromptBlock[]): string {
     })
     .join('\n\n');
 }
-

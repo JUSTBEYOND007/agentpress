@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  createStreamableHttpDefinition,
-  createStreamableHttpTransport,
-} from '../src/index.js';
+import { createStreamableHttpDefinition, createStreamableHttpTransport } from '../src/index.js';
 
 describe('MCP Streamable HTTP boundary', () => {
   it('uses the official SDK transport and accepts HTTPS built-ins', () => {

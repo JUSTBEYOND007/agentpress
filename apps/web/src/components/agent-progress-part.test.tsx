@@ -17,7 +17,7 @@ describe('Agent progress part', () => {
             phase: 'waiting_for_user',
             completedSteps: 1,
             totalSteps: 3,
-        activeStep: { objective: '撰写正文', owner: 'writer' },
+            activeStep: { objective: '撰写正文', owner: 'writer' },
             outstandingInteraction: 'ask-user',
             recoveryPoint: { reason: 'task_settled' },
           },

@@ -30,7 +30,8 @@ export function calibrateJudge(
     const winner = resolveWinner(report);
     if (winner === expected.winner) winnerCorrect += 1;
     else disagreements.push(report.caseId);
-    scoreError += Math.abs(report.scoreA - expected.scoreA) + Math.abs(report.scoreB - expected.scoreB);
+    scoreError +=
+      Math.abs(report.scoreA - expected.scoreA) + Math.abs(report.scoreB - expected.scoreB);
     scored += 2;
   }
   const total = reports.filter((report) => byCase.has(report.caseId)).length;
@@ -69,9 +70,16 @@ export function summarizeJudgeStability(
       return {
         caseId,
         samples: samples.length,
-        winnerAgreement: samples.filter((sample) => resolveWinner(sample) === first).length / samples.length,
-        scoreVarianceA: variance(samples.map(({ scoreA }) => scoreA), meanA),
-        scoreVarianceB: variance(samples.map(({ scoreB }) => scoreB), meanB),
+        winnerAgreement:
+          samples.filter((sample) => resolveWinner(sample) === first).length / samples.length,
+        scoreVarianceA: variance(
+          samples.map(({ scoreA }) => scoreA),
+          meanA,
+        ),
+        scoreVarianceB: variance(
+          samples.map(({ scoreB }) => scoreB),
+          meanB,
+        ),
       };
     });
 }

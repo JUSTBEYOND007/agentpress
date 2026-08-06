@@ -20,12 +20,20 @@ const valid: ResearchBriefContent = {
 
 describe('ResearchBrief contract', () => {
   it('requires typed purpose/depth, Evidence-backed claims, and provenance', () => {
-    expect(() => { assertResearchBriefContent(valid); }).not.toThrow();
-    expect(() => { assertResearchBriefContent({ ...valid, claims: [{ ...valid.claims[0], evidenceIds: [] }] }); }).toThrow(/Evidence/u);
+    expect(() => {
+      assertResearchBriefContent(valid);
+    }).not.toThrow();
+    expect(() => {
+      assertResearchBriefContent({ ...valid, claims: [{ ...valid.claims[0], evidenceIds: [] }] });
+    }).toThrow(/Evidence/u);
   });
 
   it('does not equate source count with confidence when research is degraded', () => {
-    expect(() => { assertResearchBriefContent({ ...valid, partialFailures: ['fetch failed'], confidence: 1 }); }).toThrow(/full confidence/u);
-    expect(() => { assertResearchBriefContent({ ...valid, conflicts: ['Source A disagrees'], confidence: 0.7 }); }).not.toThrow();
+    expect(() => {
+      assertResearchBriefContent({ ...valid, partialFailures: ['fetch failed'], confidence: 1 });
+    }).toThrow(/full confidence/u);
+    expect(() => {
+      assertResearchBriefContent({ ...valid, conflicts: ['Source A disagrees'], confidence: 0.7 });
+    }).not.toThrow();
   });
 });

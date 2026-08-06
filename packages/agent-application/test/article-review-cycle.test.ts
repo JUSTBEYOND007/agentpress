@@ -61,7 +61,11 @@ describe('ArticleReviewCycle', () => {
         issues: [],
         usage: emptyUsage,
       });
-    port.revise.mockResolvedValue({ status: 'revised', candidate: candidate(2), usage: emptyUsage });
+    port.revise.mockResolvedValue({
+      status: 'revised',
+      candidate: candidate(2),
+      usage: emptyUsage,
+    });
     const result = await cycle(port).execute(candidate(1));
     expect(result).toMatchObject({
       status: 'selected',
@@ -82,7 +86,9 @@ describe('ArticleReviewCycle', () => {
     port.revise
       .mockResolvedValueOnce({ status: 'revised', candidate: candidate(2), usage: emptyUsage })
       .mockResolvedValueOnce({ status: 'revised', candidate: candidate(3), usage: emptyUsage });
-    const result = await cycle(port, { maxRevisionRounds: 2, maxModelCalls: 5 }).execute(candidate(1));
+    const result = await cycle(port, { maxRevisionRounds: 2, maxModelCalls: 5 }).execute(
+      candidate(1),
+    );
     expect(result).toMatchObject({
       status: 'completed_with_degradation',
       selectionReason: 'best_valid_snapshot',
@@ -167,7 +173,9 @@ function fakePort() {
     review: vi.fn<NonNullable<ArticleReviewCyclePort['review']>>(),
     revise: vi.fn<NonNullable<ArticleReviewCyclePort['revise']>>(),
     recordRound: vi.fn<ArticleReviewCyclePort['recordRound']>().mockResolvedValue(undefined),
-    recordSelection: vi.fn<ArticleReviewCyclePort['recordSelection']>().mockResolvedValue(undefined),
+    recordSelection: vi
+      .fn<ArticleReviewCyclePort['recordSelection']>()
+      .mockResolvedValue(undefined),
   };
 }
 

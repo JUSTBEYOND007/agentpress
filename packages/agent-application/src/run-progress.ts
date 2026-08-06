@@ -14,16 +14,17 @@ export function projectRunProgress(input: {
   readonly pendingInteraction?: Readonly<Record<string, unknown>>;
   readonly recoveryPoint?: RunRecoveryPoint;
 }): RunPart | undefined {
-  if (input.mode !== 'planned' && !input.events.some(({ eventType }) => eventType.startsWith('task.')))
+  if (
+    input.mode !== 'planned' &&
+    !input.events.some(({ eventType }) => eventType.startsWith('task.'))
+  )
     return undefined;
   const tasks = latestPlanTasks(input.events);
   const taskStates = latestTaskStates(input.events);
   const completedSteps = [...taskStates.values()].filter(
     ({ eventType }) => eventType === 'task.succeeded',
   ).length;
-  const activeTask = [...taskStates.values()].find(
-    ({ eventType }) => eventType === 'task.started',
-  );
+  const activeTask = [...taskStates.values()].find(({ eventType }) => eventType === 'task.started');
   const totalSteps = Math.max(tasks.length, taskStates.size);
   return {
     id: `${input.runId}:progress`,
@@ -62,7 +63,9 @@ export function projectRunProgress(input: {
 function latestPlanTasks(events: readonly DurableRunEvent[]): readonly unknown[] {
   const event = [...events]
     .reverse()
-    .find(({ eventType, payload }) => eventType.startsWith('plan.') && Array.isArray(payload.tasks));
+    .find(
+      ({ eventType, payload }) => eventType.startsWith('plan.') && Array.isArray(payload.tasks),
+    );
   return event && Array.isArray(event.payload.tasks) ? event.payload.tasks : [];
 }
 

@@ -1155,7 +1155,10 @@ export const reviewRounds = pgTable(
       .$type<readonly Record<string, unknown>[]>()
       .notNull()
       .default([]),
-    modelIssues: jsonb('model_issues').$type<readonly Record<string, unknown>[]>().notNull().default([]),
+    modelIssues: jsonb('model_issues')
+      .$type<readonly Record<string, unknown>[]>()
+      .notNull()
+      .default([]),
     usage: jsonb('usage').$type<Readonly<Record<string, number>>>().notNull().default({}),
     selectionReason: varchar('selection_reason', { length: 48 }),
     createdAt,

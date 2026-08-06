@@ -69,8 +69,7 @@ describe('compaction evaluation dataset', () => {
   it('accepts equivalent rejection wording but rejects the opposite approved state', () => {
     const scenario = compactionEvalCases.find(({ id }) => id === 'incremental-stale-state');
     if (!scenario) throw new Error('Stale-state fixture is missing');
-    const references =
-      'STATE-DRAFT-PENDING-810 EVID-BETA-811 STATE-DRAFT-REJECTED-812';
+    const references = 'STATE-DRAFT-PENDING-810 EVID-BETA-811 STATE-DRAFT-REJECTED-812';
 
     expect(
       scoreCompactionSummary(

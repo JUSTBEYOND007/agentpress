@@ -33,7 +33,10 @@ export function writeConversationSelection(
   selection: ConversationSelection,
 ): void {
   try {
-    window.localStorage.setItem(conversationSelectionStorageKey(articleId), JSON.stringify(selection));
+    window.localStorage.setItem(
+      conversationSelectionStorageKey(articleId),
+      JSON.stringify(selection),
+    );
   } catch {
     // A blocked storage backend must not make the Agent workbench unusable.
   }

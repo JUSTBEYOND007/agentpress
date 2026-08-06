@@ -108,7 +108,14 @@ function evaluateToolProtocol(
   const calls = observed.toolCalls ?? [];
   const required = scenario.expected.requiredToolIds ?? [];
   const maxToolCalls = scenario.expected.maxToolCalls ?? Number.POSITIVE_INFINITY;
-  const terminal = new Set(['succeeded', 'failed', 'denied', 'expired', 'outcome_unknown', 'cancelled']);
+  const terminal = new Set([
+    'succeeded',
+    'failed',
+    'denied',
+    'expired',
+    'outcome_unknown',
+    'cancelled',
+  ]);
   const repeatedWrites = calls.filter(
     (call, index) =>
       call.risk !== 'read_only' &&

@@ -231,15 +231,17 @@ export function assertBoundedPlan(tasks: readonly PlannedTaskSpec[]): void {
   const depthOf = (task: PlannedTaskSpec): number => {
     const known = depths.get(task.id);
     if (known !== undefined) return known;
-    const depth = task.dependencyIds.length === 0
-      ? 1
-      : 1 + Math.max(
-          ...task.dependencyIds.map((id) => {
-            const dependency = byId.get(id);
-            if (!dependency) throw new Error(`Plan dependency ${id} is missing`);
-            return depthOf(dependency);
-          }),
-        );
+    const depth =
+      task.dependencyIds.length === 0
+        ? 1
+        : 1 +
+          Math.max(
+            ...task.dependencyIds.map((id) => {
+              const dependency = byId.get(id);
+              if (!dependency) throw new Error(`Plan dependency ${id} is missing`);
+              return depthOf(dependency);
+            }),
+          );
     depths.set(task.id, depth);
     return depth;
   };
@@ -255,7 +257,8 @@ export function assertBoundedPlan(tasks: readonly PlannedTaskSpec[]): void {
     throw new RangeError(`Plan exceeds the ${String(PLANNED_DAG_MAX_WIDTH)} parallel task limit`);
   }
   const estimatedTokens = tasks.reduce(
-    (total, task) => total + 4_000 + task.objective.length + task.acceptanceCriteria.join(' ').length,
+    (total, task) =>
+      total + 4_000 + task.objective.length + task.acceptanceCriteria.join(' ').length,
     0,
   );
   if (estimatedTokens > PLANNED_DAG_MAX_ESTIMATED_TOKENS) {

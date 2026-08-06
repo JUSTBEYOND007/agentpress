@@ -8,14 +8,7 @@ import {
   useAui,
   useAuiState,
 } from '@assistant-ui/react';
-import {
-  ArrowUp,
-  AtSign,
-  Paperclip,
-  Plus,
-  Square,
-  X,
-} from 'lucide-react';
+import { ArrowUp, AtSign, Paperclip, Plus, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AgentSendMode } from '../lib/agentpress-assistant-runtime';

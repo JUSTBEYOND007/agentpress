@@ -24,7 +24,8 @@ export function hybridSearch(
   limit = 8,
   options: HybridSearchOptions = {},
 ): readonly Evidence[] {
-  if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError('Search limit must be positive');
+  if (!Number.isSafeInteger(limit) || limit < 1)
+    throw new RangeError('Search limit must be positive');
   const lambda = options.mmrLambda ?? 0.8;
   if (!Number.isFinite(lambda) || lambda < 0 || lambda > 1)
     throw new RangeError('MMR lambda must be between 0 and 1');
@@ -40,7 +41,10 @@ export function hybridSearch(
         0.05 * clamp(candidate.importance ?? 0.5);
       return { candidate, fused: fused * temporalDecay(candidate.updatedAt, options) };
     })
-    .sort((left, right) => right.fused - left.fused || left.candidate.chunkId.localeCompare(right.candidate.chunkId));
+    .sort(
+      (left, right) =>
+        right.fused - left.fused || left.candidate.chunkId.localeCompare(right.candidate.chunkId),
+    );
   const selected: { candidate: SearchCandidate; fused: number }[] = [];
   const remaining = [...ranked];
   while (remaining.length > 0 && selected.length < limit) {
@@ -54,7 +58,11 @@ export function hybridSearch(
         0,
       );
       const mmr = lambda * item.fused - (1 - lambda) * redundancy;
-      if (mmr > bestScore || (mmr === bestScore && item.candidate.chunkId < (remaining[bestIndex]?.candidate.chunkId ?? ''))) {
+      if (
+        mmr > bestScore ||
+        (mmr === bestScore &&
+          item.candidate.chunkId < (remaining[bestIndex]?.candidate.chunkId ?? ''))
+      ) {
         bestIndex = index;
         bestScore = mmr;
       }
@@ -99,7 +107,8 @@ function temporalDecay(updatedAt: string | undefined, options: HybridSearchOptio
   const timestamp = Date.parse(updatedAt);
   if (!Number.isFinite(timestamp)) return 1;
   const halfLife = options.temporalHalfLifeMs ?? 30 * 24 * 60 * 60 * 1_000;
-  if (!Number.isFinite(halfLife) || halfLife <= 0) throw new RangeError('Temporal half-life must be positive');
+  if (!Number.isFinite(halfLife) || halfLife <= 0)
+    throw new RangeError('Temporal half-life must be positive');
   const age = Math.max(0, (options.now?.getTime() ?? Date.now()) - timestamp);
   return Math.pow(0.5, age / halfLife);
 }

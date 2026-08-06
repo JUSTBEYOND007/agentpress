@@ -114,7 +114,10 @@ function collectHtmlText(value: unknown, excluded = false): string {
   const hidden = excluded || ['script', 'style', 'noscript', 'template'].includes(value.nodeName);
   if (hidden) return '';
   if (value.nodeName === '#text') return typeof value.value === 'string' ? value.value : '';
-  return (value.childNodes ?? []).map((child) => collectHtmlText(child)).filter(Boolean).join(' ');
+  return (value.childNodes ?? [])
+    .map((child) => collectHtmlText(child))
+    .filter(Boolean)
+    .join(' ');
 }
 
 function isHtmlNode(value: unknown): value is {

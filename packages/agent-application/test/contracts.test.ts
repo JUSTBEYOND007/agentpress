@@ -186,13 +186,23 @@ describe('agent application contracts', () => {
       capabilities: [],
       detached: false,
     });
-    expect(() => { assertBoundedPlan([
-      task('a'), task('b', ['a']), task('c', ['b']), task('d', ['c']),
-      task('e', ['d']), task('f', ['e']), task('g', ['f']),
-    ]); }).toThrow(/stage depth/u);
-    expect(() => { assertBoundedPlan([task('a'), task('b'), task('c'), task('d'), task('e')]); })
-      .toThrow(/parallel task/u);
-    expect(() => { assertBoundedPlan([task('a'), task('b', ['a']), task('c', ['a'])]); }).not.toThrow();
+    expect(() => {
+      assertBoundedPlan([
+        task('a'),
+        task('b', ['a']),
+        task('c', ['b']),
+        task('d', ['c']),
+        task('e', ['d']),
+        task('f', ['e']),
+        task('g', ['f']),
+      ]);
+    }).toThrow(/stage depth/u);
+    expect(() => {
+      assertBoundedPlan([task('a'), task('b'), task('c'), task('d'), task('e')]);
+    }).toThrow(/parallel task/u);
+    expect(() => {
+      assertBoundedPlan([task('a'), task('b', ['a']), task('c', ['a'])]);
+    }).not.toThrow();
   });
 
   it('keeps Specialist Task identity, depth, budget, and detached policy host-owned', () => {

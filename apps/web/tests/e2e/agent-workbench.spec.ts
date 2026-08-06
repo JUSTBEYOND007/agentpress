@@ -120,9 +120,7 @@ test.describe('Agent workbench browser contracts', () => {
     await composer.fill('');
   });
 
-  test('preserves reading position when completed process expands', async ({
-    page,
-  }, testInfo) => {
+  test('preserves reading position when completed process expands', async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'desktop',
       'Scrolling behavior only needs one browser profile.',

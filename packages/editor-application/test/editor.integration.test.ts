@@ -746,9 +746,11 @@ describeWithInfra('editor persistence and recovery', () => {
       .select({ document: articleRevisions.document })
       .from(articleRevisions)
       .where(eq(articleRevisions.id, article?.currentRevisionId ?? ''));
-    expect((revision?.document as { content: readonly { attrs: { blockId: string } }[] }).content.map(
-      ({ attrs }) => attrs.blockId,
-    )).toEqual(['generated-title', 'generated-body']);
+    expect(
+      (revision?.document as { content: readonly { attrs: { blockId: string } }[] }).content.map(
+        ({ attrs }) => attrs.blockId,
+      ),
+    ).toEqual(['generated-title', 'generated-body']);
   });
 
   it('atomically promotes an acknowledged draft and schedules its index update', async () => {

@@ -72,7 +72,11 @@ export function reviewArticleDeterministically(
   }
   if (blocks.length > policy.maxBlocks) {
     issues.push(
-      error('too_many_blocks', `Article contains ${String(blocks.length)} blocks`, 'document.content'),
+      error(
+        'too_many_blocks',
+        `Article contains ${String(blocks.length)} blocks`,
+        'document.content',
+      ),
     );
   }
 
@@ -81,7 +85,11 @@ export function reviewArticleDeterministically(
     const blockId = block.attrs.blockId;
     if (typeof blockId !== 'string' || blockId.length === 0) {
       issues.push(
-        error('invalid_document', 'Every article block requires a stable blockId', blockPath(index)),
+        error(
+          'invalid_document',
+          'Every article block requires a stable blockId',
+          blockPath(index),
+        ),
       );
       continue;
     }
@@ -145,15 +153,21 @@ export function reviewArticleDeterministically(
   }
 
   const score = Math.max(0, 100 - issues.reduce((total, issue) => total + issuePenalty(issue), 0));
-  return { valid: issues.every(({ severity }) => severity !== 'error'), score, characterCount, issues };
+  return {
+    valid: issues.every(({ severity }) => severity !== 'error'),
+    score,
+    characterCount,
+    issues,
+  };
 }
 
 export function selectBestValidArticleCandidate(
   candidates: readonly ScoredReviewCandidate[],
 ): ScoredReviewCandidate | undefined {
   return candidates
-    .filter(({ deterministic, modelIssues }) =>
-      deterministic.valid && modelIssues.every(({ severity }) => severity !== 'error'),
+    .filter(
+      ({ deterministic, modelIssues }) =>
+        deterministic.valid && modelIssues.every(({ severity }) => severity !== 'error'),
     )
     .reduce<ScoredReviewCandidate | undefined>((best, candidate) => {
       if (!best) return candidate;
@@ -184,7 +198,10 @@ function countCharacters(value: string): number {
   return count;
 }
 
-function collectLinks(value: unknown, path = 'document'): readonly { value: string; path: string }[] {
+function collectLinks(
+  value: unknown,
+  path = 'document',
+): readonly { value: string; path: string }[] {
   if (Array.isArray(value)) {
     return value.flatMap((item, index) => collectLinks(item, `${path}[${String(index)}]`));
   }
@@ -219,11 +236,7 @@ function clampScore(score: number): number {
   return Math.min(100, Math.max(0, Number.isFinite(score) ? score : 0));
 }
 
-function error(
-  code: ArticleReviewIssueCode,
-  message: string,
-  path?: string,
-): ArticleReviewIssue {
+function error(code: ArticleReviewIssueCode, message: string, path?: string): ArticleReviewIssue {
   return { code, severity: 'error', message, ...(path ? { path } : {}) };
 }
 

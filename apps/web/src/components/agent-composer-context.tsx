@@ -104,10 +104,7 @@ export function ComposerContextRow({
         />
       ) : null}
       {contextLabel ? (
-        <ContextIndicator
-          icon={<Workflow aria-hidden="true" size={12} />}
-          label={contextLabel}
-        />
+        <ContextIndicator icon={<Workflow aria-hidden="true" size={12} />} label={contextLabel} />
       ) : null}
       {pendingReview ? (
         <ContextIndicator

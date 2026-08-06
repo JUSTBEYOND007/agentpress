@@ -212,8 +212,8 @@ TODO：
 - [x] 真实模型验证工具选择、参数正确率、循环次数、重复副作用为零和终态一致性。
       Tool gate 从 PostgreSQL `tool_calls` 事实验证 required tool IDs、调用预算、终态集合、
       `arguments_hash` 参数幂等键和 draft-write 重复成功为零；相反语义测试覆盖禁止工具和重复
-      成功写入。terra/sol 两份报告均通过：直接文章修改严格经历 `article.read_current ->
-      article.propose_edits`，多 Specialist 场景所有 ToolCall settled，禁止工具场景零调用。
+      成功写入。terra/sol 两份报告均通过：直接文章修改严格经历
+      `article.read_current -> article.propose_edits`，多 Specialist 场景所有 ToolCall settled，禁止工具场景零调用。
 
 首选本地落点：`packages/agent-runtime/`、`packages/agent-application/`、`packages/tool-runtime/`。
 

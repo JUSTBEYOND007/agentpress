@@ -142,24 +142,16 @@ export class ArticleReviewCycle {
         const persisted = reviewRound(round, assessed, false, true, modelReview.usage);
         await this.port.recordRound(persisted);
         rounds.push(persisted);
-        return this.finishDegraded(
-          rounds,
-          usage,
-          modelCalls,
-          'model_parse_failed',
-          [],
-          current,
-        );
+        return this.finishDegraded(rounds, usage, modelCalls, 'model_parse_failed', [], current);
       }
 
-      const assessed = assessment(current, deterministic, modelReview.score ?? 0, modelReview.issues);
-      const persisted = reviewRound(
-        round,
-        assessed,
-        modelReview.passed,
-        false,
-        modelReview.usage,
+      const assessed = assessment(
+        current,
+        deterministic,
+        modelReview.score ?? 0,
+        modelReview.issues,
       );
+      const persisted = reviewRound(round, assessed, modelReview.passed, false, modelReview.usage);
       await this.port.recordRound(persisted);
       rounds.push(persisted);
       const issues = [...deterministic.issues, ...modelReview.issues];
@@ -221,7 +213,7 @@ export class ArticleReviewCycle {
     const selected = best?.candidate ?? fallback;
     const issues = best
       ? [...best.deterministic.issues, ...best.modelIssues]
-      : rounds.at(-1)?.candidate.deterministic.issues ?? [];
+      : (rounds.at(-1)?.candidate.deterministic.issues ?? []);
     return this.finishDegraded(rounds, usage, modelCalls, reason, issues, selected);
   }
 
@@ -253,7 +245,10 @@ export class ArticleReviewCycle {
     modelCalls: number,
     unresolvedIssues: readonly ArticleReviewIssue[],
   ): Promise<ArticleReviewCycleResult> {
-    await this.port.recordSelection({ artifactVersionId: selected.artifactVersionId, reason: selectionReason });
+    await this.port.recordSelection({
+      artifactVersionId: selected.artifactVersionId,
+      reason: selectionReason,
+    });
     return {
       status,
       selected,
@@ -272,7 +267,12 @@ function assessment(
   modelScore: number | undefined,
   modelIssues: readonly ArticleReviewIssue[],
 ): ScoredReviewCandidate {
-  return { candidate, deterministic, ...(modelScore === undefined ? {} : { modelScore }), modelIssues };
+  return {
+    candidate,
+    deterministic,
+    ...(modelScore === undefined ? {} : { modelScore }),
+    modelIssues,
+  };
 }
 
 function reviewRound(
@@ -298,13 +298,22 @@ function withinBudget(
 }
 
 function assertBudget(budget: ArticleReviewBudget): void {
-  if (!Number.isInteger(budget.maxRevisionRounds) || budget.maxRevisionRounds < 0 || budget.maxRevisionRounds > 3) {
+  if (
+    !Number.isInteger(budget.maxRevisionRounds) ||
+    budget.maxRevisionRounds < 0 ||
+    budget.maxRevisionRounds > 3
+  ) {
     throw new RangeError('Article review revision budget must be an integer between 0 and 3');
   }
   if (!Number.isInteger(budget.maxModelCalls) || budget.maxModelCalls < 1) {
     throw new RangeError('Article review model call budget must be a positive integer');
   }
-  if (budget.maxTokens < 1 || budget.maxCostUsd <= 0 || budget.passScore < 0 || budget.passScore > 100) {
+  if (
+    budget.maxTokens < 1 ||
+    budget.maxCostUsd <= 0 ||
+    budget.passScore < 0 ||
+    budget.passScore > 100
+  ) {
     throw new RangeError('Article review token, cost, and score budgets are invalid');
   }
 }

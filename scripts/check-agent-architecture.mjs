@@ -20,7 +20,8 @@ async function visit(directory) {
     }
     if (!['.ts', '.tsx'].includes(extname(entry.name))) continue;
     const source = await readFile(path, 'utf8');
-    const lines = source.length === 0 ? 0 : source.split('\n').length - Number(source.endsWith('\n'));
+    const lines =
+      source.length === 0 ? 0 : source.split('\n').length - Number(source.endsWith('\n'));
     if (lines > limit) oversized.push(`${path}: ${lines} lines (limit ${limit})`);
   }
 }

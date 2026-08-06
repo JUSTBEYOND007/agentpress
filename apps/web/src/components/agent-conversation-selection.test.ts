@@ -21,9 +21,7 @@ describe('conversation selection persistence', () => {
 
   it('restores only a branch that still belongs to the article conversation list', () => {
     expect(
-      chooseConversation(conversations, [
-        { conversationId: 'conversation', branchId: 'fork' },
-      ]),
+      chooseConversation(conversations, [{ conversationId: 'conversation', branchId: 'fork' }]),
     ).toEqual(conversations[1]);
     expect(
       chooseConversation(conversations, [

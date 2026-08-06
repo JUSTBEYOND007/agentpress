@@ -35,23 +35,35 @@ const anchored = {
 } as const;
 const operations = Type.Array(
   Type.Union([
-    Type.Object({
-      kind: Type.Literal('insert'),
-      afterBlockId: Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
-      block,
-    }, { additionalProperties: false }),
-    Type.Object({ ...anchored, kind: Type.Literal('replace'), block }, { additionalProperties: false }),
+    Type.Object(
+      {
+        kind: Type.Literal('insert'),
+        afterBlockId: Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
+        block,
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      { ...anchored, kind: Type.Literal('replace'), block },
+      { additionalProperties: false },
+    ),
     Type.Object({ ...anchored, kind: Type.Literal('delete') }, { additionalProperties: false }),
-    Type.Object({
-      ...anchored,
-      kind: Type.Literal('move'),
-      afterBlockId: Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
-    }, { additionalProperties: false }),
-    Type.Object({
-      ...anchored,
-      kind: Type.Literal('update_attrs'),
-      attrs: Type.Record(Type.String(), Type.Unknown()),
-    }, { additionalProperties: false }),
+    Type.Object(
+      {
+        ...anchored,
+        kind: Type.Literal('move'),
+        afterBlockId: Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        ...anchored,
+        kind: Type.Literal('update_attrs'),
+        attrs: Type.Record(Type.String(), Type.Unknown()),
+      },
+      { additionalProperties: false },
+    ),
   ]),
   { minItems: 1, maxItems: 200 },
 );

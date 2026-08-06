@@ -89,7 +89,10 @@ export function createResearchPlan(input: {
   const topic = normalizeQuery(input.topic);
   if (!topic) throw new TypeError('Research topic is required');
   const policy = policies[input.depth];
-  const queries = uniqueQueries([topic, ...(input.expandedQueries ?? [])]).slice(0, policy.maxQueries);
+  const queries = uniqueQueries([topic, ...(input.expandedQueries ?? [])]).slice(
+    0,
+    policy.maxQueries,
+  );
   return { purpose: input.purpose, depth: input.depth, queries, policy };
 }
 
