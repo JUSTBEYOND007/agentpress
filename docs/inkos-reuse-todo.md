@@ -67,6 +67,9 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       不把所有 RunPart 分支重新集中到单个消息组件。
 - [ ] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
       先减少职责和净行数，不允许以“后续再拆分”放行。
+      根架构入口已完成，但当前 `pnpm format:check` 仍报告 51 个既有文件差异；在不批量改写用户文件或
+      添加 ignore 白名单的前提下，CI 尚不能作为绿色必过门禁。需先按所有权分批消除格式债务，再提交只
+      调用根 `pnpm check` 的 workflow。API Extractor report 仍作为公共 API 稳定化的后续增强。
 
 架构门禁实施顺序（2026-08-07 更新）：
 
@@ -74,8 +77,10 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       workflow 等真实职责拆分核心 Agent owner：`pi-runtime-adapter.ts`、`tool-call-service.ts`、
       `worker-lifecycle.ts`、`schema-compatibility.ts`、`proposal-service.ts` 均已通过 500 行门禁；
       拆分没有创建笼统 `helpers.ts` 或第二套状态机。
-- [ ] 将现有 Web walker 提升为根级文件长度命令，为 Agent-facing TS/TSX 建立 500 行硬门禁；普通 Web
+- [x] 将现有 Web walker 提升为根级文件长度命令，为 Agent-facing TS/TSX 建立 500 行硬门禁；普通 Web
       源码的 1000 行规则独立保留。不得对白名单文件、文件名或目录名做例外来隐藏新增职责。
+      根 `pnpm check` 同时运行 `check:agent-architecture` 与 Web `check:file-lengths`，两套阈值保持独立且
+      没有超限白名单。
 - [x] 固定并复用 `dependency-cruiser@18.1.1`（MIT）检查源码循环、Workspace deep import 和 Domain
       边界；不自行实现 import parser 或图算法。当前只读审计未发现 Workspace package 环、deep import，
       且 `@agentpress/domain` 无外部依赖；门禁已巡检 5750 个模块、762 条依赖且无违规。
