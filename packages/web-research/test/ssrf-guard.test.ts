@@ -112,4 +112,19 @@ describe('SSRF guard', () => {
       }),
     ).rejects.toThrow(/signature/);
   });
+
+  it('extracts HTML through a parser and excludes executable nodes', async () => {
+    await expect(
+      fetchResearchSource('https://example.test/article', {
+        lookup: publicLookup,
+        fetch: () =>
+          Promise.resolve(
+            new Response(
+              '<html><head><title>A &amp; B</title><style>hidden-style</style></head><body><p>Visible <strong>text</strong>.</p><script>hidden-script</script></body></html>',
+              { headers: { 'content-type': 'text/html' } },
+            ),
+          ),
+      }),
+    ).resolves.toMatchObject({ title: 'A & B', text: 'A & B Visible text .' });
+  });
 });

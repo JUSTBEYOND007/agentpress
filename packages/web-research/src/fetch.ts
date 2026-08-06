@@ -1,4 +1,5 @@
 import { assertSafeUrl, type DnsAddress } from './ssrf-guard.js';
+import { parse } from 'parse5';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 const MAX_PDF_PAGES = 200;
@@ -92,14 +93,41 @@ function extractTextContent(
   raw: string,
   fallbackTitle: string,
 ): { readonly title: string; readonly text: string } {
-  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(raw)?.[1]?.trim() ?? fallbackTitle;
-  const text = raw
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const document = parse(raw);
+  const title = findElementText(document, 'title') || fallbackTitle;
+  const text = collectHtmlText(document).replace(/\s+/gu, ' ').trim();
   return { title, text };
+}
+
+function findElementText(value: unknown, elementName: string): string {
+  if (!isHtmlNode(value)) return '';
+  if (value.nodeName === elementName) return collectHtmlText(value).trim();
+  for (const child of value.childNodes ?? []) {
+    const found = findElementText(child, elementName);
+    if (found) return found;
+  }
+  return '';
+}
+
+function collectHtmlText(value: unknown, excluded = false): string {
+  if (!isHtmlNode(value)) return '';
+  const hidden = excluded || ['script', 'style', 'noscript', 'template'].includes(value.nodeName);
+  if (hidden) return '';
+  if (value.nodeName === '#text') return typeof value.value === 'string' ? value.value : '';
+  return (value.childNodes ?? []).map((child) => collectHtmlText(child)).filter(Boolean).join(' ');
+}
+
+function isHtmlNode(value: unknown): value is {
+  readonly nodeName: string;
+  readonly value?: unknown;
+  readonly childNodes?: readonly unknown[];
+} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'nodeName' in value &&
+    typeof value.nodeName === 'string'
+  );
 }
 
 export async function fetchPublicImage(

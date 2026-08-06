@@ -784,6 +784,9 @@ importers:
 
   packages/web-research:
     dependencies:
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
       unpdf:
         specifier: 1.8.0
         version: 1.8.0

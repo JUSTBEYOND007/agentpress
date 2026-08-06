@@ -138,6 +138,23 @@ the compact Skill identity while revision/hash/resource diagnostics remain persi
 online `pnpm eval:skill` target-model gate remains intentionally unchecked until credentials and a
 provider/model manifest are supplied.
 
+Web Research retains the existing SSRF/DNS/redirect/media/size guards and built-in `web_research`
+MCP route. `packages/web-research` now owns product enums, the typed ResearchBrief schema,
+claim-to-Evidence validation, provider-neutral search/fetch/synthesis Ports, depth-specific query,
+source, concurrency, byte and synthesis-token budgets, and canonical URL deduplication. Production
+HTML extraction now directly depends on pinned `parse5@7.3.0` instead of InkOS-style regular
+expression tag removal; PDF extraction continues through `unpdf@1.8.0`. Provider output remains
+untrusted and must become Evidence before a ResearchBrief claim can cite it. Search provider fields
+stay behind `runtime-tools`/MCP adapters and do not enter the domain contract.
+
+MCP remains independent of InkOS, which has no MCP subsystem at the pinned release. AgentPress
+continues to use the official TypeScript SDK through `packages/mcp-runtime`, with the three fixed
+built-in servers only. Their tools register in the shared Tool Registry and therefore execute via
+PersistentToolBridge, ToolCallService, capability, approval and settlement facts; Specialist and
+Skill paths receive no alternate executor. Oh My Pi reconnect and pi-mcp-adapter output-guard
+behavior remain pinned in their existing tests. Consumer projection shows typed goal/result facts
+and keeps JSON-RPC, transport and raw guarded payloads in diagnostic detail.
+
 Review/revision behavior was audited at the same fixed InkOS commit in
 `packages/core/src/pipeline/chapter-review-cycle.ts` and
 `packages/core/src/__tests__/chapter-review-cycle.test.ts`. The reusable contract is the order

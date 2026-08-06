@@ -319,17 +319,17 @@ Tool output guard。
 
 TODO：
 
-- [ ] 将 InkOS `purpose`（worldbuilding/era/profession/market/fact-check/general）和
+- [x] 将 InkOS `purpose`（worldbuilding/era/profession/market/fact-check/general）和
       `depth`（quick/standard/deep）评估为 AgentPress Research Brief 的产品级枚举，避免只暴露裸 query。
-- [ ] 研究输出定义为 typed Research Artifact：summary、claims、conflicts、unknowns、implications、
+- [x] 研究输出定义为 typed Research Artifact：summary、claims、conflicts、unknowns、implications、
       sources、confidence、query log、partial failures 和版本信息。
-- [ ] Claim 必须引用 Evidence ID；source count 不能自动等价为事实可信，单来源和抓取失败必须降级。
-- [ ] 搜索、URL 获取、正文抽取和报告合成使用独立 Port，不把 provider-specific Tavily 字段泄漏进领域层。
-- [ ] URL 获取继续复用 DNS/redirect SSRF guard、HTTPS allowlist、媒体类型、大小、超时和 secret redaction；
+- [x] Claim 必须引用 Evidence ID；source count 不能自动等价为事实可信，单来源和抓取失败必须降级。
+- [x] 搜索、URL 获取、正文抽取和报告合成使用独立 Port，不把 provider-specific Tavily 字段泄漏进领域层。
+- [x] URL 获取继续复用 DNS/redirect SSRF guard、HTTPS allowlist、媒体类型、大小、超时和 secret redaction；
       不采用 InkOS 的正则 HTML 去标签作为生产抽取器。
-- [ ] 查询扩展、去重、抓取并发、来源上限和预算由 Research policy 拥有，不写进通用 Agent executor。
-- [ ] 外部内容始终为 untrusted；网页中的指令不能调用工具、改变 Skill、提升权限或直接写文章。
-- [ ] Research Artifact 可打开和继续引用；消息流默认显示“查询数、保留来源数、部分失败、置信度”，
+- [x] 查询扩展、去重、抓取并发、来源上限和预算由 Research policy 拥有，不写进通用 Agent executor。
+- [x] 外部内容始终为 untrusted；网页中的指令不能调用工具、改变 Skill、提升权限或直接写文章。
+- [x] Research Artifact 可打开和继续引用；消息流默认显示“查询数、保留来源数、部分失败、置信度”，
       Evidence chip/来源抽屉承载来源，不默认展开原始页面正文。
 - [ ] 测试覆盖无凭据、零结果、重复 URL、redirect-to-private、超大响应、非文本、部分 fetch 失败、
       互相冲突来源、恶意网页指令和全部失败的 degraded report。
@@ -340,12 +340,12 @@ TODO：
 InkOS `v1.7.2` 没有 MCP 子系统，因此不得把 MCP 实现归因于 InkOS，也不得为了“对齐 InkOS”新造
 MCP manager。
 
-- [ ] 继续直接使用官方 MCP TypeScript SDK，并复用现有 `packages/mcp-runtime`、Oh My Pi reconnect
+- [x] 继续直接使用官方 MCP TypeScript SDK，并复用现有 `packages/mcp-runtime`、Oh My Pi reconnect
       行为和 `pi-mcp-adapter` output guard；真实缺口先进入 `docs/oh-my-pi-reuse-todo.md`。
-- [ ] 首版仍只注册 `web_research`、`workspace_knowledge`、`licensed_media` 三个宿主内置 Server。
-- [ ] MCP Tool 必须通过同一 PersistentToolBridge、ToolCallService、capability、approval 和 settlement；
+- [x] 首版仍只注册 `web_research`、`workspace_knowledge`、`licensed_media` 三个宿主内置 Server。
+- [x] MCP Tool 必须通过同一 PersistentToolBridge、ToolCallService、capability、approval 和 settlement；
       不为 Multi-Agent 或 Skill 创建旁路。
-- [ ] UI 显示用户目标和结果摘要，不默认显示 JSON-RPC、Server transport 和原始 JSON；技术详情可审计。
+- [x] UI 显示用户目标和结果摘要，不默认显示 JSON-RPC、Server transport 和原始 JSON；技术详情可审计。
 
 ## P1：结果优先的消费者投影
 
