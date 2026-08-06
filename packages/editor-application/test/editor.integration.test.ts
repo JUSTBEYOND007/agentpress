@@ -624,6 +624,60 @@ describeWithInfra('editor persistence and recovery', () => {
     });
   });
 
+  it('normalizes a serialized document into valid top-level blocks', async () => {
+    const service = new ProposalService(connection.db);
+    const proposal = await service.create({
+      articleId: ids.article,
+      reviewMode: 'document',
+      operations: [
+        {
+          operationId: 'serialized-document',
+          kind: 'insert',
+          afterBlockId: null,
+          block: {
+            type: 'doc',
+            attrs: { blockId: 'draft-root' },
+            content: [
+              paragraph('generated-title', 'Generated title'),
+              paragraph('generated-body', 'Generated body'),
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(
+      proposal.operations.map((operation) => [
+        operation.kind,
+        'block' in operation ? operation.block.type : undefined,
+      ]),
+    ).toEqual([
+      ['delete', undefined],
+      ['delete', undefined],
+      ['insert', 'paragraph'],
+      ['insert', 'paragraph'],
+    ]);
+    await expect(
+      service.decide({
+        proposalId: proposal.proposalId,
+        userId: ids.user,
+        decisions: { 'serialized-document:delete:0': 'accepted' },
+      }),
+    ).resolves.toMatchObject({ status: 'accepted' });
+
+    const [article] = await connection.db
+      .select({ currentRevisionId: articles.currentRevisionId })
+      .from(articles)
+      .where(eq(articles.id, ids.article));
+    const [revision] = await connection.db
+      .select({ document: articleRevisions.document })
+      .from(articleRevisions)
+      .where(eq(articleRevisions.id, article?.currentRevisionId ?? ''));
+    expect((revision?.document as { content: readonly { attrs: { blockId: string } }[] }).content.map(
+      ({ attrs }) => attrs.blockId,
+    )).toEqual(['generated-title', 'generated-body']);
+  });
+
   it('atomically promotes an acknowledged draft and schedules its index update', async () => {
     const articleId = randomUUID();
     const revisionId = randomUUID();
