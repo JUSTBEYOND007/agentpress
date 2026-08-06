@@ -4,6 +4,25 @@
   font-size: 11px;
 }
 
+.run-process-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-process-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-process-details > summary > svg {
+  margin-left: auto;
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.run-process-details[open] > summary > svg {
+  transform: rotate(180deg);
+}
+
 .run-process-status {
   display: flex;
   min-height: 28px;
@@ -74,9 +93,23 @@
 }
 
 .execution-status {
+  flex: 0 0 auto;
   margin-left: auto;
   color: #92938e;
   font-size: 10px;
+  white-space: nowrap;
+}
+
+.run-process-pipeline > summary > span:not(.execution-status),
+.run-process-utility > summary > span:not(.execution-status) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-process-sections {
+  display: grid;
+  gap: 8px;
+  padding: 3px 0 8px 12px;
 }
 
 .execution-duration {

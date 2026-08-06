@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, CircleAlert, LoaderCircle } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { numberValue, recordValue, stringValue } from '../lib/agentpress-assistant-runtime';
@@ -9,7 +9,12 @@ import type {
   RunPart,
   RunProcessPresentation,
 } from '../lib/agent-runtime-contracts';
-import { parseRunPart, statusLabel } from './agent-view-model';
+import { consumerTaskLabel, parseRunPart, statusLabel } from './agent-view-model';
+import { ContextSourcesPart } from './agent-context-sources';
+import { ReasoningPart } from './agent-reasoning-part';
+import { PlanPart } from './agent-plan-part';
+import { AgentProgressPart } from './agent-progress-part';
+import { AgentUsagePart } from './agent-usage-part';
 
 const toolLabels: Readonly<Record<string, string>> = {
   'article.read_current': '读取正文',
@@ -33,29 +38,45 @@ export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX
           <span role="status">{view.label}</span>
           {view.meta ? <small>{view.meta}</small> : null}
         </div>
-        {process.items.length > 0 ? (
-          <div className="run-process-items">
-            {process.items.map((item) => (
-              <ExecutionItemView item={item} key={item.id} />
-            ))}
-          </div>
-        ) : null}
       </div>
     );
   }
-  if (process.items.length === 0) return null;
+  if (process.items.length === 0 && process.parts.length === 0) return null;
 
   return (
-    <div className="run-process-details">
-      <div className="run-process-heading">
+    <details className="run-process-details">
+      <summary className="run-process-heading">
         <span>{view.label}</span>
-        {process.durationMs > 0 ? <small>{formatProcessDuration(process.durationMs)}</small> : null}
-      </div>
+        {process.durationMs > 0 ? (
+          <small>共 {formatProcessDuration(process.durationMs)}</small>
+        ) : null}
+        <ChevronDown aria-hidden="true" size={13} />
+      </summary>
       <div className="run-process-items">
         {process.items.map((item) => (
           <ExecutionItemView item={item} key={item.id} />
         ))}
       </div>
+      <ProcessSections parts={process.parts} />
+    </details>
+  );
+}
+
+function ProcessSections({ parts }: { readonly parts: readonly RunPart[] }): React.JSX.Element {
+  const latest = (type: RunPart['type']): RunPart | undefined =>
+    parts.findLast((part) => part.type === type);
+  const context = latest('context');
+  const reasoning = latest('reasoning');
+  const plan = latest('plan');
+  const progress = latest('progress');
+  const usage = latest('usage');
+  return (
+    <div className="run-process-sections">
+      {reasoning ? <ReasoningPart part={reasoning} embedded /> : null}
+      {progress ? <AgentProgressPart part={progress} embedded /> : null}
+      {plan ? <PlanPart part={plan} embedded /> : null}
+      {context ? <ContextSourcesPart part={context} embedded /> : null}
+      {usage ? <AgentUsagePart part={usage} embedded /> : null}
     </div>
   );
 }
@@ -84,12 +105,10 @@ export function parseProcessPresentation(data: unknown): RunProcessPresentation 
 export function processSummary(process: RunProcessPresentation) {
   const progress = process.parts.findLast(({ type }) => type === 'progress');
   const latestActivity = process.parts.findLast(({ type }) => type === 'activity');
-  const activeObjective = progress
-    ? stringValue(recordValue(progress.payload.activeStep).objective)
-    : '';
+  const activeOwner = progress ? stringValue(recordValue(progress.payload.activeStep).owner) : '';
   const label = process.terminal
-    ? '执行过程'
-    : activeObjective ||
+    ? '过程详情'
+    : (activeOwner ? `正在${consumerTaskLabel(activeOwner)}` : '') ||
       (latestActivity ? activeActivityLabel(latestActivity) : statusLabel(process.status));
   const completedSteps = progress ? numberValue(progress.payload.completedSteps) : 0;
   const totalSteps = progress ? numberValue(progress.payload.totalSteps) : 0;
@@ -130,9 +149,9 @@ function processSteps(parts: readonly RunPart[]): readonly { id: string; label: 
     if (part.type !== 'activity' || !part.status.endsWith('.succeeded')) return [];
     const toolId = stringValue(part.payload.toolId);
     const taskId = stringValue(part.payload.taskId);
-    const objective = stringValue(part.payload.objective);
+    const owner = stringValue(part.payload.owner);
     const key = toolId ? `tool:${toolId}` : taskId ? `task:${taskId}` : '';
-    const label = toolId ? toolLabels[toolId] : taskId && objective ? objective : '';
+    const label = toolId ? toolLabels[toolId] : taskId ? consumerTaskLabel(owner) : '';
     if (!key || !label || seen.has(key)) return [];
     seen.add(key);
     return [{ id: key, label }];
@@ -205,14 +224,16 @@ function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): 
         <span className={`execution-status is-${item.status}`}>{statusText(item.status)}</span>
       </summary>
       {item.result ? <div className="execution-result">{resultSummary(item.result)}</div> : null}
-      <ol>
-        {item.stages.map((stage) => (
-          <li key={stage.id}>
-            <span className={`stage-dot is-${stage.status}`} />
-            <span>{stage.label}</span>
-          </li>
-        ))}
-      </ol>
+      {item.stages.length > 1 ? (
+        <ol>
+          {item.stages.map((stage) => (
+            <li key={stage.id}>
+              <span className={`stage-dot is-${stage.status}`} />
+              <span>{stage.label}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
       {item.error ? <p className="execution-error">{item.error}</p> : null}
     </details>
   );

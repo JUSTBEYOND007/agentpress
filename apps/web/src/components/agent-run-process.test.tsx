@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AgentRunProcess, parseProcessPresentation, processSummary } from './agent-run-process';
 
 describe('Agent run process disclosure', () => {
-  it('does not render a disclosure for diagnostic-only process data', () => {
+  it('renders one collapsed disclosure for diagnostic-only process data', () => {
     const data = {
       runId: 'run-1',
       status: 'completed',
@@ -35,12 +35,12 @@ describe('Agent run process disclosure', () => {
     };
     const markup = renderToStaticMarkup(<AgentRunProcess data={data} />);
 
-    expect(markup).toBe('');
+    expect(markup).toContain('过程详情');
     const process = parseProcessPresentation(data);
     expect(process).toBeDefined();
     if (!process) return;
     expect(processSummary(process)).toMatchObject({
-      label: '执行过程',
+      label: '过程详情',
       meta: '',
     });
   });
@@ -64,9 +64,9 @@ describe('Agent run process disclosure', () => {
       />,
     );
 
-    expect(markup).toContain('执行过程');
-    expect(markup.match(/读取正文/gu)).toHaveLength(2);
-    expect(markup.match(/生成修改稿/gu)).toHaveLength(2);
+    expect(markup).toContain('过程详情');
+    expect(markup.match(/读取正文/gu)).toHaveLength(1);
+    expect(markup.match(/生成修改稿/gu)).toHaveLength(1);
     expect(markup).not.toContain('internal.runtime');
     expect(markup).not.toContain('搜索资料');
     expect(markup).toContain('19 秒');

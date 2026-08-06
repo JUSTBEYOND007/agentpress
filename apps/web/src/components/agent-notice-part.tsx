@@ -12,7 +12,7 @@ export function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Elem
   const error = recordValue(part.payload.error);
   const code = stringValue(error.code) || stringValue(part.payload.code);
   const message = noticeMessage(part, code, error);
-  const action = recoveryAction(part, code);
+  const action = recoveryAction(part, code, error);
   const Icon = state === 'waiting' ? ShieldAlert : state === 'failed' ? CircleX : AlertTriangle;
   return (
     <div className={`run-part notice-part notice-${state}`} role="status">
@@ -34,9 +34,15 @@ export function NoticePart({ part }: { readonly part: RunPart }): React.JSX.Elem
   );
 }
 
-export function recoveryAction(part: RunPart, code: string): { readonly label: string } | undefined {
+export function recoveryAction(
+  part: RunPart,
+  code: string,
+  error: Readonly<Record<string, unknown>> = {},
+): { readonly label: string } | undefined {
   if (part.type === 'recovery' || part.payload.pendingDraft === true) return undefined;
-  if (code.includes('stale') || code.includes('expired')) return { label: '基于最新正文重试' };
+  if (error.retryable === false) return undefined;
+  if (code === 'stale_revision' || code === 'proposal_expired')
+    return { label: '基于最新正文重试' };
   if (part.status === 'run.cancelled') return { label: '重新开始' };
   if (part.status === 'run.completed_with_degradation') return { label: '重新生成完整结果' };
   if (
@@ -59,11 +65,11 @@ export function noticeMessage(
     return '本次运行未完成，但正文修改草稿仍已保留，可以继续审阅。';
   if (part.status === 'run.cancelled') return '本次运行已停止。';
   if (part.status === 'run.completed_with_degradation') return '已完成，但部分步骤出现警告。';
-  if (code.includes('stale') || code.includes('expired')) {
+  if (code === 'stale_revision' || code === 'proposal_expired') {
     return '正文已经更新，这次修改未覆盖现有内容。请基于最新正文重新修改。';
   }
   if (code === 'provider_error') return '模型服务暂时不可用，请稍后重试。';
-  if (code === 'protocol_error') return 'Agent 没有完成本次运行协议，请重新发送。';
+  if (code === 'protocol_error') return '运行结果未通过完整性校验，请重新生成。';
   if (code === 'runtime_error') {
     const publicMessage = friendlyFailure(error.message, '运行服务暂时不可用，请稍后重试。');
     return publicMessage === '运行服务暂时不可用，请稍后重试。'

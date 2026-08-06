@@ -19,7 +19,9 @@ describe('run presentation projection', () => {
     expect(texts(content)).toEqual([]);
     const outcome = dataByName(content, 'agentpress-article-outcome');
     expect((outcome.process as { parts: RunPart[] }).parts.map(({ type }) => type)).toEqual([
+      'context',
       'activity',
+      'usage',
     ]);
     expect(outcome.process).toMatchObject({
       items: [{ kind: 'utility-group', count: 1, status: 'completed' }],
@@ -33,7 +35,7 @@ describe('run presentation projection', () => {
     );
 
     expect(texts(content)).toEqual(['已生成修改，等待审阅。']);
-    expect(names(content)).toEqual(['agentpress-run-part']);
+    expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-process']);
   });
 
   it('keeps an ordinary answer with a separately disclosed reasoning summary', () => {
@@ -48,7 +50,7 @@ describe('run presentation projection', () => {
     );
 
     expect(texts(content)).toEqual(['这是普通回答。']);
-    expect(names(content)).toEqual(['agentpress-run-part']);
+    expect(names(content)).toEqual(['agentpress-run-process']);
   });
 
   it('keeps warnings visible before the stable process status', () => {
@@ -64,7 +66,7 @@ describe('run presentation projection', () => {
     const content = projectionContent(
       projection([part('reasoning', 'run.planning', 1, {})], false, 'planning'),
     );
-    expect(names(content)).toEqual(['agentpress-run-part']);
+    expect(names(content)).toEqual(['agentpress-run-process']);
   });
 
   it('keeps the process position stable across terminal state changes', () => {
@@ -118,7 +120,7 @@ describe('run presentation projection', () => {
 
     expect(names(content)).toEqual(['agentpress-run-process']);
     const process = dataByName(content, 'agentpress-run-process');
-    expect((process.parts as RunPart[]).map(({ type }) => type)).toEqual(['activity']);
+    expect((process.parts as RunPart[]).map(({ type }) => type)).toEqual(['activity', 'usage']);
     expect(process).toMatchObject({ durationMs: 19_000 });
   });
 
@@ -167,8 +169,38 @@ describe('run presentation projection', () => {
       ),
     );
 
-    expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-part']);
-    expect(names(content)).not.toContain('agentpress-run-process');
+    expect(names(content)).toEqual([
+      'agentpress-run-part',
+      'agentpress-run-part',
+      'agentpress-run-process',
+    ]);
+    expect(JSON.stringify(content)).toContain('call-1');
+  });
+
+  it('uses a consumer task label and suppresses an orphaned started task after failure', () => {
+    const content = projectionContent(
+      projection(
+        [
+          part('plan', 'plan.revised', 1, {
+            tasks: [
+              { id: 'task-1', owner: 'editor', objective: 'article UUID and SHA-256 secret' },
+            ],
+          }),
+          part('activity', 'task.started', 2, {
+            taskId: 'task-1',
+            owner: 'editor',
+            objective: 'article UUID and SHA-256 secret',
+          }),
+          part('warning', 'run.failed', 3, { error: { code: 'runtime_error' } }),
+        ],
+        true,
+        'failed',
+      ),
+    );
+    expect(JSON.stringify(content)).not.toContain('article UUID');
+    expect(JSON.stringify(content)).not.toContain('SHA-256');
+    expect(JSON.stringify(content)).toContain('task-1');
+    expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-process']);
   });
 });
 

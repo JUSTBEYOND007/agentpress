@@ -12,6 +12,7 @@ import type {
   RunProcessPresentation,
   RunProjection,
 } from './agent-runtime-contracts';
+import { consumerTaskLabel } from './agent-consumer-labels';
 
 export function buildRunTurns(
   messages: readonly StableAgentMessage[],
@@ -85,13 +86,17 @@ export function projectionContent(
     | { readonly type: 'data'; readonly name: string; readonly data: unknown }
   )[] = [];
   const projectedParts = augmentedProjectionParts(projection);
+  const processParts = projectedParts
+    .filter((part) => isProcessPart(part, projection.terminal))
+    .map(sanitizeProcessPart);
+  const processPartIds = new Set(processParts.map(({ id }) => id));
   const process: RunProcessPresentation = {
     runId: projection.runId,
     status: projection.status,
     terminal: projection.terminal,
     durationMs: processDurationMs(projectedParts),
-    parts: projectedParts.filter(isProcessPart),
-    items: executionItems(projectedParts.filter(isProcessPart), projectedParts),
+    parts: processParts,
+    items: executionItems(processParts, projectedParts),
   };
   const articleProposalIds = new Set(
     projectedParts.flatMap((part) => {
@@ -110,7 +115,12 @@ export function projectionContent(
   let processAttached = false;
 
   for (const part of projectedParts) {
-    if (isProcessPart(part) || isConsumerHiddenDiagnostic(part.type)) continue;
+    if (
+      processPartIds.has(part.id) ||
+      isConsumerHiddenDiagnostic(part.type) ||
+      isStaleTerminalActivity(part, projection.terminal)
+    )
+      continue;
     if (part.type === 'text') {
       const message = recordValue(part.payload.message);
       const text = stringValue(message.content) || stringValue(part.payload.content);
@@ -157,13 +167,71 @@ function processDurationMs(parts: readonly RunPart[]): number {
 }
 
 function isConsumerHiddenDiagnostic(type: RunPart['type']): boolean {
-  return type === 'context' || type === 'plan' || type === 'usage';
+  return (
+    type === 'context' ||
+    type === 'reasoning' ||
+    type === 'plan' ||
+    type === 'progress' ||
+    type === 'usage'
+  );
 }
 
-function isProcessPart(part: RunPart): boolean {
-  if (part.type === 'progress') return true;
+function isProcessPart(part: RunPart, terminal: boolean): boolean {
+  if (isConsumerHiddenDiagnostic(part.type)) return true;
   if (part.type !== 'activity') return false;
-  return !/\.(failed|cancelled|denied|expired)$/u.test(part.status);
+  if (terminal && /\.(started|executing)$/u.test(part.status)) return false;
+  return !/\.(failed|cancelled|denied|expired|interrupted)$/u.test(part.status);
+}
+
+function isStaleTerminalActivity(part: RunPart, terminal: boolean): boolean {
+  return terminal && part.type === 'activity' && /\.(started|executing)$/u.test(part.status);
+}
+
+function sanitizeProcessPart(part: RunPart): RunPart {
+  if (part.type === 'reasoning') {
+    return {
+      ...part,
+      payload: {
+        durationMs: part.payload.durationMs,
+        eventAt: part.payload.eventAt,
+      },
+    };
+  }
+  if (part.type === 'plan') {
+    const tasks = Array.isArray(part.payload.tasks)
+      ? part.payload.tasks.flatMap((task) => {
+          if (typeof task !== 'object' || task === null || Array.isArray(task)) return [];
+          const record = task as Record<string, unknown>;
+          const id = stringProperty(record, 'id');
+          const owner = stringProperty(record, 'owner');
+          return id ? [{ id, ...(owner ? { owner } : {}) }] : [];
+        })
+      : [];
+    return { ...part, payload: { summary: part.payload.summary, tasks } };
+  }
+  if (part.type === 'progress') {
+    const activeStep = recordProperty(part.payload, 'activeStep');
+    return {
+      ...part,
+      payload: {
+        phase: part.payload.phase,
+        completedSteps: part.payload.completedSteps,
+        totalSteps: part.payload.totalSteps,
+        ...(stringProperty(activeStep, 'owner')
+          ? { activeStep: { owner: stringProperty(activeStep, 'owner') } }
+          : {}),
+        outstandingInteraction: part.payload.outstandingInteraction,
+        recoveryPoint: part.payload.recoveryPoint,
+      },
+    };
+  }
+  if (part.type === 'activity') {
+    const payload = Object.fromEntries(
+      Object.entries(part.payload).filter(([key]) => key !== 'objective'),
+    );
+    return { ...part, payload };
+  }
+  return part;
 }
 
 const utilityTools = new Set([
@@ -205,8 +273,8 @@ function executionItems(
       if (typeof task !== 'object' || task === null || Array.isArray(task)) continue;
       const record = task as Record<string, unknown>;
       const id = stringProperty(record, 'id');
-      const objective = stringProperty(record, 'objective');
-      if (id && objective) taskLabels.set(id, objective);
+      const owner = stringProperty(record, 'owner');
+      if (id && owner) taskLabels.set(id, consumerTaskLabel(owner));
     }
   }
   type MutableUtility = {
@@ -301,7 +369,12 @@ function executionItems(
 }
 
 function executionStatus(status: string): ConsumerExecutionStatus {
-  if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
+  if (
+    status.endsWith('.failed') ||
+    status.endsWith('.denied') ||
+    status.endsWith('.expired') ||
+    status.endsWith('.interrupted')
+  )
     return 'error';
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return 'completed';
   if (status.endsWith('.executing') || status.endsWith('.started')) return 'processing';
@@ -342,19 +415,25 @@ function lifecycleStagesForPart(part: RunPart, label: string): readonly Consumer
 }
 
 function stageLabel(label: string, status: string): string {
-  if (status.endsWith('.succeeded')) return `${label}完成`;
-  if (status.endsWith('.failed')) return `${label}未完成`;
-  if (status.endsWith('.executing') || status.endsWith('.started')) return `正在${label}`;
+  if (status.endsWith('.succeeded') || status.endsWith('.completed')) return '结果已生成';
+  if (
+    status.endsWith('.failed') ||
+    status.endsWith('.denied') ||
+    status.endsWith('.expired') ||
+    status.endsWith('.interrupted')
+  )
+    return '未完成';
+  if (status.endsWith('.executing') || status.endsWith('.started')) return '已开始';
   return label;
 }
 
 function activityDisplayLabel(part: RunPart, taskLabels: ReadonlyMap<string, string>): string {
   const toolId = stringProperty(part.payload, 'toolId');
   if (toolId && toolLabels[toolId]) return toolLabels[toolId];
-  const objective = stringProperty(part.payload, 'objective');
   const taskId = stringProperty(part.payload, 'taskId');
+  const owner = stringProperty(part.payload, 'owner');
   return (
-    objective ??
+    (owner ? consumerTaskLabel(owner) : undefined) ??
     (taskId ? taskLabels.get(taskId) : undefined) ??
     (part.status.startsWith('task.') ? '执行任务' : '处理请求')
   );

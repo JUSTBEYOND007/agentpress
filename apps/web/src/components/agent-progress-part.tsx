@@ -2,12 +2,27 @@
 
 import { CheckCircle2, Flag, PauseCircle } from 'lucide-react';
 
-import { numberValue, recordValue, stringValue, type RunPart } from '../lib/agentpress-assistant-runtime';
+import {
+  numberValue,
+  recordValue,
+  stringValue,
+  type RunPart,
+} from '../lib/agentpress-assistant-runtime';
+import { consumerTaskLabel } from './agent-view-model';
 
-export function AgentProgressPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+export function AgentProgressPart({
+  part,
+  embedded = false,
+}: {
+  readonly part: RunPart;
+  readonly embedded?: boolean;
+}): React.JSX.Element {
   const view = progressView(part.payload);
   return (
-    <section className="run-part agent-progress-part" aria-label="长任务进度">
+    <section
+      className={`${embedded ? 'run-process-section is-embedded' : 'run-part'} agent-progress-part`}
+      aria-label="长任务进度"
+    >
       <div className="agent-progress-heading">
         <Flag aria-hidden="true" size={13} />
         <strong>{phaseLabel(view.phase)}</strong>
@@ -17,7 +32,7 @@ export function AgentProgressPart({ part }: { readonly part: RunPart }): React.J
           </span>
         ) : null}
       </div>
-      {view.activeObjective ? <p>{view.activeObjective}</p> : null}
+      {view.activeOwner ? <p>{consumerTaskLabel(view.activeOwner)}</p> : null}
       {view.outstandingInteraction ? (
         <div className="agent-progress-waiting">
           <PauseCircle aria-hidden="true" size={12} />
@@ -41,7 +56,7 @@ export function progressView(payload: Readonly<Record<string, unknown>>) {
     phase: stringValue(payload.phase),
     completedSteps: numberValue(payload.completedSteps),
     totalSteps: numberValue(payload.totalSteps),
-    activeObjective: stringValue(activeStep.objective),
+    activeOwner: stringValue(activeStep.owner),
     outstandingInteraction: stringValue(payload.outstandingInteraction),
     recoveryReason: stringValue(recoveryPoint.reason),
   };

@@ -434,7 +434,15 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
         now: recoveredAt,
       }),
     );
-    expect(requeued).toEqual([{ taskId, runId: ids.run }]);
+    expect(requeued).toMatchObject([{ taskId, runId: ids.run, attempt: 1 }]);
+    await expect(
+      connection.db
+        .select({ eventType: runEvents.eventType, taskId: runEvents.payload })
+        .from(runEvents)
+        .where(eq(runEvents.runId, ids.run)),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ eventType: 'task.interrupted' })]),
+    );
     await expect(
       connection.db.transaction((transaction) =>
         requeueExpiredAgentTasks(transaction, {

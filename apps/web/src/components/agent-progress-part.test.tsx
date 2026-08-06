@@ -17,7 +17,7 @@ describe('Agent progress part', () => {
             phase: 'waiting_for_user',
             completedSteps: 1,
             totalSteps: 3,
-            activeStep: { objective: '撰写正文', owner: 'writer' },
+        activeStep: { objective: '撰写正文', owner: 'writer' },
             outstandingInteraction: 'ask-user',
             recoveryPoint: { reason: 'task_settled' },
           },
@@ -27,7 +27,7 @@ describe('Agent progress part', () => {
 
     expect(markup).toContain('等待补充信息');
     expect(markup).toContain('1/3 已完成');
-    expect(markup).toContain('撰写正文');
+    expect(markup).toContain('撰写内容');
     expect(markup).toContain('最近安全点：已保存的任务结果');
     expect(markup).not.toContain('task_settled');
   });

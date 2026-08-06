@@ -4,7 +4,8 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { enqueueOutboxMessage } from './outbox.js';
-import { agentTaskLeases, agentTasks, taskResults } from './schema.js';
+import { appendRunEvent } from './run-event-store.js';
+import { agentTaskLeases, agentTasks, runEvents, taskResults } from './schema.js';
 
 export type TaskLease = {
   readonly leaseId: string;
@@ -239,11 +240,32 @@ export async function requeueExpiredAgentTasks(
     readonly topic: string;
     readonly createId: () => string;
     readonly now?: Date;
+    readonly collectEvent?: (event: typeof runEvents.$inferSelect) => void;
   },
-): Promise<readonly { readonly taskId: string; readonly runId: string }[]> {
+): Promise<
+  readonly {
+    readonly taskId: string;
+    readonly runId: string;
+    readonly attempt: number;
+    readonly owner: string;
+  }[]
+> {
   const now = input.now ?? new Date();
   const rows = await reclaimExpiredAgentTaskRows(transaction, now);
   for (const row of rows) {
+    const event = await appendRunEvent(transaction, {
+      id: input.createId(),
+      runId: row.runId,
+      eventType: 'task.interrupted',
+      payload: {
+        taskId: row.taskId,
+        owner: row.owner,
+        attempt: row.attempt,
+        reason: 'lease_expired',
+        recoveryScheduled: true,
+      },
+    });
+    input.collectEvent?.(event);
     const messageId = input.createId();
     await enqueueOutboxMessage(transaction, {
       id: messageId,
@@ -266,7 +288,14 @@ export async function requeueExpiredAgentTasks(
 function reclaimExpiredAgentTaskRows(
   db: AgentPressDatabase | DatabaseTransaction,
   now: Date,
-): Promise<readonly { readonly taskId: string; readonly runId: string }[]> {
+): Promise<
+  readonly {
+    readonly taskId: string;
+    readonly runId: string;
+    readonly attempt: number;
+    readonly owner: string;
+  }[]
+> {
   return db
     .update(agentTasks)
     .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
@@ -286,5 +315,10 @@ function reclaimExpiredAgentTaskRows(
         )`,
       ),
     )
-    .returning({ taskId: agentTasks.id, runId: agentTasks.runId });
+    .returning({
+      taskId: agentTasks.id,
+      runId: agentTasks.runId,
+      attempt: agentTasks.attempt,
+      owner: agentTasks.owner,
+    });
 }

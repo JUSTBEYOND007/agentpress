@@ -30,7 +30,7 @@ export function AgentArticleChangePart({
       <div className="proposal-heading">
         <div>
           <strong>{outcomeLabel}</strong>
-          {duration ? <span>{duration}</span> : null}
+          {duration ? <span>共 {duration}</span> : null}
         </div>
         <span className="proposal-view-status">{proposalStatusLabel(proposal.status)}</span>
       </div>

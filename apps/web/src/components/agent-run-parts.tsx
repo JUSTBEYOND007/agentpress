@@ -1,6 +1,6 @@
 'use client';
 
-import { ActionBarPrimitive, MessagePrimitive } from '@assistant-ui/react';
+import { ActionBarPrimitive, AuiIf, MessagePrimitive } from '@assistant-ui/react';
 import {
   Check,
   CircleAlert,
@@ -61,14 +61,22 @@ export function AssistantMessage(): React.JSX.Element {
             },
           }}
         />
-        <ActionBarPrimitive.Root className="message-actions" hideWhenRunning>
-          <ActionBarPrimitive.Copy aria-label="复制回答" title="复制回答">
-            <Copy aria-hidden="true" size={13} />
-          </ActionBarPrimitive.Copy>
-          <ActionBarPrimitive.Reload aria-label="创建分支并重新生成" title="重新生成">
-            <RefreshCw aria-hidden="true" size={13} />
-          </ActionBarPrimitive.Reload>
-        </ActionBarPrimitive.Root>
+        <AuiIf
+          condition={(state) =>
+            state.message.content.some(
+              (part) => part.type === 'text' && part.text.trim().length > 0,
+            )
+          }
+        >
+          <ActionBarPrimitive.Root className="message-actions" hideWhenRunning>
+            <ActionBarPrimitive.Copy aria-label="复制回答" title="复制回答">
+              <Copy aria-hidden="true" size={13} />
+            </ActionBarPrimitive.Copy>
+            <ActionBarPrimitive.Reload aria-label="创建分支并重新生成" title="重新生成">
+              <RefreshCw aria-hidden="true" size={13} />
+            </ActionBarPrimitive.Reload>
+          </ActionBarPrimitive.Root>
+        </AuiIf>
       </div>
     </MessagePrimitive.Root>
   );

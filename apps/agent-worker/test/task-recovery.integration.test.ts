@@ -144,7 +144,7 @@ describeWithInfrastructure('Kafka detached Task recovery', () => {
           now: new Date(lostAt.getTime() + 2),
         }),
       ),
-    ).resolves.toContainEqual({ taskId, runId: run.runId });
+    ).resolves.toContainEqual(expect.objectContaining({ taskId, runId: run.runId, attempt: 1 }));
     const recoveryCommand = await waitForTaskCommand(taskId, topic);
     const recoveryMessageId = parseAgentTaskCommandPayload(recoveryCommand)?.messageId;
     expect(recoveryMessageId).toBeDefined();

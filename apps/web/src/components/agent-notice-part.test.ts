@@ -16,7 +16,7 @@ describe('noticeMessage', () => {
     expect(noticeMessage(part('run.recovering', 'recovery'), '', {})).toContain('恢复');
     expect(noticeMessage(part('run.cancelled'), '', {})).toContain('停止');
     expect(noticeMessage(part('run.completed_with_degradation'), '', {})).toContain('警告');
-    expect(noticeMessage(part('run.failed'), 'protocol_error', {})).toContain('协议');
+    expect(noticeMessage(part('run.failed'), 'protocol_error', {})).toContain('完整性');
     expect(
       noticeMessage(
         { ...part('run.failed'), payload: { pendingDraft: true } },

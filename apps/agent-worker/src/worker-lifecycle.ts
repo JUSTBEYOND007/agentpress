@@ -472,13 +472,18 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
   }
 
   private async recoverExpiredTasks(now: Date): Promise<void> {
+    const events: Parameters<RunEventPublisher['publish']>[0][] = [];
     const recovered = await this.database.db.transaction((transaction) =>
       requeueExpiredAgentTasks(transaction, {
         topic: AGENT_TASK_COMMAND_TOPIC,
         createId: randomUUID,
         now,
+        collectEvent: (event) => {
+          events.push({ durable: true, event });
+        },
       }),
     );
+    for (const event of events) await this.createEventPublisher().publish(event);
     if (recovered.length > 0) {
       this.logger.warn(
         { tasks: recovered },

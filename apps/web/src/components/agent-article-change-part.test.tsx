@@ -118,7 +118,7 @@ describe('Agent article change part', () => {
     expect(markup).toContain('已生成 1 处修改');
     expect(markup).toContain('19 秒');
     expect(markup).toContain('在正文中审阅');
-    expect(markup).toContain('执行过程');
+    expect(markup).toContain('过程详情');
     expect(markup).not.toContain('<details open');
   });
 });

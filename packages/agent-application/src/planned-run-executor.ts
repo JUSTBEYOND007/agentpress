@@ -5,6 +5,7 @@ import type {
   RuntimeEvent,
   RuntimeMessage,
   RuntimeCurrentTurn,
+  RuntimeFailure,
   RuntimeResult,
   RuntimeTool,
   RuntimeTranscriptMessage,
@@ -137,6 +138,8 @@ type PlannedRunExecutorOptions = {
 };
 
 const specialistRoles = ['researcher', 'writer', 'editor', 'fact_checker', 'illustrator'] as const;
+const INLINE_TASK_TIMEOUT_MS = 120_000;
+const TASK_LEASE_GRACE_MS = 30_000;
 const artifactTypes = [
   'ResearchBrief',
   'Outline',
@@ -297,17 +300,6 @@ export class PlannedRunExecutor {
     if (!envelope.rootRequest) {
       return 'failed';
     }
-    const claim = await this.options.database.transaction((transaction) =>
-      claimAgentTask(transaction, {
-        taskId,
-        workerId: `task:${String(process.pid)}`,
-        leaseId: this.createId(),
-        leaseToken: this.createId(),
-        leaseMs: request.timeoutMs + 30_000,
-        now: this.now(),
-      }),
-    );
-    if (!claim) return 'skipped';
     const task: PlannedTaskSpec = {
       id: persisted.id,
       clientKey: persisted.id,
@@ -319,20 +311,27 @@ export class PlannedRunExecutor {
       capabilities: request.capabilities,
       detached: true,
     };
+    const claim = await this.claimTaskAttempt(
+      runId,
+      task,
+      request.timeoutMs,
+      `task:${String(process.pid)}`,
+    );
+    if (!claim) return 'skipped';
     try {
       const result = await this.executeTask(
         runId,
         task,
         envelope.rootRequest,
         new Map(),
+        claim.claim.attempt,
         signal,
-        claim.attempt,
       );
       return result.status;
     } finally {
       await releaseAgentTaskLease(this.options.database, {
-        leaseToken: claim.lease.leaseToken,
-        workerId: claim.lease.workerId,
+        leaseToken: claim.claim.lease.leaseToken,
+        workerId: claim.claim.lease.workerId,
         now: this.now(),
       });
     }
@@ -604,10 +603,7 @@ export class PlannedRunExecutor {
     if (requiredFailure) {
       return {
         degraded: false,
-        result: protocolFailure(
-          [],
-          `Required ${requiredFailure.owner} task failed: ${requiredFailure.failure ?? 'unknown failure'}`,
-        ),
+        result: requiredTaskFailure(requiredFailure),
       };
     }
     if (tasks.length === 1 && tasks[0]?.clientKey === 'confirmed-article-edit') {
@@ -787,7 +783,7 @@ export class PlannedRunExecutor {
         ready.map((task) =>
           task.detached
             ? this.waitForDetachedTask(runId, task, signal)
-            : this.executeTask(runId, task, rootPrompt, settled, signal),
+            : this.executeInlineTask(runId, task, rootPrompt, settled, signal),
         ),
       );
       for (const task of wave) {
@@ -1052,19 +1048,9 @@ export class PlannedRunExecutor {
     task: PlannedTaskSpec,
     rootPrompt: RuntimeCurrentTurn,
     settled: ReadonlyMap<string, SettledTask>,
+    attempt: number,
     signal?: AbortSignal,
-    claimedAttempt?: number,
   ): Promise<SettledTask> {
-    const attempt = claimedAttempt ?? (await this.updateTaskStatus(runId, task, 'running'));
-    if (attempt === undefined) {
-      return {
-        ...task,
-        status: 'failed',
-        artifacts: [],
-        warnings: [],
-        failure: 'attempt_budget_exhausted',
-      };
-    }
     let completion:
       | {
           readonly status: 'succeeded' | 'failed';
@@ -1167,7 +1153,7 @@ export class PlannedRunExecutor {
         status: result.status === 'cancelled' ? 'cancelled' : 'failed',
         artifacts: [],
         warnings: [],
-        failure: 'protocol_error',
+        failure: result.status === 'failed' ? result.error.code : 'protocol_error',
         ...(assistant ? { usage: assistant.usage } : {}),
       };
       return (await this.persistTaskResult(runId, failed, attempt))
@@ -1186,6 +1172,74 @@ export class PlannedRunExecutor {
     return (await this.persistTaskResult(runId, taskResult, attempt))
       ? taskResult
       : staleTaskSettlement(task);
+  }
+
+  private async executeInlineTask(
+    runId: string,
+    task: PlannedTaskSpec,
+    rootPrompt: RuntimeCurrentTurn,
+    settled: ReadonlyMap<string, SettledTask>,
+    signal?: AbortSignal,
+  ): Promise<SettledTask> {
+    const claim = await this.claimTaskAttempt(
+      runId,
+      task,
+      INLINE_TASK_TIMEOUT_MS,
+      `planned:${String(process.pid)}`,
+    );
+    if (!claim) {
+      return {
+        ...task,
+        status: 'failed',
+        artifacts: [],
+        warnings: [],
+        failure: 'attempt_budget_exhausted',
+      };
+    }
+    try {
+      return await this.executeTask(runId, task, rootPrompt, settled, claim.claim.attempt, signal);
+    } finally {
+      await releaseAgentTaskLease(this.options.database, {
+        leaseToken: claim.claim.lease.leaseToken,
+        workerId: claim.claim.lease.workerId,
+        now: this.now(),
+      });
+    }
+  }
+
+  private async claimTaskAttempt(
+    runId: string,
+    task: PlannedTaskSpec,
+    timeoutMs: number,
+    workerId: string,
+  ) {
+    const result = await this.options.database.transaction(async (transaction) => {
+      const claim = await claimAgentTask(transaction, {
+        taskId: task.id,
+        workerId,
+        leaseId: this.createId(),
+        leaseToken: this.createId(),
+        leaseMs: timeoutMs + TASK_LEASE_GRACE_MS,
+        now: this.now(),
+      });
+      if (!claim) return undefined;
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId,
+        eventType: 'task.started',
+        payload: {
+          taskId: task.id,
+          owner: task.owner,
+          criticality: task.criticality,
+          attempt: claim.attempt,
+        },
+      });
+      return { claim, event };
+    });
+    if (result) {
+      await this.options.publisher.publish({ durable: true, event: toDurableEvent(result.event) });
+    }
+    return result;
   }
 
   /** Waits on the durable TaskResult produced by a detached worker. */
@@ -1661,7 +1715,7 @@ export class PlannedRunExecutor {
   private async updateTaskStatus(
     runId: string,
     task: PlannedTaskSpec,
-    status: 'running' | 'skipped',
+    status: 'skipped',
     failure?: string,
   ): Promise<number | undefined> {
     const event = await this.options.database.transaction(async (transaction) => {
@@ -1670,26 +1724,17 @@ export class PlannedRunExecutor {
         .update(agentTasks)
         .set({
           status,
-          ...(status === 'running'
-            ? { attempt: sql`${agentTasks.attempt} + 1` }
-            : { completedAt: now }),
+          completedAt: now,
           updatedAt: now,
           version: sql`${agentTasks.version} + 1`,
         })
-        .where(
-          status === 'running'
-            ? and(
-                eq(agentTasks.id, task.id),
-                sql`${agentTasks.attempt} < ${agentTasks.maxAttempts}`,
-              )
-            : eq(agentTasks.id, task.id),
-        )
+        .where(eq(agentTasks.id, task.id))
         .returning({ attempt: agentTasks.attempt });
       if (updated.length === 0) return undefined;
       const event = await appendRunEvent(transaction, {
         id: this.createId(),
         runId,
-        eventType: `task.${status === 'running' ? 'started' : 'skipped'}`,
+        eventType: 'task.skipped',
         payload: { taskId: task.id, owner: task.owner, ...(failure ? { failure } : {}) },
       });
       return { attempt: updated[0]?.attempt, event };
@@ -2037,6 +2082,35 @@ function protocolFailure(messages: readonly RuntimeMessage[], message: string): 
     messages,
     error: { code: 'protocol_error', message, retryable: true },
   };
+}
+
+function requiredTaskFailure(task: SettledTask): RuntimeResult {
+  const failure = task.failure ?? 'runtime_error';
+  const runtimeCodes = new Set([
+    'provider_error',
+    'invalid_history',
+    'protocol_error',
+    'runtime_error',
+  ]);
+  const code = runtimeCodes.has(failure) ? (failure as RuntimeFailure['code']) : 'runtime_error';
+  return {
+    status: 'failed',
+    messages: [],
+    error: {
+      code,
+      message: publicTaskFailureMessage(failure),
+      retryable: failure !== 'stale_task_settlement' && failure !== 'attempt_budget_exhausted',
+    },
+  };
+}
+
+function publicTaskFailureMessage(failure: string): string {
+  if (failure === 'provider_error') return '模型服务暂时不可用，请稍后重试。';
+  if (failure === 'invalid_history') return '运行上下文无法恢复，请重新生成。';
+  if (failure === 'protocol_error') return '运行结果未通过完整性校验，请重新生成。';
+  if (failure === 'stale_task_settlement' || failure === 'attempt_budget_exhausted')
+    return '运行未完成，当前没有可用结果。';
+  return '这次处理没有完成，请稍后重试。';
 }
 
 function findAssistant(result: RuntimeResult): RuntimeAssistantMessage | undefined {

@@ -6,6 +6,9 @@ import {
   stringValue,
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
+import { consumerTaskLabel } from '../lib/agent-consumer-labels';
+
+export { consumerTaskLabel };
 
 export type SkillView = {
   readonly skillId: string;
@@ -153,8 +156,6 @@ export function statusLabel(status: string): string {
 }
 
 export function activityLabel(part: RunPart): string {
-  const summary = stringValue(part.payload.summary);
-  if (summary && !looksInternal(summary)) return summary;
   if (part.status.startsWith('tool.')) {
     if (part.status === 'tool.executing') return '正在使用所需工具';
     if (part.status === 'tool.succeeded') return '所需信息已准备好';
@@ -162,8 +163,7 @@ export function activityLabel(part: RunPart): string {
     return '正在准备下一步';
   }
   if (part.status.startsWith('task.')) {
-    const objective = stringValue(part.payload.objective);
-    if (objective && !looksInternal(objective)) return objective;
+    return consumerTaskLabel(stringValue(part.payload.owner));
   }
   return statusLabel(part.status);
 }

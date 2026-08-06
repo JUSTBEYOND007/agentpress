@@ -3,6 +3,7 @@
 import { ListChecks } from 'lucide-react';
 
 import { recordValue, stringValue, type RunPart } from '../lib/agentpress-assistant-runtime';
+import { consumerTaskLabel } from './agent-view-model';
 
 export function PlanPart({
   part,
@@ -19,7 +20,7 @@ export function PlanPart({
         <li key={stringValue(task.id) || String(index)}>
           <span className="task-state" />
           <div>
-            <strong>{stringValue(task.objective) || stringValue(task.label)}</strong>
+            <strong>{consumerTaskLabel(stringValue(task.owner))}</strong>
           </div>
         </li>
       ))}
