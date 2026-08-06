@@ -56,6 +56,18 @@ export type RunProjection = {
   readonly completedAt?: string;
 };
 
+export type RunProcessPresentation = {
+  readonly runId: string;
+  readonly status: string;
+  readonly terminal: boolean;
+  readonly parts: readonly RunPart[];
+};
+
+export type ArticleOutcomePresentation = {
+  readonly part: RunPart;
+  readonly process: RunProcessPresentation;
+};
+
 export type PendingDirective = {
   readonly id: string;
   readonly kind: 'steering' | 'follow_up';

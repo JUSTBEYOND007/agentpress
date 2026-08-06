@@ -9,14 +9,43 @@ import {
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
 
-export function AgentUsagePart({ part }: { readonly part: RunPart }): React.JSX.Element {
+export function AgentUsagePart({
+  part,
+  embedded = false,
+}: {
+  readonly part: RunPart;
+  readonly embedded?: boolean;
+}): React.JSX.Element {
   const view = executionFactsView(part.payload);
+  if (embedded) {
+    return (
+      <section className="run-process-section usage-part is-embedded">
+        <h4>
+          <Coins aria-hidden="true" size={13} />
+          运行详情
+        </h4>
+        <UsageBody view={view} />
+      </section>
+    );
+  }
   return (
     <details className="run-part usage-part">
       <summary>
         <Coins aria-hidden="true" size={13} />
         运行详情
       </summary>
+      <UsageBody view={view} />
+    </details>
+  );
+}
+
+function UsageBody({
+  view,
+}: {
+  readonly view: ReturnType<typeof executionFactsView>;
+}): React.JSX.Element {
+  return (
+    <>
       <div className="usage-summary">
         {view.durationMs >= 0 ? <span>{formatDuration(view.durationMs)}</span> : null}
         {view.hasUsage ? <span>{view.totalTokens.toLocaleString()} tokens</span> : null}
@@ -25,7 +54,9 @@ export function AgentUsagePart({ part }: { readonly part: RunPart }): React.JSX.
       {view.executions.length > 0 ? (
         <ul className="execution-fact-models">
           {view.executions.map((execution, index) => (
-            <li key={`${execution.purpose}:${execution.provider}:${execution.model}:${String(index)}`}>
+            <li
+              key={`${execution.purpose}:${execution.provider}:${execution.model}:${String(index)}`}
+            >
               <strong>
                 {execution.provider} / {execution.model}
               </strong>
@@ -53,7 +84,7 @@ export function AgentUsagePart({ part }: { readonly part: RunPart }): React.JSX.
           ) : null}
         </div>
       ) : null}
-    </details>
+    </>
   );
 }
 

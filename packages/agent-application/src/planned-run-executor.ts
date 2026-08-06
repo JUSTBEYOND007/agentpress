@@ -49,6 +49,7 @@ import type {
   RunEventPublisher,
   RuntimeToolFactory,
 } from './contracts.js';
+import { articleOutcomeReceipt, articleOutcomeReceiptFromArtifact } from './outcome-receipt.js';
 import { AGENT_RUN_COMMAND_TOPIC, AGENT_TASK_COMMAND_TOPIC } from './contracts.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { AgentSessionRunner } from './agent-session-runner.js';
@@ -1138,10 +1139,7 @@ export class PlannedRunExecutor {
           task.owner,
           specialistPrompt(task.owner),
           [],
-          specialistApplicationTurn(
-            rootPrompt,
-            immutableTaskContext,
-          ),
+          specialistApplicationTurn(rootPrompt, immutableTaskContext),
           [...domainTools, taskComplete],
           signal,
         );
@@ -1933,12 +1931,14 @@ function terminalProductionResult(task: SettledTask | undefined, now: Date): Run
     return protocolFailure([], 'Confirmed article edit did not produce a successful task result');
   }
   const proposal = task.artifacts.find(({ type }) => type === 'EditProposal');
+  const presentation = articleOutcomeReceiptFromArtifact(proposal);
   return {
     status: 'completed',
     messages: [
       {
         role: 'assistant',
         content: proposal?.summary ?? task.summary ?? '文章修改提案已生成，请在正文中审阅。',
+        ...(presentation ? { presentation } : {}),
         provider: 'agentpress',
         model: 'durable-production-result',
         stopReason: 'stop',
@@ -1977,6 +1977,7 @@ function articleEditResult(
       },
     ],
     parts: [],
+    presentation: articleOutcomeReceipt(proposal.id),
     provider: source?.provider ?? 'agentpress',
     model: source?.model ?? 'host-terminal',
     stopReason: 'stop',

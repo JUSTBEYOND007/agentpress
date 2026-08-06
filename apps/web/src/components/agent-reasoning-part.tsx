@@ -4,9 +4,28 @@ import { Brain, ChevronDown, LoaderCircle } from 'lucide-react';
 
 import { numberValue, type RunPart } from '../lib/agentpress-assistant-runtime';
 
-export function ReasoningPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+export function ReasoningPart({
+  part,
+  embedded = false,
+}: {
+  readonly part: RunPart;
+  readonly embedded?: boolean;
+}): React.JSX.Element {
   const active = part.status === 'run.planning';
   const durationMs = numberValue(part.payload.durationMs);
+  if (embedded) {
+    return (
+      <div className="run-process-row reasoning-part is-embedded">
+        {active ? (
+          <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
+        ) : (
+          <Brain aria-hidden="true" size={13} />
+        )}
+        <span>{active ? '正在分析请求' : '已完成分析'}</span>
+        {!active && durationMs > 0 ? <small>{formatDuration(durationMs)}</small> : null}
+      </div>
+    );
+  }
   return (
     <details className={`run-part reasoning-part${active ? ' is-active' : ''}`} open={active}>
       <summary>
@@ -19,7 +38,6 @@ export function ReasoningPart({ part }: { readonly part: RunPart }): React.JSX.E
         {!active && durationMs > 0 ? <small>{formatDuration(durationMs)}</small> : null}
         <ChevronDown className="reasoning-chevron" aria-hidden="true" size={13} />
       </summary>
-      <p>分析过程由运行时托管，仅展示可验证的执行状态。</p>
     </details>
   );
 }

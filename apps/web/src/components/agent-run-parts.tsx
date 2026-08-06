@@ -8,7 +8,6 @@ import {
   Copy,
   ExternalLink,
   FileCheck2,
-  ListChecks,
   LoaderCircle,
   RefreshCw,
   X,
@@ -34,6 +33,8 @@ import { AgentArticleChangePart } from './agent-article-change-part';
 import { useRunActions } from './agent-run-actions';
 import { AgentUsagePart } from './agent-usage-part';
 import { AgentProgressPart } from './agent-progress-part';
+import { PlanPart } from './agent-plan-part';
+import { AgentRunProcess, processPart } from './agent-run-process';
 
 export function UserMessage(): React.JSX.Element {
   return (
@@ -54,6 +55,8 @@ export function AssistantMessage(): React.JSX.Element {
               by_name: {
                 'agentpress-run-part': RunPartRenderer,
                 'agentpress-execution-timeline': ExecutionTimelineRenderer,
+                'agentpress-run-process': AgentRunProcess,
+                'agentpress-article-outcome': ArticleOutcomeRenderer,
               },
             },
           }}
@@ -69,6 +72,13 @@ export function AssistantMessage(): React.JSX.Element {
       </div>
     </MessagePrimitive.Root>
   );
+}
+
+function ArticleOutcomeRenderer({ data }: { readonly data: unknown }): React.JSX.Element | null {
+  const part = processPart(data);
+  if (part?.type !== 'article-change') return null;
+  const record = recordValue(data);
+  return <AgentArticleChangePart part={part} process={record.process} />;
 }
 
 function RunPartRenderer({ data }: { readonly data: unknown }): React.JSX.Element | null {
@@ -160,30 +170,6 @@ function ActionProposalPart({ part }: { readonly part: RunPart }): React.JSX.Ele
       ) : null}
       {error ? <p className="interaction-error">{error}</p> : null}
     </section>
-  );
-}
-
-function PlanPart({ part }: { readonly part: RunPart }): React.JSX.Element {
-  const tasks = Array.isArray(part.payload.tasks) ? part.payload.tasks.map(recordValue) : [];
-  const taskCount = tasks.length;
-  return (
-    <details className="run-part plan-part">
-      <summary>
-        <ListChecks size={14} />
-        <span>{stringValue(part.payload.summary) || '执行计划'}</span>
-        <small>{taskCount > 0 ? `${String(taskCount)} 项任务` : '查看计划'}</small>
-      </summary>
-      <ol>
-        {tasks.map((task, index) => (
-          <li key={stringValue(task.id) || String(index)}>
-            <span className="task-state" />
-            <div>
-              <strong>{stringValue(task.objective) || stringValue(task.label)}</strong>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </details>
   );
 }
 

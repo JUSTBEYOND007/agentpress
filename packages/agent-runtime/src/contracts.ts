@@ -51,6 +51,11 @@ export type RuntimeToolResultMessage = {
 export type RuntimeAssistantMessage = {
   readonly role: 'assistant';
   readonly content: string;
+  readonly presentation?: {
+    readonly kind: 'outcome_receipt';
+    readonly targetType: 'article-change';
+    readonly targetId: string;
+  };
   readonly blocks?: readonly RuntimeAssistantContentBlock[];
   readonly parts?: readonly RuntimeToolCall[];
   readonly provider: string;

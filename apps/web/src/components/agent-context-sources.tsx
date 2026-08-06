@@ -11,8 +11,27 @@ import {
 
 type ContextSource = { readonly id: string; readonly kind: string; readonly revision?: string };
 
-export function ContextSourcesPart({ part }: { readonly part: RunPart }): React.JSX.Element {
+export function ContextSourcesPart({
+  part,
+  embedded = false,
+}: {
+  readonly part: RunPart;
+  readonly embedded?: boolean;
+}): React.JSX.Element {
   const view = contextSourcesView(part.payload);
+  if (embedded) {
+    return (
+      <section className="run-process-section run-context-sources is-embedded">
+        <h4>
+          <Database size={12} /> 上下文
+          <small>
+            {view.sources.length} 项 · {view.tokenCount.toLocaleString()} tokens
+          </small>
+        </h4>
+        <ContextSourcesBody view={view} />
+      </section>
+    );
+  }
   return (
     <details className="run-context-sources">
       <summary>
@@ -21,6 +40,18 @@ export function ContextSourcesPart({ part }: { readonly part: RunPart }): React.
           {view.sources.length} 项 · {view.tokenCount.toLocaleString()} tokens
         </span>
       </summary>
+      <ContextSourcesBody view={view} />
+    </details>
+  );
+}
+
+function ContextSourcesBody({
+  view,
+}: {
+  readonly view: ReturnType<typeof contextSourcesView>;
+}): React.JSX.Element {
+  return (
+    <>
       <div className="context-source-runtime">
         {view.model ? (
           <span>
@@ -42,7 +73,7 @@ export function ContextSourcesPart({ part }: { readonly part: RunPart }): React.
         ))}
       </ul>
       {view.droppedCount > 0 ? <p>{view.droppedCount} 项因预算或权限状态未加入本次运行</p> : null}
-    </details>
+    </>
   );
 }
 

@@ -1,3 +1,113 @@
+.run-process-details {
+  color: #747570;
+  font-size: 11px;
+}
+
+.run-process-details > summary {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-process-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-process-details > summary small {
+  color: #999a94;
+  font-size: 10px;
+}
+
+.run-process-details.is-active > summary {
+  color: #4f725c;
+}
+
+.run-process-details.is-warning > summary {
+  color: #9a6840;
+}
+
+.run-process-chevron {
+  margin-left: auto;
+  transition: transform 160ms ease;
+}
+
+.run-process-details[open] .run-process-chevron {
+  transform: rotate(180deg);
+}
+
+.run-process-body {
+  display: grid;
+  gap: 0;
+  margin: 2px 0 4px 6px;
+  border-left: 1px solid #e3e3df;
+  padding-left: 12px;
+}
+
+.run-process-section,
+.run-process-row {
+  min-width: 0;
+  border-top: 1px solid #ededeb;
+  padding: 8px 0;
+}
+
+.run-process-body > :first-child {
+  border-top: 0;
+}
+
+.run-process-section h4,
+.run-process-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.run-process-section h4 {
+  margin: 0 0 5px;
+  color: #5f605b;
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.run-process-section h4 small,
+.run-process-row small {
+  margin-left: auto;
+  color: #999a94;
+  font-size: 10px;
+  font-weight: 450;
+}
+
+.run-process-section.plan-part.is-embedded,
+.run-process-section.execution-timeline.is-embedded,
+.run-process-section.run-context-sources.is-embedded,
+.run-process-section.usage-part.is-embedded,
+.run-process-row.reasoning-part.is-embedded {
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.run-process-section.plan-part.is-embedded,
+.run-process-section.execution-timeline.is-embedded {
+  padding: 8px 0;
+}
+
+.run-process-section.run-context-sources.is-embedded,
+.run-process-section.usage-part.is-embedded,
+.run-process-row.reasoning-part.is-embedded {
+  color: #777873;
+}
+
+.run-process-section .usage-summary,
+.run-process-section .usage-token-details,
+.run-process-section .execution-fact-models {
+  padding-left: 0;
+}
+
 .run-inspector {
   margin: 22px 0 10px;
   border-top: 1px solid #e1e1de;

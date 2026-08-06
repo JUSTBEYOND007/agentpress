@@ -34,10 +34,13 @@ test.describe('Agent workbench browser contracts', () => {
     await page.reload();
     await openAgentWorkbench(page);
     await expect(page.locator('.message-markdown').last()).toContainText('流式标题');
+    const process = page.locator('.run-process-details').first();
+    await expect(process).toBeVisible();
+    await expect(process.locator('.run-process-body')).toBeHidden();
+    await process.locator('summary').click();
     await expect(page.locator('.execution-timeline')).toBeVisible();
     await expect(page.locator('.execution-step')).toHaveCount(2);
     const context = page.locator('.run-context-sources');
-    await context.locator('summary').click();
     await expect(context).toContainText('gpt-5.6-sol');
     await expect(page.locator('.notice-part')).toContainText('正在恢复当前工作');
     const artifact = page.locator('.artifact-card').first();
@@ -112,10 +115,10 @@ test.describe('Agent workbench browser contracts', () => {
       'Scrolling behavior only needs one browser profile.',
     );
 
-    const timeline = page.locator('.execution-timeline').first();
+    const timeline = page.locator('.run-process-details').first();
     test.skip(
       (await timeline.count()) === 0,
-      'The authenticated fixture has no persisted tool timeline.',
+      'The authenticated fixture has no persisted process details.',
     );
     const viewport = page.locator('.agent-thread');
     await timeline.scrollIntoViewIfNeeded();
@@ -126,7 +129,7 @@ test.describe('Agent workbench browser contracts', () => {
     await timeline.locator('summary').click();
     const after = await viewport.evaluate((node) => node.scrollTop);
     expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
-    await expect(timeline.locator('ol')).toBeVisible();
+    await expect(timeline.locator('.run-process-body')).toBeVisible();
 
     await viewport.evaluate((node) => {
       node.scrollTop = node.scrollHeight;
@@ -170,11 +173,11 @@ test.describe('Agent workbench browser contracts', () => {
       await assertContained(markdown, panel);
     }
 
-    const context = page.locator('.run-context-sources').first();
-    if ((await context.count()) > 0) {
-      await context.locator('summary').click();
-      await expect(context).toHaveAttribute('open', '');
-      await assertContained(context, panel);
+    const process = page.locator('.run-process-details').first();
+    if ((await process.count()) > 0) {
+      await process.locator('summary').click();
+      await expect(process).toHaveAttribute('open', '');
+      await assertContained(process, panel);
     }
 
     const screenshotName =

@@ -10,8 +10,10 @@ export type ExecutionTimelineData = { readonly steps: readonly unknown[] };
 
 export function ExecutionTimelineRenderer({
   data,
+  embedded = false,
 }: {
   readonly data: unknown;
+  readonly embedded?: boolean;
 }): React.JSX.Element | null {
   const record = typeof data === 'object' && data !== null ? (data as ExecutionTimelineData) : null;
   const steps = Array.isArray(record?.steps)
@@ -22,6 +24,22 @@ export function ExecutionTimelineRenderer({
     : [];
   if (steps.length === 0) return null;
   const view = executionTimelineView(steps);
+  if (embedded) {
+    return (
+      <section className="run-process-section execution-timeline is-embedded">
+        <h4>
+          <TimelineIcon state={view.state} />
+          执行步骤
+          <small>{view.summary}</small>
+        </h4>
+        <ol>
+          {steps.map((step) => (
+            <ExecutionStep key={step.id} step={step} />
+          ))}
+        </ol>
+      </section>
+    );
+  }
   return (
     <details className="run-part execution-timeline" open={view.open}>
       <summary>

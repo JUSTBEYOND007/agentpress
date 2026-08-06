@@ -70,4 +70,54 @@ describe('Agent article change part', () => {
     expect(markup).toContain('在正文中审阅');
     expect(markup).not.toContain('正文工作草稿');
   });
+
+  it('combines a structured outcome receipt with one collapsed process disclosure', () => {
+    const markup = renderToStaticMarkup(
+      <RunActionsContext.Provider
+        value={{
+          decideTool: () => Promise.resolve(),
+          answerQuestion: () => Promise.resolve(),
+          decideActionProposal: () => Promise.resolve({}),
+          openArticleProposal: () => Promise.resolve(),
+        }}
+      >
+        <AgentArticleChangePart
+          part={{
+            id: 'part-1',
+            runId: 'run-1',
+            sequence: 1,
+            type: 'article-change',
+            status: 'article.proposal.created',
+            payload: {
+              proposalStatus: 'pending',
+              proposalId: 'proposal-1',
+              operations: [{ operationId: 'operation-1' }],
+              diffs: [],
+            },
+          }}
+          process={{
+            runId: 'run-1',
+            status: 'completed',
+            terminal: true,
+            parts: [
+              {
+                id: 'usage-1',
+                runId: 'run-1',
+                sequence: 2,
+                type: 'usage',
+                status: 'execution.facts',
+                payload: { durationMs: 19_000 },
+              },
+            ],
+          }}
+        />
+      </RunActionsContext.Provider>,
+    );
+
+    expect(markup).toContain('已生成 1 处修改');
+    expect(markup).toContain('19 秒');
+    expect(markup).toContain('在正文中审阅');
+    expect(markup).toContain('过程详情');
+    expect(markup).not.toContain('<details open');
+  });
 });

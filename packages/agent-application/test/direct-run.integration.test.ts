@@ -697,6 +697,7 @@ describeWithDatabase('Direct Run application flow', () => {
       runtimeFactory: { create: () => editRuntime },
       runtimeToolFactory: bridge,
       systemPrompt: 'You are AgentPress.',
+      dispatchCommands: false,
     });
     const run = await directEditService.create({
       conversationId,
@@ -733,6 +734,30 @@ describeWithDatabase('Direct Run application flow', () => {
         model: 'faux-1',
         contextWindow: 128_000,
         maxOutputTokens: 16_384,
+      },
+    ]);
+    const receiptPart = projection?.parts.find(({ type }) => type === 'text');
+    expect(receiptPart?.payload.message).toMatchObject({
+      presentation: {
+        kind: 'outcome_receipt',
+        targetType: 'article-change',
+        targetId: proposals[0]?.id,
+      },
+    });
+    const stableMessages = await connection.db
+      .select({ content: conversationMessages.content })
+      .from(conversationMessages)
+      .where(eq(conversationMessages.runId, run.runId));
+    expect(stableMessages[0]?.content).toMatchObject([
+      {
+        type: 'agentpress.runtime-message',
+        message: {
+          presentation: {
+            kind: 'outcome_receipt',
+            targetType: 'article-change',
+            targetId: proposals[0]?.id,
+          },
+        },
       },
     ]);
   });

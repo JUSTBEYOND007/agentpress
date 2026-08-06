@@ -6,27 +6,31 @@ import { useState } from 'react';
 import { friendlyFailure, proposalFromPart } from './agent-view-model';
 import { useRunActions } from './agent-run-actions';
 import type { RunPart } from '../lib/agentpress-assistant-runtime';
+import { AgentRunProcess, processDuration } from './agent-run-process';
 
 export function AgentArticleChangePart({
   part,
+  process,
 }: {
   readonly part: RunPart;
+  readonly process?: unknown;
 }): React.JSX.Element | null {
   const proposal = proposalFromPart(part);
   const { openArticleProposal } = useRunActions();
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string>();
   if (!proposal) return null;
+  const outcomeLabel =
+    proposal.reviewMode === 'document'
+      ? '已生成整篇文章草稿'
+      : `已生成 ${String(proposal.operations.length)} 处修改`;
+  const duration = process ? processDuration(process) : '';
   return (
     <section className="run-part proposal-preview">
       <div className="proposal-heading">
         <div>
-          <strong>文章修改</strong>
-          <span>
-            {proposal.reviewMode === 'document'
-              ? '整篇文章草稿'
-              : `${String(proposal.operations.length)} 处修改`}
-          </span>
+          <strong>{outcomeLabel}</strong>
+          {duration ? <span>{duration}</span> : null}
         </div>
         <span className="proposal-view-status">{proposalStatusLabel(proposal.status)}</span>
       </div>
@@ -52,6 +56,7 @@ export function AgentArticleChangePart({
         </button>
       ) : null}
       {error ? <p className="interaction-error">{error}</p> : null}
+      {process ? <AgentRunProcess data={process} /> : null}
     </section>
   );
 }
