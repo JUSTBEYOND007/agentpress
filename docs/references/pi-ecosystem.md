@@ -110,6 +110,13 @@ cancellation, expired-worker requeue and synthesis use the existing Task/Outbox 
 retains Oh My Pi's already-adopted lifecycle contracts and rejects a second InkOS `sub_agent` state
 machine.
 
+Plan-level boundedness is now enforced by the existing plan protocol rather than a new scheduler:
+`validateSubmittedPlan` and `plan_revise` call `assertBoundedPlan`, which caps 12 tasks, six DAG
+stages, four parallel layers, and 96,000 deterministic estimated Specialist tokens. Existing
+acyclic dependency validation, Specialist recursion/depth policy, provider concurrency, attempt
+budget, lease/fencing, cancellation, and late-result tests remain the enforcement points for their
+respective concerns. The new limits are host policy, not model-provided values.
+
 Review/revision behavior was audited at the same fixed InkOS commit in
 `packages/core/src/pipeline/chapter-review-cycle.ts` and
 `packages/core/src/__tests__/chapter-review-cycle.test.ts`. The reusable contract is the order

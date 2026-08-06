@@ -14,6 +14,8 @@ import {
   specialistConcurrencyLimit,
   specialistApplicationTurn,
   validateSubmittedPlan,
+  assertBoundedPlan,
+  type PlannedTaskSpec,
 } from '../src/index.js';
 
 describe('agent application contracts', () => {
@@ -170,6 +172,27 @@ describe('agent application contracts', () => {
         () => 'task-4',
       ),
     ).toThrow(/plan_submit returned schema-invalid output/u);
+  });
+
+  it('bounds DAG depth and parallel width with one host-owned policy', () => {
+    const task = (id: string, dependencyIds: readonly string[] = []): PlannedTaskSpec => ({
+      id,
+      clientKey: id,
+      owner: 'writer',
+      objective: 'Write a bounded section',
+      criticality: 'required',
+      acceptanceCriteria: ['Return a structured draft'],
+      dependencyIds,
+      capabilities: [],
+      detached: false,
+    });
+    expect(() => { assertBoundedPlan([
+      task('a'), task('b', ['a']), task('c', ['b']), task('d', ['c']),
+      task('e', ['d']), task('f', ['e']), task('g', ['f']),
+    ]); }).toThrow(/stage depth/u);
+    expect(() => { assertBoundedPlan([task('a'), task('b'), task('c'), task('d'), task('e')]); })
+      .toThrow(/parallel task/u);
+    expect(() => { assertBoundedPlan([task('a'), task('b', ['a']), task('c', ['a'])]); }).not.toThrow();
   });
 
   it('keeps Specialist Task identity, depth, budget, and detached policy host-owned', () => {

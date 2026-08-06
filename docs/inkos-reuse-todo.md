@@ -191,7 +191,9 @@ TODO：
       由 Main 和现有 editor proposal boundary 统一治理。
       角色 capability 与 Artifact policy 不含 canonical settlement；Editor 只能产生 EditProposal，Writer 只能
       产生 Outline/ArticleDraft，外部副作用继续走 ToolCall/Approval ledger 与领域 application。
-- [ ] 写作、审阅和修订使用持久化 DAG，限制深度、宽度、并发和总预算；递归委派默认拒绝。
+- [x] 写作、审阅和修订使用持久化 DAG，限制深度、宽度、并发和总预算；递归委派默认拒绝。
+      `validateSubmittedPlan`/`plan_revise` 共享宿主策略：12 Task、6 层、4 并行宽度和 96,000
+      估算 Token 上限；现有 acyclic、Specialist depth/owner、attempt/lease 约束继续生效。
 - [x] 每个 Task Attempt 使用 lease/fencing token；旧 worker、过期 attempt 和取消后的结果不能覆盖新结果。
       `claim/settleAgentTaskAttempt` 绑定 attempt 与 lease token，取消释放 lease，过期重排同事务写 Event/Outbox；
       stale-owner、late result、cancel race 的数据库/Kafka 测试已存在。
@@ -202,7 +204,7 @@ TODO：
       不展示 Specialist 列表作为产品主导航。
       RunPart server projector 折叠 Task lifecycle 并计算 duration，Web typed renderer 展示 plan/activity；
       Specialist registry 只作为运行详情事实，不是工作区导航。现有 projection/renderer 测试覆盖。
-- [ ] 合约测试覆盖 Schema precedence、工具越权、递归拒绝、预算耗尽、部分成功、并行结算、late result、
+- [x] 合约测试覆盖 Schema precedence、工具越权、递归拒绝、预算耗尽、部分成功、并行结算、late result、
       cancel/recover race 和 private-thinking isolation。
 - [ ] 真实模型验收至少覆盖“研究 -> 写作 -> 审阅 -> 修订 -> 提案”和“审阅认为无需修改”两个相反场景。
 

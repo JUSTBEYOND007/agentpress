@@ -52,6 +52,11 @@ export type SettledTask = PlannedTaskSpec & {
   readonly failure?: string;
 };
 
+export const PLANNED_DAG_MAX_TASKS = 12;
+export const PLANNED_DAG_MAX_DEPTH = 6;
+export const PLANNED_DAG_MAX_WIDTH = 4;
+export const PLANNED_DAG_MAX_ESTIMATED_TOKENS = 96_000;
+
 export const specialistRoles = [
   'researcher',
   'writer',
@@ -212,7 +217,49 @@ export function validateSubmittedPlan(
     detached: task.detached ?? false,
   }));
   assertAcyclic(tasks);
+  assertBoundedPlan(tasks);
   return { goal: String(value.goal), tasks };
+}
+
+export function assertBoundedPlan(tasks: readonly PlannedTaskSpec[]): void {
+  if (tasks.length > PLANNED_DAG_MAX_TASKS) {
+    throw new RangeError(`Plan exceeds the ${String(PLANNED_DAG_MAX_TASKS)} task limit`);
+  }
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const depths = new Map<string, number>();
+  const depthOf = (task: PlannedTaskSpec): number => {
+    const known = depths.get(task.id);
+    if (known !== undefined) return known;
+    const depth = task.dependencyIds.length === 0
+      ? 1
+      : 1 + Math.max(
+          ...task.dependencyIds.map((id) => {
+            const dependency = byId.get(id);
+            if (!dependency) throw new Error(`Plan dependency ${id} is missing`);
+            return depthOf(dependency);
+          }),
+        );
+    depths.set(task.id, depth);
+    return depth;
+  };
+  for (const task of tasks) {
+    if (depthOf(task) > PLANNED_DAG_MAX_DEPTH) {
+      throw new RangeError(`Plan exceeds the ${String(PLANNED_DAG_MAX_DEPTH)} stage depth limit`);
+    }
+  }
+  const layers = new Map<number, number>();
+  for (const depth of depths.values()) layers.set(depth, (layers.get(depth) ?? 0) + 1);
+  const width = Math.max(0, ...layers.values());
+  if (width > PLANNED_DAG_MAX_WIDTH) {
+    throw new RangeError(`Plan exceeds the ${String(PLANNED_DAG_MAX_WIDTH)} parallel task limit`);
+  }
+  const estimatedTokens = tasks.reduce(
+    (total, task) => total + 4_000 + task.objective.length + task.acceptanceCriteria.join(' ').length,
+    0,
+  );
+  if (estimatedTokens > PLANNED_DAG_MAX_ESTIMATED_TOKENS) {
+    throw new RangeError('Plan exceeds the total Specialist token budget');
+  }
 }
 
 export function assertStrictSchema(
