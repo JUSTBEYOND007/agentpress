@@ -65,11 +65,12 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 - [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
 - [ ] Web renderer 按 `plan/activity/approval/evidence/artifact/article-change/recovery/usage` 分 owner，
       不把所有 RunPart 分支重新集中到单个消息组件。
-- [ ] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
+- [x] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
       先减少职责和净行数，不允许以“后续再拆分”放行。
-      根架构入口已完成，但当前 `pnpm format:check` 仍报告 51 个既有文件差异；在不批量改写用户文件或
-      添加 ignore 白名单的前提下，CI 尚不能作为绿色必过门禁。需先按所有权分批消除格式债务，再提交只
-      调用根 `pnpm check` 的 workflow。API Extractor report 仍作为公共 API 稳定化的后续增强。
+      GitHub Actions 使用不可变 commit 固定官方 checkout/setup-node/pnpm actions，并只执行根
+      `pnpm check`；该入口聚合 Agent/Web 文件长度、dependency-cruiser、publint、格式、lint、typecheck、
+      离线测试和 build，避免 CI 与本地门禁漂移。Drizzle 生成快照由 `.prettierignore` 明确排除，源码与
+      手写文档已通过全仓格式门禁。API Extractor report 仍作为公共 API 稳定化的后续增强。
 
 架构门禁实施顺序（2026-08-07 更新）：
 
