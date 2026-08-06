@@ -1146,12 +1146,25 @@ export const reviewRounds = pgTable(
     issues: jsonb('issues').$type<readonly string[]>().notNull(),
     inputHash: varchar('input_hash', { length: 80 }).notNull(),
     outputHash: varchar('output_hash', { length: 80 }),
+    artifactVersionId: uuid('artifact_version_id').references(() => artifactVersions.id, {
+      onDelete: 'restrict',
+    }),
+    score: integer('score').notNull().default(0),
+    modelParseFailed: boolean('model_parse_failed').notNull().default(false),
+    deterministicIssues: jsonb('deterministic_issues')
+      .$type<readonly Record<string, unknown>[]>()
+      .notNull()
+      .default([]),
+    modelIssues: jsonb('model_issues').$type<readonly Record<string, unknown>[]>().notNull().default([]),
+    usage: jsonb('usage').$type<Readonly<Record<string, number>>>().notNull().default({}),
+    selectionReason: varchar('selection_reason', { length: 48 }),
     createdAt,
   },
   (table) => [
     unique('review_rounds_task_round_unique').on(table.taskId, table.round),
     check('review_rounds_round_check', sql`${table.round} between 1 and 3`),
     check('review_rounds_reviewer_check', sql`${table.reviewer} in ('editor', 'fact_checker')`),
+    check('review_rounds_score_check', sql`${table.score} between 0 and 100`),
   ],
 );
 

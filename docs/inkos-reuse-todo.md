@@ -215,17 +215,17 @@ InkOS 证据起点：
 
 TODO：
 
-- [ ] 先审计 AgentPress Article Proposal、Batch、Artifact Version 和 Evidence policy，禁止创建平行的
+- [x] 先审计 AgentPress Article Proposal、Batch、Artifact Version 和 Evidence policy，禁止创建平行的
       chapter truth 或文件 snapshot 体系。
-- [ ] 将 InkOS fiction-specific 检查替换为文章领域的确定性检查：引用完整性、事实声明、链接安全、
+- [x] 将 InkOS fiction-specific 检查替换为文章领域的确定性检查：引用完整性、事实声明、链接安全、
       结构、字数/格式和 stale revision。
-- [ ] 每一轮都先运行确定性检查，再运行可选模型审阅；模型输出 Schema 解析失败时 fail closed。
-- [ ] 限制最大修订轮次、模型调用、Token 和费用；达到上限后返回显式 degraded result，而非无限自我修订。
-- [ ] 每轮保存不可变候选 Artifact Version、review score、问题列表、来源和选择理由。
-- [ ] 最终选择“最佳有效快照”，而不是盲目采用最后一次输出；新版本得分下降或事实校验失败时保留旧版本。
-- [ ] “无需修改”是合法终态，不得为了展示 Agent 工作而强制产生 diff。
-- [ ] 审阅结论只创建修改提案，不自动覆盖 canonical article revision。
-- [ ] 测试覆盖零问题、持续改进、后轮退化、解析失败、确定性检查失败、预算耗尽、stale article、
+- [x] 每一轮都先运行确定性检查，再运行可选模型审阅；模型输出 Schema 解析失败时 fail closed。
+- [x] 限制最大修订轮次、模型调用、Token 和费用；达到上限后返回显式 degraded result，而非无限自我修订。
+- [x] 每轮保存不可变候选 Artifact Version、review score、问题列表、来源和选择理由。
+- [x] 最终选择“最佳有效快照”，而不是盲目采用最后一次输出；新版本得分下降或事实校验失败时保留旧版本。
+- [x] “无需修改”是合法终态，不得为了展示 Agent 工作而强制产生 diff。
+- [x] 审阅结论只创建修改提案，不自动覆盖 canonical article revision。
+- [x] 测试覆盖零问题、持续改进、后轮退化、解析失败、确定性检查失败、预算耗尽、stale article、
       Evidence 丢失和用户拒绝提案。
 
 ## P0：状态恢复与降级输出
