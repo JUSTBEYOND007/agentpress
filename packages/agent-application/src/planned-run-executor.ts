@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import type {
   RuntimeAssistantMessage,
@@ -16,25 +16,18 @@ import {
   agentTasks,
   appendCheckpoint,
   appendRunEvent,
-  artifacts,
-  artifactEvidence,
-  artifactVersions,
   type AgentPressDatabase,
   contextPacks,
   type DatabaseTransaction,
   executionPlans,
-  evidenceRecords,
   editProposals,
   editProposalBatches,
   planRevisionTasks,
   planRevisions,
   runDirectives,
-  taskResults,
   toolCalls,
   claimAgentTask,
-  enqueueOutboxMessage,
   releaseAgentTaskLease,
-  settleAgentTaskAttempt,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
 import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
@@ -50,7 +43,6 @@ import {
   articleOutcomeReceiptFromArtifact,
   withArticleOutcomeReceipt,
 } from './outcome-receipt.js';
-import { AGENT_RUN_COMMAND_TOPIC } from './contracts.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import { AgentSessionRunner } from './agent-session-runner.js';
 import { ActionProposalService } from './action-proposal-service.js';
@@ -84,6 +76,7 @@ import {
   type SubmittedPlan,
 } from './planned-run-protocol.js';
 import { PlannedRunStore } from './planned-run-store.js';
+import { SpecialistResultStore } from './specialist-result-store.js';
 
 export {
   mainPlanningPrompt,
@@ -126,6 +119,7 @@ export class PlannedRunExecutor {
   private readonly actionProposals: ActionProposalService;
   private readonly taskWaits: AgentTaskWaitService;
   private readonly store: PlannedRunStore;
+  private readonly results: SpecialistResultStore;
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
@@ -146,6 +140,12 @@ export class PlannedRunExecutor {
     );
     this.taskWaits = new AgentTaskWaitService(options.database);
     this.store = new PlannedRunStore({
+      database: options.database,
+      publisher: options.publisher,
+      createId: this.createId,
+      now: this.now,
+    });
+    this.results = new SpecialistResultStore({
       database: options.database,
       publisher: options.publisher,
       createId: this.createId,
@@ -1258,192 +1258,37 @@ export class PlannedRunExecutor {
     return [message, toolResult];
   }
 
-  private async persistTaskResult(
+  private persistTaskResult(
     runId: string,
     result: SettledTask,
     expectedAttempt: number,
   ): Promise<boolean> {
-    const event = await this.options.database.transaction(async (transaction) => {
-      const now = this.now();
-      if (
-        !(await settleAgentTaskAttempt(transaction, {
-          taskId: result.id,
-          attempt: expectedAttempt,
-          status: result.status,
-          now,
-        }))
-      )
-        return undefined;
-      const persistedArtifacts = [];
-      for (const artifact of result.artifacts) {
-        const artifactId = this.createId();
-        const versionId = this.createId();
-        const contentHash = createHash('sha256')
-          .update(JSON.stringify(artifact.content))
-          .digest('hex');
-        await transaction.insert(artifacts).values({
-          id: artifactId,
-          runId,
-          taskId: result.id,
-          type: artifact.type,
-          title: artifact.title,
-        });
-        await transaction.insert(artifactVersions).values({
-          id: versionId,
-          artifactId,
-          version: 1,
-          summary: artifact.summary,
-          content: artifact.content,
-          contentHash,
-        });
-        if (artifact.evidenceIds.length > 0) {
-          await transaction.insert(artifactEvidence).values(
-            artifact.evidenceIds.map((evidenceId, ordinal) => ({
-              artifactVersionId: versionId,
-              evidenceId,
-              claim: artifact.summary,
-              ordinal: ordinal + 1,
-            })),
-          );
-        }
-        persistedArtifacts.push({ artifactId, versionId, ...artifact });
-      }
-      if (result.status !== 'cancelled' && result.status !== 'skipped') {
-        await transaction.insert(taskResults).values({
-          id: this.createId(),
-          taskId: result.id,
-          attempt: expectedAttempt,
-          status: result.status,
-          summary: result.summary ?? result.failure ?? `${result.owner} task ${result.status}`,
-          artifacts: persistedArtifacts,
-          evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
-          usage: result.usage ?? {},
-          warnings: result.warnings,
-          ...(result.failure ? { failure: { code: result.failure, message: result.failure } } : {}),
-        });
-      }
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'task_settled',
-        state: { taskId: result.id, status: result.status },
-      });
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: `task.${result.status}`,
-        payload: {
-          taskId: result.id,
-          owner: result.owner,
-          criticality: result.criticality,
-          summary: result.summary,
-          artifacts: persistedArtifacts.map(({ artifactId, type, title, summary }) => ({
-            artifactId,
-            type,
-            title,
-            summary,
-          })),
-          ...(result.failure ? { failure: result.failure } : {}),
-        },
-      });
-      await enqueueOutboxMessage(transaction, {
-        id: this.createId(),
-        aggregateType: 'AgentRun',
-        aggregateId: runId,
-        topic: AGENT_RUN_COMMAND_TOPIC,
-        messageKey: runId,
-        payload: {
-          command: 'run.execute',
-          messageId: this.createId(),
-          runId,
-        },
-        occurredAt: this.now(),
-      });
-      return event;
-    });
-    if (!event) return false;
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
-    return true;
+    return this.results.persistTaskResult(runId, result, expectedAttempt);
   }
 
-  private async updateTaskStatus(
+  private updateTaskStatus(
     runId: string,
     task: PlannedTaskSpec,
     status: 'skipped',
     failure?: string,
   ): Promise<number | undefined> {
-    const event = await this.options.database.transaction(async (transaction) => {
-      const now = this.now();
-      const updated = await transaction
-        .update(agentTasks)
-        .set({
-          status,
-          completedAt: now,
-          updatedAt: now,
-          version: sql`${agentTasks.version} + 1`,
-        })
-        .where(eq(agentTasks.id, task.id))
-        .returning({ attempt: agentTasks.attempt });
-      if (updated.length === 0) return undefined;
-      const event = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'task.skipped',
-        payload: { taskId: task.id, owner: task.owner, ...(failure ? { failure } : {}) },
-      });
-      return { attempt: updated[0]?.attempt, event };
-    });
-    if (event?.attempt === undefined) return undefined;
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event.event) });
-    return event.attempt;
+    return this.results.updateTaskStatus(runId, task, status, failure);
   }
 
-  private async assertRunReferences(
+  private assertRunReferences(
     runId: string,
     artifactIds: readonly string[],
     evidenceIds: readonly string[],
   ): Promise<void> {
-    const [artifactRows, evidenceRows] = await Promise.all([
-      artifactIds.length === 0
-        ? Promise.resolve([])
-        : this.options.database
-            .select({ id: artifacts.id })
-            .from(artifacts)
-            .where(and(eq(artifacts.runId, runId), inArray(artifacts.id, artifactIds))),
-      evidenceIds.length === 0
-        ? Promise.resolve([])
-        : this.options.database
-            .select({ id: evidenceRecords.id })
-            .from(evidenceRecords)
-            .where(and(eq(evidenceRecords.runId, runId), inArray(evidenceRecords.id, evidenceIds))),
-    ]);
-    if (new Set(artifactRows.map(({ id }) => id)).size !== new Set(artifactIds).size) {
-      throw new Error('run_complete references an artifact outside the current Run');
-    }
-    if (new Set(evidenceRows.map(({ id }) => id)).size !== new Set(evidenceIds).size) {
-      throw new Error('run_complete references Evidence outside the current Run');
-    }
+    return this.results.assertRunReferences(runId, artifactIds, evidenceIds);
   }
 
-  private async assertTaskEvidence(
+  private assertTaskEvidence(
     runId: string,
     taskId: string,
     evidenceIds: readonly string[],
   ): Promise<void> {
-    if (evidenceIds.length === 0) return;
-    const rows = await this.options.database
-      .select({ id: evidenceRecords.id })
-      .from(evidenceRecords)
-      .where(
-        and(
-          eq(evidenceRecords.runId, runId),
-          eq(evidenceRecords.taskId, taskId),
-          inArray(evidenceRecords.id, evidenceIds),
-        ),
-      );
-    if (new Set(rows.map(({ id }) => id)).size !== new Set(evidenceIds).size) {
-      throw new Error('task_complete references Evidence not produced for this task');
-    }
+    return this.results.assertTaskEvidence(runId, taskId, evidenceIds);
   }
 
   private async publishRuntimeEvent(runId: string, event: RuntimeEvent): Promise<void> {
