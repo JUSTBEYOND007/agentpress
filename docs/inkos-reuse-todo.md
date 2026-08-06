@@ -426,6 +426,12 @@ timeline/outcome 顺序、折叠控制、错误脱敏和桌面/移动 Playwright
 
 ## P2：端到端写作产品行为
 
+离线验收契约进度：`workflow-01..05` 已固定完整研究写作链、research-only、no-change review、
+conflict degradation 和 recovery-pending-proposal 五个版本 4 场景；Eval scorer 新增禁止 Artifact 与精确
+终态断言，防止“只研究”偷偷产生 ArticleDraft/EditProposal，或把来源冲突的普通 completed 误判为降级。
+Agent Evals 42 个测试通过。目标模型 provider 当前因账户欠费拒绝请求，因此以下真实运行与 PostgreSQL
+完整 trace 验收仍保持未完成。
+
 - [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
       用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
 - [ ] 固定“用户只要研究，不要改文”“审阅认为无需修改”“来源冲突导致降级”“恢复后仍等待审批”
