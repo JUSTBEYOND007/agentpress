@@ -16,7 +16,7 @@ test.describe('Agent workbench browser contracts', () => {
     await openAgentWorkbench(page);
   });
 
-  test('fixture renders streamed Markdown, typed context, tool steps, recovery and artifact facts', async ({
+  test('fixture renders streamed Markdown, consumer steps, recovery and artifact facts', async ({
     page,
   }) => {
     // The fixture is installed before navigation in this test so the browser still exercises
@@ -36,12 +36,20 @@ test.describe('Agent workbench browser contracts', () => {
     await expect(page.locator('.message-markdown').last()).toContainText('流式标题');
     const process = page.locator('.run-process-details').first();
     await expect(process).toBeVisible();
-    await expect(process.locator('.run-process-body')).toBeHidden();
+    await expect(process.locator('.run-process-steps')).toBeHidden();
     await process.locator('summary').click();
-    await expect(page.locator('.execution-timeline')).toBeVisible();
-    await expect(page.locator('.execution-step')).toHaveCount(2);
-    const context = page.locator('.run-context-sources');
-    await expect(context).toContainText('gpt-5.6-sol');
+    await expect(process.locator('.run-process-steps > li')).toHaveCount(2);
+    await expect(process).toContainText('搜索资料');
+    await expect(process).toContainText('生成 Markdown 内容');
+    await expect(page.getByRole('complementary', { name: 'Agent 工作台' })).not.toContainText(
+      'gpt-5.6-sol',
+    );
+    await expect(page.getByRole('complementary', { name: 'Agent 工作台' })).not.toContainText(
+      'revision-1',
+    );
+    await expect(page.getByRole('complementary', { name: 'Agent 工作台' })).not.toContainText(
+      '220 token',
+    );
     await expect(page.locator('.notice-part')).toContainText('正在恢复当前工作');
     const artifact = page.locator('.artifact-card').first();
     await artifact.click();
@@ -107,7 +115,7 @@ test.describe('Agent workbench browser contracts', () => {
     await composer.fill('');
   });
 
-  test('preserves reading position when a completed execution timeline expands', async ({
+  test('preserves reading position when completed process expands', async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -129,7 +137,7 @@ test.describe('Agent workbench browser contracts', () => {
     await timeline.locator('summary').click();
     const after = await viewport.evaluate((node) => node.scrollTop);
     expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
-    await expect(timeline.locator('.run-process-body')).toBeVisible();
+    await expect(timeline.locator('.run-process-steps')).toBeVisible();
 
     await viewport.evaluate((node) => {
       node.scrollTop = node.scrollHeight;
@@ -142,7 +150,7 @@ test.describe('Agent workbench browser contracts', () => {
     expect(pinned).toBe(true);
   });
 
-  test('contains Markdown, context, and workbench layout at desktop and mobile widths', async ({
+  test('contains Markdown, consumer process, and workbench layout at desktop and mobile widths', async ({
     page,
   }, testInfo) => {
     const panel = page.getByRole('complementary', { name: 'Agent 工作台' });

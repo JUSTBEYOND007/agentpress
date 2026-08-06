@@ -60,6 +60,7 @@ export type RunProcessPresentation = {
   readonly runId: string;
   readonly status: string;
   readonly terminal: boolean;
+  readonly durationMs: number;
   readonly parts: readonly RunPart[];
 };
 

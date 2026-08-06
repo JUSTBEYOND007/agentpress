@@ -154,7 +154,7 @@ function projection(status: 'running' | 'completed', rootMessageId = fixtureUser
         sequence: 5,
         type: 'activity',
         status: terminal ? 'tool.succeeded' : 'tool.executing',
-        payload: { summary: '整理文章结构', durationMs: 1200 },
+        payload: { toolId: 'web.search', toolCallId: 'fixture-search', durationMs: 1200 },
       },
       {
         id: `${fixtureRunId}-activity-2`,
@@ -162,7 +162,11 @@ function projection(status: 'running' | 'completed', rootMessageId = fixtureUser
         sequence: 6,
         type: 'activity',
         status: terminal ? 'task.succeeded' : 'task.started',
-        payload: { summary: '生成 Markdown 内容' },
+        payload: {
+          taskId: 'fixture-write',
+          objective: '生成 Markdown 内容',
+          summary: '内部任务摘要不应作为展示协议',
+        },
       },
       {
         id: `${fixtureRunId}-context`,

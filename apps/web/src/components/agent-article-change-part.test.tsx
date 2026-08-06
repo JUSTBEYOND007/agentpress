@@ -99,14 +99,15 @@ describe('Agent article change part', () => {
             runId: 'run-1',
             status: 'completed',
             terminal: true,
+            durationMs: 19_000,
             parts: [
               {
-                id: 'usage-1',
+                id: 'activity-1',
                 runId: 'run-1',
                 sequence: 2,
-                type: 'usage',
-                status: 'execution.facts',
-                payload: { durationMs: 19_000 },
+                type: 'activity',
+                status: 'tool.succeeded',
+                payload: { toolId: 'article.propose_edits', toolCallId: 'call-1' },
               },
             ],
           }}
@@ -117,7 +118,7 @@ describe('Agent article change part', () => {
     expect(markup).toContain('已生成 1 处修改');
     expect(markup).toContain('19 秒');
     expect(markup).toContain('在正文中审阅');
-    expect(markup).toContain('过程详情');
+    expect(markup).toContain('执行过程');
     expect(markup).not.toContain('<details open');
   });
 });

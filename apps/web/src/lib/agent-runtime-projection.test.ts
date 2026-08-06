@@ -8,7 +8,7 @@ describe('run presentation projection', () => {
     const content = projectionContent(
       projection([
         part('context', 'context.ready', 1, { manifest: { included: [], tokenCount: 20 } }),
-        part('activity', 'tool.succeeded', 2, { summary: '读取正文' }),
+        part('activity', 'tool.succeeded', 2, { toolId: 'article.read_current' }),
         articleChange('proposal-1', 3),
         receipt('proposal-1', 4),
         usage(5),
@@ -19,10 +19,9 @@ describe('run presentation projection', () => {
     expect(texts(content)).toEqual([]);
     const outcome = dataByName(content, 'agentpress-article-outcome');
     expect((outcome.process as { parts: RunPart[] }).parts.map(({ type }) => type)).toEqual([
-      'context',
       'activity',
-      'usage',
     ]);
+    expect(outcome.process).toMatchObject({ durationMs: 19_000 });
   });
 
   it('keeps a receipt visible when its structured target does not match the proposal', () => {
@@ -31,15 +30,22 @@ describe('run presentation projection', () => {
     );
 
     expect(texts(content)).toEqual(['已生成修改，等待审阅。']);
-    expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-process']);
+    expect(names(content)).toEqual(['agentpress-run-part']);
   });
 
-  it('keeps an ordinary answer and places one process disclosure after it', () => {
-    const content = projectionContent(projection([text('这是普通回答。', 1), usage(2)]));
+  it('keeps an ordinary answer without exposing diagnostic process data', () => {
+    const content = projectionContent(
+      projection([
+        part('context', 'context.ready', 1, { revisionId: 'revision-secret' }),
+        part('reasoning', 'reasoning.completed', 2, { text: 'internal analysis' }),
+        part('plan', 'plan.created', 3, { steps: [] }),
+        text('这是普通回答。', 4),
+        usage(5),
+      ]),
+    );
 
     expect(texts(content)).toEqual(['这是普通回答。']);
-    expect(names(content)).toEqual(['agentpress-run-process']);
-    expect(content.at(-1)).toMatchObject({ type: 'data', name: 'agentpress-run-process' });
+    expect(names(content)).toEqual([]);
   });
 
   it('puts the compact process status first while a run is active and leaves warnings visible', () => {
@@ -49,6 +55,44 @@ describe('run presentation projection', () => {
 
     expect(content[0]).toMatchObject({ type: 'data', name: 'agentpress-run-process' });
     expect(content[1]).toMatchObject({ type: 'data', name: 'agentpress-run-part' });
+  });
+
+  it('adds one terminal process only for consumer-relevant activity', () => {
+    const content = projectionContent(
+      projection([
+        text('资料已经整理好。', 1),
+        part('activity', 'tool.succeeded', 2, {
+          toolId: 'web.search',
+          toolCallId: 'call-1',
+        }),
+        usage(3),
+      ]),
+    );
+
+    expect(names(content)).toEqual(['agentpress-run-process']);
+    const process = dataByName(content, 'agentpress-run-process');
+    expect((process.parts as RunPart[]).map(({ type }) => type)).toEqual(['activity']);
+    expect(process).toMatchObject({ durationMs: 19_000 });
+  });
+
+  it('keeps failed tool activity outside the collapsed process', () => {
+    const content = projectionContent(
+      projection(
+        [
+          part('activity', 'tool.failed', 1, {
+            toolId: 'web.search',
+            toolCallId: 'call-1',
+          }),
+          part('warning', 'run.failed', 2, {}),
+          usage(3),
+        ],
+        true,
+        'failed',
+      ),
+    );
+
+    expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-part']);
+    expect(names(content)).not.toContain('agentpress-run-process');
   });
 });
 

@@ -10,15 +10,6 @@ import type {
   RunProjection,
 } from './agent-runtime-contracts';
 
-const processPartTypes = new Set<RunPart['type']>([
-  'context',
-  'reasoning',
-  'plan',
-  'activity',
-  'progress',
-  'usage',
-]);
-
 export function buildRunTurns(
   messages: readonly StableAgentMessage[],
   projections: readonly RunProjection[],
@@ -95,7 +86,8 @@ export function projectionContent(
     runId: projection.runId,
     status: projection.status,
     terminal: projection.terminal,
-    parts: projectedParts.filter(({ type }) => processPartTypes.has(type)),
+    durationMs: processDurationMs(projectedParts),
+    parts: projectedParts.filter(isProcessPart),
   };
   const articleProposalIds = new Set(
     projectedParts.flatMap((part) => {
@@ -114,7 +106,7 @@ export function projectionContent(
   let processAttached = false;
 
   for (const part of projectedParts) {
-    if (processPartTypes.has(part.type)) continue;
+    if (isProcessPart(part) || isConsumerHiddenDiagnostic(part.type)) continue;
     if (part.type === 'text') {
       const message = recordValue(part.payload.message);
       const text = stringValue(message.content) || stringValue(part.payload.content);
@@ -151,6 +143,24 @@ export function projectionContent(
     else parts.unshift(processPart);
   }
   return parts;
+}
+
+function processDurationMs(parts: readonly RunPart[]): number {
+  const usage = parts.findLast(({ type }) => type === 'usage');
+  const durationMs = usage?.payload.durationMs;
+  return typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0
+    ? durationMs
+    : 0;
+}
+
+function isConsumerHiddenDiagnostic(type: RunPart['type']): boolean {
+  return type === 'context' || type === 'reasoning' || type === 'plan' || type === 'usage';
+}
+
+function isProcessPart(part: RunPart): boolean {
+  if (part.type === 'progress') return true;
+  if (part.type !== 'activity') return false;
+  return !/\.(failed|cancelled|denied|expired)$/u.test(part.status);
 }
 
 function augmentedProjectionParts(projection: RunProjection): readonly RunPart[] {
