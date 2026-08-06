@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 
 import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
-import { hashBlock } from '@agentpress/editor-patch';
 import { fauxAssistantMessage, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import {
   agentSessions,
@@ -670,17 +669,11 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     const editRuntime = PiRuntimeAdapter.forTests({
       responses: [
-        toolResponse(runtimeToolName('article.propose_edits', '1.0.0'), {
+        toolResponse(runtimeToolName('article.propose_edits', '1.1.0'), {
           operations: [
             {
-              operationId: 'main-replace',
               kind: 'replace',
               blockId: 'mention-block',
-              expectedHash: hashBlock({
-                type: 'paragraph',
-                attrs: { blockId: 'mention-block' },
-                content: [{ type: 'text', text: 'Mentioned immutable content' }],
-              }),
               block: {
                 type: 'paragraph',
                 attrs: { blockId: 'mention-block' },

@@ -388,6 +388,7 @@ Agent 缺少必要信息时，使用内联问题卡，不用一段普通文本�
 - “全部接受”只作用于当前 Proposal，并在执行前显示影响范围。
 - 过期 Proposal 显示冲突摘要，不能沿用普通接受按钮。
 - 应用完成后，卡片保留结果状态和目标 revision，不能从历史消息中消失。
+- `operationId` 与 `expectedHash` 是 host 基于当前 Run 绑定 revision 派生的事实；模型输入只提供稳定 `blockId`、操作类型和修改内容，避免复制不透明锚点造成伪 stale 错误。Proposal 仍在服务端按 revision 原子预检并 fail-closed。
 
 ### 14.3 非正文 Artifact
 

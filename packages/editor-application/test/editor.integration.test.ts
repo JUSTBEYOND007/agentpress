@@ -176,7 +176,7 @@ describeWithInfra('editor persistence and recovery', () => {
       id: context.toolCallId,
       runId: ids.run,
       toolId: 'article.propose_edits',
-      toolVersion: '1.0.0',
+      toolVersion: '1.1.0',
       arguments: {},
       argumentsHash: 'test',
       risk: 'draft_write',
@@ -195,14 +195,12 @@ describeWithInfra('editor persistence and recovery', () => {
     });
 
     const created = (await registry.execute(
-      registry.get('article.propose_edits', '1.0.0'),
+      registry.get('article.propose_edits', '1.1.0'),
       {
         operations: [
           {
-            operationId: 'tool-replace-a',
             kind: 'replace',
             blockId: 'block-a',
-            expectedHash: hashBlock(first),
             block: paragraph('block-a', 'Tool replacement'),
           },
         ],
@@ -214,7 +212,7 @@ describeWithInfra('editor persistence and recovery', () => {
       baseRevisionId: ids.revision,
       diffs: [
         {
-          operationId: 'tool-replace-a',
+          operationId: `op-${context.toolCallId}-1`,
           before: first,
           after: paragraph('block-a', 'Tool replacement'),
         },
@@ -230,7 +228,7 @@ describeWithInfra('editor persistence and recovery', () => {
       id: secondToolCallId,
       runId: ids.run,
       toolId: 'article.propose_edits',
-      toolVersion: '1.0.0',
+      toolVersion: '1.1.0',
       arguments: {},
       argumentsHash: 'test-2',
       risk: 'draft_write',
@@ -238,21 +236,22 @@ describeWithInfra('editor persistence and recovery', () => {
       status: 'executing',
     });
     const appended = (await registry.execute(
-      registry.get('article.propose_edits', '1.0.0'),
+      registry.get('article.propose_edits', '1.1.0'),
       {
         operations: [
           {
-            operationId: 'tool-delete-b',
             kind: 'delete',
             blockId: 'block-b',
-            expectedHash: hashBlock(second),
           },
         ],
       },
       { runId: ids.run, toolCallId: secondToolCallId },
     )) as Record<string, unknown>;
     expect(appended).toMatchObject({
-      operations: [{ operationId: 'tool-replace-a' }, { operationId: 'tool-delete-b' }],
+      operations: [
+        { operationId: `op-${context.toolCallId}-1`, expectedHash: hashBlock(first) },
+        { operationId: `op-${secondToolCallId}-1`, expectedHash: hashBlock(second) },
+      ],
     });
     const batchIds = (appended.batches as readonly { id: string; status: string }[]).filter(
       ({ status }) => status === 'active',
@@ -273,7 +272,7 @@ describeWithInfra('editor persistence and recovery', () => {
     await expect(
       proposals.decideOperation({
         proposalId: String(created.proposalId),
-        operationId: 'tool-replace-a',
+        operationId: `op-${context.toolCallId}-1`,
         userId: ids.user,
         decision: 'rejected',
       }),
@@ -312,6 +311,80 @@ describeWithInfra('editor persistence and recovery', () => {
       .from(editProposals)
       .where(eq(editProposals.id, onlyBatchProposal.proposalId));
     expect(repaired?.status).toBe('rejected');
+  });
+
+  it('keeps proposal identity and concurrency anchors under host control', async () => {
+    const registry = new ToolRegistry();
+    const proposals = new ProposalService(connection.db);
+    registerArticleTools(registry, connection.db, proposals);
+    const definition = registry.get('article.propose_edits', '1.1.0');
+    const toolCallId = randomUUID();
+    const context = { runId: ids.run, toolCallId };
+    await connection.db.insert(toolCalls).values({
+      id: toolCallId,
+      runId: ids.run,
+      toolId: 'article.propose_edits',
+      toolVersion: '1.1.0',
+      arguments: {},
+      argumentsHash: 'host-anchor-test',
+      risk: 'draft_write',
+      sideEffect: 'test host anchored proposal',
+      status: 'executing',
+    });
+
+    await expect(
+      registry.execute(
+        definition,
+        {
+          operations: [
+            {
+              operationId: 'caller-owned',
+              kind: 'delete',
+              blockId: 'block-a',
+              expectedHash: '0'.repeat(64),
+            },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toThrow('invalid input');
+
+    const created = (await registry.execute(
+      definition,
+      {
+        operations: [
+          {
+            kind: 'replace',
+            blockId: 'block-a',
+            block: paragraph('block-a', 'First replacement'),
+          },
+          { kind: 'delete', blockId: 'block-b' },
+        ],
+      },
+      context,
+    )) as {
+      readonly proposalId: string;
+      readonly operations: readonly Record<string, unknown>[];
+      readonly batches: readonly { readonly id: string }[];
+    };
+    expect(created.operations).toMatchObject([
+      {
+        operationId: `op-${toolCallId}-1`,
+        expectedHash: hashBlock(first),
+      },
+      {
+        operationId: `op-${toolCallId}-2`,
+        expectedHash: hashBlock(second),
+      },
+    ]);
+    expect(new Set(created.operations.map(({ operationId }) => operationId)).size).toBe(2);
+    await expect(
+      proposals.revertBatch({
+        proposalId: created.proposalId,
+        batchId: created.batches[0]?.id ?? '',
+        userId: ids.user,
+      }),
+    ).resolves.toMatchObject({ status: 'rejected' });
   });
 
   it('applies accepted proposal operations into an immutable revision', async () => {

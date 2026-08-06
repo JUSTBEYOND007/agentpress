@@ -366,7 +366,7 @@ export const evalScenarios: readonly EvalScenario[] = [
   scenario(
     'stale-edit-01',
     'stale_edit',
-    'expectedHash 不匹配拒绝修改',
+    'Run 绑定 revision 过期时拒绝修改',
     expectation(
       ['planned'],
       ['editor'],
