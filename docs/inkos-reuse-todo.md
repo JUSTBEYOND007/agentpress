@@ -19,6 +19,76 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 - AgentPress Runtime：继续使用 `@earendil-works/pi-agent-core@0.82.1` 和
   `@earendil-works/pi-ai@0.82.1`，不得引入 InkOS 的旧 Pi Runtime 形成第二套事件模型。
 
+## 四类能力展示盘点与复用裁决
+
+本节回答“界面上如何展示、哪些值得学、落到哪里、哪些不能照搬”。证据均来自上述固定 commit；
+它是本清单唯一所称的 InkOS，GitHub 上同名的电子墨水系统、操作系统练习和无关 fork 不在调研范围内。
+
+| 能力                  | InkOS `v1.7.2` 的真实展示                                                                                                                                                                                                                                                                                                                                                                          | 值得 AgentPress 学习                                                                                                                                        | 本项目复用与落点                                                                                                                                                                                                                                                                                    | 不采用或需修正                                                                                                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Multi-Agent           | `sub_agent` 以消息流中的 pipeline operation 展示；Architect/Writer/Auditor/Reviser/Exporter 转成业务标签，卡片显示 running/processing/completed/error、耗时、阶段、字符进度和日志；运行时展开，完成 500ms 后折叠；连续 read/edit/grep/ls 合并为“n 个文件操作”；生成物预览和确认动作位于过程详情之前                                                                                                | 用户看目标、当前角色、阶段、耗时和业务结果，不把 Agent 拓扑当产品导航；低价值操作聚合；长任务可展开审计；结果优先于日志                                     | 继续复用 AgentPress Execution Plan、Task/Attempt、lease/fencing、Kafka worker、TaskResult、Artifact、Proposal、RunEvent projector 和 `assistant-ui@0.15.1`；应用层 owner 拆为 planner、DAG scheduler、task executor、specialist runtime、result/evidence store、synthesis，Web 只消费 typed RunPart | 不复制 `sub_agent` 状态机、任意角色创建、文件事实源、私有 thinking、原始日志默认展开或普通聊天完整工具表；不把所有状态分支塞进 `PlannedRunExecutor` 或单个 React renderer                                          |
+| MCP                   | **InkOS 没有 MCP 子系统，也没有 MCP Server 管理或 MCP 专用 UI**；只能借鉴其通用工具活动与结果优先展示                                                                                                                                                                                                                                                                                              | MCP 是传输/工具来源，不应成为普通作者必须理解的主导航；用户主要看到业务动作、审批、结果、失败和恢复，JSON-RPC/transport 放到审计详情                        | 直接使用 `@modelcontextprotocol/sdk` 和现有 `packages/mcp-runtime`，复用 Oh My Pi reconnect、pi-mcp-adapter output guard、PersistentToolBridge、ToolCall ledger、approval/settlement、Run projection；首版仍是三个内置 Server                                                                       | 不得声称 MCP 来自 InkOS，不新造 MCP manager，不开放任意 stdio/remote Server，不让 Server/tool list、Skill 或网页内容授予 capability；Domain 不暴露 transport/JSON-RPC 类型                                         |
+| Skill                 | Composer 的 `+` 打开 Skill picker；列表展示名称、`@id`、来源和用途，勾选后成为可移除 chip，只强制下一条消息并在发送后清空；Agent 也可按意图自主调用；设置页可导入含 `SKILL.md` 的 AgentSkills/OpenClaw 文件夹，显示未加载诊断、来源和删除入口；脚本明确不自动执行                                                                                                                                  | 显式选择与模型选择并存；选择贴近 Composer；来源/诊断进入管理面；Skill 是当轮声明式上下文，不是永久权限                                                      | 复用现有 Skill Revision、Run Skill Binding、`validateSkillConformance`、`discoverSkillsWithWarnings`、PiSkillPreselector 和 `badlogic/pi-skills` 格式证据；owner 分为 discovery、selection、binding、resource loading、tool narrowing，版本/hash 固定到 PostgreSQL Run                              | 不复制本地目录为事实源，不执行脚本，不扫描凭据，不把 `use_skill` 当授权；InkOS 没有 AgentPress 所需的不可变 revision/hash 投影，其激活工具还会落入通用 utility 分组，本项目必须保留独立 Skill part/chip 和审计事实 |
+| Web Search / Research | `research_web` 接收 topic、purpose 和 quick/standard/deep；完成结果是保存路径、来源数、confidence、partial failure 数，完整报告写入本地 Markdown，含 summary、claims、conflicts、unknowns、creative implications、sources、query log；设置页直接配置 Tavily/兼容端点、环境变量名和 API key；但 `research_web` 未进入 pipeline tool 集合，会被通用“文件操作”分组，没有专用 Research result renderer | 不只暴露裸 query；输出显式区分 Claim、冲突、未知项、来源、置信度和部分失败；外部资料只是 reference，不能直接修改正文/事实；消息流显示摘要，完整材料按需打开 | 复用 `packages/web-research`、内置 `web_research` MCP、Evidence/Artifact persistence、SSRF/output guard、`parse5@7.3.0`、`unpdf@1.8.0` 和 `pi-web-access@v0.15.0` provider 行为；research policy 独立拥有查询扩展、去重、并发、预算与来源上限                                                       | 不复制 Tavily 专用领域字段、明文项目级密钥、本地 Markdown 事实源、串行抓取、正则去 HTML 或误导性的“文件操作”投影；来源数不等于可信度，Claim 必须关联当前 Run/Task 的 Evidence ID，恶意网页内容始终是 untrusted     |
+
+### 展示层完整清单
+
+以下项目是产品投影的穷举基线。新增展示项必须先有稳定事实和 typed projector，React 不得根据文案、
+tool 名称、timer 或 provider 名称猜状态。
+
+#### Multi-Agent
+
+- [x] 顶层目标、当前业务角色、阶段、运行状态、耗时和完成摘要进入消息流；不新增 Specialist 导航栏。
+- [x] active pipeline 自动展开，settled pipeline 自动折叠，用户手动展开后不被轮询 timer 反复抢夺。
+- [x] 低价值连续工具调用聚合；Approval、Ask User、Evidence、Artifact、Article Change、Recovery 和 Warning
+      保持独立可见。
+- [x] Product outcome 和接受/拒绝动作先于 pipeline、日志和原始 tool result。
+- [ ] 补齐 partial success、Specialist timeout、预算耗尽、取消、恢复、late result 和 synthesis failure 的
+      typed 消费者状态；同一事实在 live SSE 与 PostgreSQL replay 中必须同构。
+- [ ] 用 Playwright 验证桌面/移动端长角色名、长阶段名、并行 Task、折叠、失败、恢复和无重叠。
+
+#### MCP
+
+- [x] 普通消息流使用“联网研究、工作区检索、授权媒体”等业务标签，不显示 Server transport 或 JSON-RPC。
+- [x] ToolCall 状态、审批、用户可操作错误、Evidence/Artifact 结果与恢复状态来自统一 RunPart projector。
+- [ ] 审计详情展示 server/tool/revision、参数摘要、耗时、重试、输出引用和脱敏错误；凭据、原始 header、
+      stack、私有 thinking 与超大输出正文不得进入消费者 transcript。
+- [ ] Server/tool revision 变化、断线重连、调用中断线、重复结果、`outcome_unknown` 和旧连接晚到结果必须
+      有独立 projection fixture 与 Playwright 场景。
+
+#### Skill
+
+- [x] Composer 以名称/用途列表选择 Skill，已选项显示为可移除 chip；普通用户不需要输入版本或 hash。
+- [x] 管理面展示来源、版本、诊断和禁用状态；损坏或冲突 Skill 不静默消失。
+- [x] 消息/运行详情展示实际绑定的 Skill，而不是只显示用户发送前的临时选择。
+- [ ] 明确展示“用户显式选择、模型自主选择、被策略禁用、加载失败、历史已过期”五种不同状态。
+- [ ] PostgreSQL replay 和浏览器验证 worker 重启、恢复、分支切换后 revision/hash 不漂移，旧 instructions
+      不重新进入新 turn。
+
+#### Web Search / Research
+
+- [x] 运行中展示查询阶段、已保留来源数和部分失败，不滚动输出完整网页正文。
+- [x] 完成后优先展示 Research Artifact 摘要、confidence、conflicts/unknowns 和来源入口；Evidence chip 与
+      来源抽屉承载 URL、标题、摘录和 provenance。
+- [x] 无结果或部分失败仍使用同一 typed Artifact；不得用成功色或普通 completed 掩盖 degraded 状态。
+- [ ] 补齐 search/fetch/synthesis 各阶段 timeout、rate limit、cancel、非法 Schema、全部失败和持久化失败投影。
+- [ ] Playwright 验证 0/1/多来源、冲突来源、恶意页面、超长标题/URL、来源打开、错误脱敏和移动端溢出。
+
+### 复用顺序与 Owner 门禁
+
+- [ ] **先直接依赖**：官方 Pi、`assistant-ui`、官方 MCP SDK、`parse5`、`unpdf` 和既有 Workspace package；
+      只有公共 API 无法覆盖明确契约时才进入下一层。
+- [ ] **再扩展现有 Adapter/Port**：`PiRuntimeAdapter`、`PersistentToolBridge`、`McpClientGateway`、
+      `ContextAssembler`、Research ports、RunEvent projector；不得从 UI 或 coordinator 绕过这些边界。
+- [ ] **再独立适配上游行为与测试**：先复制行为 fixture/contract，再写最小实现；AGPL InkOS 只允许行为参考，
+      未完成许可评估不得复制源码或测试文本。
+- [ ] **最后才自研**：必须在 `docs/references/pi-ecosystem.md` 逐项记录候选库、固定版本、源码/测试路径、
+      许可证和拒绝原因；“代码不多”“自己写更快”不是理由。
+- [ ] 新增 owner 使用窄接口和 typed command/event/result；禁止创建 `AgentManager`、`ToolManager`、
+      `SkillManager`、`ResearchManager`、`RunCoordinator` 一类同时拥有多种状态转换的总控模块。
+- [ ] 新增 Agent-facing TypeScript/TSX 文件继续受 500 行硬门禁；拆分必须按领域职责，不能以
+      `helpers.ts`、`utils.ts`、barrel 或回调链规避。
+
 ## 强制执行顺序
 
 每个 TODO 行为单元都按以下顺序执行，任何一步没有证据时不得直接编码：
@@ -119,10 +189,12 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 - [ ] ResearchBrief 契约测试覆盖缺失 `schemaVersion`、任意嵌套对象、额外字段、空 Evidence ID、Claim
       引用未列 Source、重复 Source、冲突但满置信度，以及有效 canonical payload；真实评测中首次
       `task_complete` 应可通过宿主 Schema，不依赖 protocol-repair Prompt。
-- [ ] **P0：固定 Provider Schema capability。** 不再仅从可自定义的 provider ID 名称猜测 OpenAI/
+- [x] **P0：固定 Provider Schema capability。** 不再仅从可自定义的 provider ID 名称猜测 OpenAI/
       Anthropic/Google 兼容族；backend 显式声明 wire schema capability。任何 strict normalization 必须有
       optional <-> required-nullable 的双向转换，并覆盖 unsupported keyword、嵌套对象、数组上限和
-      `failure:null` round-trip；未通过真实 provider contract test 前不得全局启用。
+      `failure:null` round-trip；`strict=require` 在 provider 不能保证执行时请求前失败，`prefer` 保留
+      wire codec 和宿主复验。52 个 Runtime 测试、真实 custom endpoint 调用与构建门禁通过，提交为
+      `2114866`。
 - [ ] Researcher 输出体积预算必须从 `ResearchExecutionPolicy.maxSynthesisTokens` 进入真实 Pi
       `streamSimple(maxTokens)`；同时保证 Provider wire schema 与 canonical 本地 Schema 的差异可审计，
       不能因 wire 降级跳过 Evidence 引用、置信度或数组边界校验。
@@ -134,12 +206,14 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 - [ ] **P0：闭合研究 Evidence 事实链。** Researcher submission 不重复填写 Artifact 外层
       `evidenceIds`，宿主从 canonical `content.sources[].evidenceId` 确定性生成关联边；Claim 只能引用
       Source 子集，Source 集合与 Artifact Evidence 集合必须精确相等，之后再验证每个 UUID 属于当前
-      Run/Task。下一步为 `evidence_records` 增加强类型 `source_tool_call_id`，通过 ToolCall 关联 attempt，
-      消除 metadata JSON 软关联、旧 attempt 混入和 ToolCall succeeded 后 Evidence 另事务写入的崩溃窗口。
+      Run/Task。`91f47a7` 已增加强类型 `source_tool_call_id`、ToolCall attempt 关联、幂等唯一键和
+      inline/oversized ToolOutput 同构投影；剩余项是消除 ToolCall succeeded 后 Evidence 另事务写入的
+      崩溃窗口，因此总项仍不勾选。
 - [ ] **P0：闭合研究来源 provenance。** Provider/adapter revision 必须由 Tool Definition 明确声明并
       快照到 ToolCall，不能由模型填写或把 `source_revision` 内容哈希冒充 Provider revision；oversized
-      ToolOutput Artifact 路径也必须产生与 inline output 相同的 Evidence。完成前不得让宿主从不完整 facts
-      自动组装 `sources/queryLog/providerRevision`。
+      ToolOutput Artifact 路径已由 `91f47a7` 产生与 inline output 相同的 Evidence；剩余项是把明确的
+      Provider/adapter revision 快照到 ToolCall。完成前不得让宿主从不完整 facts 自动组装
+      `sources/queryLog/providerRevision`。
 - [ ] **P0：复跑最小在线闭环。** 只运行 `workflow-02`，要求 Researcher 在 120 秒内结算、ToolCall <= 8、
       Evidence <= 24、ResearchBrief 结构与引用合法、无证据 Claim 为 0，并从 PostgreSQL 核对 Root
       Request、Run、transcript、ToolCall、Task、Evidence、Artifact 和 terminal projection。
@@ -557,10 +631,14 @@ completed 误判为降级。Agent Evals 42 个测试通过。
   0 Evidence；模型随后虚构非 UUID 引用。ResearchBrief Schema 已将 Evidence ID 固定为 UUID。Provider
   原始错误正文曾包含自动生成凭据，现已改为不保留响应正文；MCP `isError=true` 也改为失败结算，不能再
   作为 succeeded ToolCall 投影。该场景受外部搜索额度阻塞，不能标记为真实在线成功。
+- `.agentpress/evals/2026-08-06T23-49-11-116Z-gpt-5.6-terra-workflow-02.json`：显式 Provider
+  capability/codec 上线后，模型正常提交 4 个上限为 2 的 `web.search` ToolCall，但搜索端仍全部返回
+  MCP error，最终 0 Evidence、0 Artifact、0 越权写入并在 134 秒后 `task_timeout`。PostgreSQL
+  `9eeaf81d-6e2f-41cc-b1c2-2d93b8844dfe` 的 ToolCall/RunEvent 只保存脱敏错误
+  `MCP tool search returned an error`，证明 Provider wire 根因已移除，但外部搜索额度仍阻塞在线闭环。
 
-因此当前未完成项不仅是 ResearchBrief canonical Schema，还包括 Provider wire capability 与双向适配。
-在这两项同时通过真实 provider contract 前，不得把 role-specific completion、研究输出预算或
-`workflow-02` 标记为完成。
+因此 Provider wire capability 与双向适配已完成；ResearchBrief canonical Schema、研究输出预算和
+Evidence 事务闭包仍必须在搜索服务恢复后通过真实 `workflow-02`，在此之前不得标记完成。
 
 - [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
       用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
