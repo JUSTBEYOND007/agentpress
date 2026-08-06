@@ -194,7 +194,7 @@ export class ActionProposalService {
     userId: string,
     runs: Pick<DirectRunService, 'createConfirmedAction'>,
   ): Promise<ActionProposalSnapshot> {
-    const source = await this.database.transaction(async (transaction) => {
+    const resolution = await this.database.transaction(async (transaction) => {
       await transaction.execute(sql`select id from ${actionProposals} where id = ${id} for update`);
       const rows = await transaction
         .select({
@@ -212,21 +212,33 @@ export class ActionProposalService {
         .limit(1);
       const row = rows[0];
       if (!row) throw new Error('Action proposal does not exist');
-      if (row.proposal.status === 'confirmed') return row;
+      if (row.proposal.status === 'confirmed') return { kind: 'ready' as const, source: row };
       if (row.proposal.status !== 'pending')
         throw new Error(`Action proposal is ${row.proposal.status}`);
       if (row.proposal.expiresAt <= this.now()) {
+        const now = this.now();
         await transaction
           .update(actionProposals)
-          .set({ status: 'expired', updatedAt: this.now() })
+          .set({ status: 'expired', updatedAt: now })
           .where(eq(actionProposals.id, id));
-        throw new Error('Action proposal has expired');
+        const event = await appendRunEvent(transaction, {
+          id: this.createId(),
+          runId: row.proposal.sourceRunId,
+          eventType: 'action.expired',
+          payload: { proposalId: row.proposal.id },
+        });
+        return { kind: 'expired' as const, event: toDurableEvent(event) };
       }
       if (row.currentRevisionId !== row.proposal.baseRevisionId) {
         throw new Error('Action proposal base revision is stale');
       }
-      return row;
+      return { kind: 'ready' as const, source: row };
     });
+    if (resolution.kind === 'expired') {
+      await this.publisher.publish({ durable: true, event: resolution.event });
+      throw new Error('Action proposal has expired');
+    }
+    const source = resolution.source;
     if (source.proposal.status === 'confirmed') return snapshot(source.proposal);
 
     const created = await runs.createConfirmedAction({

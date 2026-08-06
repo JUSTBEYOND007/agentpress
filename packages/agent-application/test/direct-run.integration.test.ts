@@ -5,6 +5,7 @@ import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
 import { fauxAssistantMessage, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import {
+  actionProposals,
   agentSessions,
   agentSessionCompactions,
   agentTranscriptEntries,
@@ -903,6 +904,66 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(agentRuns)
       .where(eq(agentRuns.branchId, branchId));
     expect(confirmedRuns).toHaveLength(2);
+  });
+
+  it('persists action proposal expiration and rejects repeated confirmation without creating a run', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Expired action proposal',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const source = await service.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '继续上一段',
+      idempotencyKey: randomUUID(),
+      mentionTargetIds: [ids.article],
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'completed', completedAt: new Date() })
+      .where(eq(agentRuns.id, source.runId));
+
+    let clock = new Date('2026-08-07T00:00:00.000Z');
+    const actions = new ActionProposalService(connection.db, publisher, () => clock);
+    const proposal = await actions.create({
+      runId: source.runId,
+      instruction: '继续上一段',
+      summary: '继续写作',
+      selectedBlocks: [],
+    });
+    clock = new Date(clock.getTime() + 31 * 60 * 1000);
+
+    await expect(actions.confirm(proposal.id, ids.user, service)).rejects.toThrow(
+      'Action proposal has expired',
+    );
+    await expect(actions.confirm(proposal.id, ids.user, service)).rejects.toThrow(
+      'Action proposal is expired',
+    );
+
+    const [stored, branchRuns, expirationEvents] = await Promise.all([
+      connection.db
+        .select()
+        .from(actionProposals)
+        .where(eq(actionProposals.id, proposal.id))
+        .limit(1),
+      connection.db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(eq(agentRuns.branchId, branchId)),
+      connection.db
+        .select({ eventType: runEvents.eventType })
+        .from(runEvents)
+        .where(and(eq(runEvents.runId, source.runId), eq(runEvents.eventType, 'action.expired'))),
+    ]);
+    expect(stored[0]).toMatchObject({ status: 'expired', confirmedRunId: null });
+    expect(branchRuns).toHaveLength(1);
+    expect(expirationEvents).toHaveLength(1);
   });
 
   it('pins Mention, Skill, prompt and accepted memory into an immutable Context Manifest', async () => {
