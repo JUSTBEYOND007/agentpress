@@ -333,7 +333,7 @@ function artifactIdFromEvent(value: unknown): string | undefined {
   return typeof artifact.artifactId === 'string' ? artifact.artifactId : undefined;
 }
 
-function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {
+export function toDurableEvent(event: typeof runEvents.$inferSelect): DurableRunEvent {
   return {
     id: event.id,
     runId: event.runId,
