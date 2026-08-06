@@ -21,6 +21,9 @@ describe('run presentation projection', () => {
     expect((outcome.process as { parts: RunPart[] }).parts.map(({ type }) => type)).toEqual([
       'activity',
     ]);
+    expect(outcome.process).toMatchObject({
+      items: [{ kind: 'utility-group', count: 1, status: 'completed' }],
+    });
     expect(outcome.process).toMatchObject({ durationMs: 19_000 });
   });
 
@@ -33,7 +36,7 @@ describe('run presentation projection', () => {
     expect(names(content)).toEqual(['agentpress-run-part']);
   });
 
-  it('keeps an ordinary answer without exposing diagnostic process data', () => {
+  it('keeps an ordinary answer with a separately disclosed reasoning summary', () => {
     const content = projectionContent(
       projection([
         part('context', 'context.ready', 1, { revisionId: 'revision-secret' }),
@@ -45,7 +48,7 @@ describe('run presentation projection', () => {
     );
 
     expect(texts(content)).toEqual(['这是普通回答。']);
-    expect(names(content)).toEqual([]);
+    expect(names(content)).toEqual(['agentpress-run-part']);
   });
 
   it('puts the compact process status first while a run is active and leaves warnings visible', () => {
@@ -73,6 +76,35 @@ describe('run presentation projection', () => {
     const process = dataByName(content, 'agentpress-run-process');
     expect((process.parts as RunPart[]).map(({ type }) => type)).toEqual(['activity']);
     expect(process).toMatchObject({ durationMs: 19_000 });
+  });
+
+  it('preserves utility-pipeline-utility order and pipeline result facts', () => {
+    const content = projectionContent(
+      projection([
+        part('activity', 'tool.succeeded', 1, {
+          toolId: 'article.read_current',
+          toolCallId: 'read-1',
+        }),
+        part('activity', 'tool.succeeded', 2, {
+          toolId: 'article.propose_edits',
+          toolCallId: 'edit-1',
+          output: { summary: '已生成两处修改' },
+        }),
+        part('activity', 'tool.succeeded', 3, { toolId: 'web.search', toolCallId: 'search-1' }),
+        usage(4),
+      ]),
+    );
+    const process = dataByName(content, 'agentpress-run-process');
+    expect(process.items).toMatchObject([
+      { kind: 'utility-group', count: 1 },
+      {
+        kind: 'pipeline',
+        label: '生成修改稿',
+        status: 'completed',
+        result: { summary: '已生成两处修改' },
+      },
+      { kind: 'utility-group', count: 1 },
+    ]);
   });
 
   it('keeps failed tool activity outside the collapsed process', () => {

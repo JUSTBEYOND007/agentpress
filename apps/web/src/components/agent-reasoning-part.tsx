@@ -21,8 +21,13 @@ export function ReasoningPart({
         ) : (
           <Brain aria-hidden="true" size={13} />
         )}
-        <span>{active ? '正在分析请求' : '已完成分析'}</span>
-        {!active && durationMs > 0 ? <small>{formatDuration(durationMs)}</small> : null}
+        <span>
+          {active
+            ? '正在思考'
+            : durationMs > 0
+              ? `思考了 ${formatDuration(durationMs)}`
+              : '思考过程'}
+        </span>
       </div>
     );
   }
@@ -34,8 +39,13 @@ export function ReasoningPart({
         ) : (
           <Brain aria-hidden="true" size={13} />
         )}
-        <span>{active ? '正在分析请求' : '已完成分析'}</span>
-        {!active && durationMs > 0 ? <small>{formatDuration(durationMs)}</small> : null}
+        <span>
+          {active
+            ? '正在思考'
+            : durationMs > 0
+              ? `思考了 ${formatDuration(durationMs)}`
+              : '思考过程'}
+        </span>
         <ChevronDown className="reasoning-chevron" aria-hidden="true" size={13} />
       </summary>
     </details>

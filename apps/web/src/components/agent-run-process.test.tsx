@@ -65,11 +65,11 @@ describe('Agent run process disclosure', () => {
     );
 
     expect(markup).toContain('执行过程');
-    expect(markup.match(/读取正文/gu)).toHaveLength(1);
-    expect(markup.match(/生成修改稿/gu)).toHaveLength(1);
+    expect(markup.match(/读取正文/gu)).toHaveLength(2);
+    expect(markup.match(/生成修改稿/gu)).toHaveLength(2);
     expect(markup).not.toContain('internal.runtime');
     expect(markup).not.toContain('搜索资料');
-    expect(markup).not.toContain('19 秒');
+    expect(markup).toContain('19 秒');
     expect(markup).not.toContain('token');
     expect(markup).not.toContain('<details open');
   });
@@ -82,15 +82,54 @@ describe('Agent run process disclosure', () => {
           status: 'running',
           terminal: false,
           durationMs: 0,
-          parts: [
-            activity('activity-1', 1, 'tool.executing', 'article.propose_edits', 'call-1'),
-          ],
+          parts: [activity('activity-1', 1, 'tool.executing', 'article.propose_edits', 'call-1')],
         }}
       />,
     );
 
     expect(markup.match(/正在生成修改稿/gu)).toHaveLength(1);
     expect(markup).not.toContain('<details');
+  });
+
+  it('groups consecutive utility operations while keeping pipeline details available', () => {
+    const markup = renderToStaticMarkup(
+      <AgentRunProcess
+        data={{
+          runId: 'run-1',
+          status: 'completed',
+          terminal: true,
+          durationMs: 0,
+          items: [
+            {
+              kind: 'utility-group',
+              id: 'utility-1',
+              count: 2,
+              status: 'completed',
+              sequence: 1,
+              items: [
+                { id: 'tool:1', label: '读取正文', status: 'completed', sequence: 1 },
+                { id: 'tool:2', label: '搜索资料', status: 'completed', sequence: 2 },
+              ],
+            },
+            {
+              kind: 'pipeline',
+              id: 'tool:3',
+              label: '生成修改稿',
+              status: 'completed',
+              durationMs: 1800,
+              sequence: 3,
+              stages: [{ id: 'stage-1', label: '生成修改提案', status: 'completed' }],
+              result: { summary: '已生成修改' },
+            },
+          ],
+          parts: [],
+        }}
+      />,
+    );
+    expect(markup).toContain('2 个文件操作');
+    expect(markup).toContain('生成修改稿');
+    expect(markup).toContain('已生成修改');
+    expect(markup).toContain('2 秒');
   });
 });
 

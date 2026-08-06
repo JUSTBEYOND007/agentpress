@@ -62,7 +62,44 @@ export type RunProcessPresentation = {
   readonly terminal: boolean;
   readonly durationMs: number;
   readonly parts: readonly RunPart[];
+  readonly items: readonly ConsumerExecutionItem[];
 };
+
+export type ConsumerExecutionStatus = 'running' | 'processing' | 'completed' | 'error';
+
+export type ConsumerExecutionStage = {
+  readonly id: string;
+  readonly label: string;
+  readonly status: ConsumerExecutionStatus;
+  readonly progress?: Readonly<Record<string, unknown>>;
+};
+
+export type ConsumerExecutionItem =
+  | {
+      readonly kind: 'pipeline';
+      readonly id: string;
+      readonly label: string;
+      readonly status: ConsumerExecutionStatus;
+      readonly durationMs: number;
+      readonly stages: readonly ConsumerExecutionStage[];
+      readonly result?: unknown;
+      readonly error?: string;
+      readonly sequence: number;
+    }
+  | {
+      readonly kind: 'utility-group';
+      readonly id: string;
+      readonly count: number;
+      readonly status: ConsumerExecutionStatus;
+      readonly items: readonly {
+        readonly id: string;
+        readonly label: string;
+        readonly status: ConsumerExecutionStatus;
+        readonly result?: unknown;
+        readonly sequence: number;
+      }[];
+      readonly sequence: number;
+    };
 
 export type ArticleOutcomePresentation = {
   readonly part: RunPart;

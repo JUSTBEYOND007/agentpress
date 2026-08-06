@@ -44,7 +44,10 @@ export function projectRunParts(
       const previousIndex = lifecycleIndexes.get(key);
       if (previousIndex === undefined) {
         lifecycleIndexes.set(key, projected.length);
-        projected.push(part);
+        projected.push({
+          ...part,
+          payload: { ...part.payload, lifecycleStages: [lifecycleStage(part)] },
+        });
       } else {
         const previous = projected[previousIndex];
         const startedAt = previous
@@ -57,6 +60,7 @@ export function projectRunParts(
               payload: {
                 ...previous.payload,
                 ...part.payload,
+                lifecycleStages: [...lifecycleStages(previous.payload), lifecycleStage(part)],
                 ...(startedAt ? { lifecycleStartedAt: startedAt.toISOString() } : {}),
                 ...(startedAt && eventAt && isSettledLifecycleStatus(part.status)
                   ? { durationMs: Math.max(0, eventAt.getTime() - startedAt.getTime()) }
@@ -69,6 +73,24 @@ export function projectRunParts(
   }
 
   return projected;
+}
+
+function lifecycleStage(part: RunPart): Readonly<Record<string, unknown>> {
+  return {
+    status: part.status,
+    eventAt: part.payload.eventAt,
+  };
+}
+
+function lifecycleStages(
+  payload: Readonly<Record<string, unknown>>,
+): readonly Readonly<Record<string, unknown>>[] {
+  return Array.isArray(payload.lifecycleStages)
+    ? payload.lifecycleStages.filter(
+        (value): value is Readonly<Record<string, unknown>> =>
+          typeof value === 'object' && value !== null && !Array.isArray(value),
+      )
+    : [];
 }
 
 function isSettledLifecycleStatus(status: string): boolean {

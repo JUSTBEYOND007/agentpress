@@ -1,9 +1,14 @@
 'use client';
 
-import { Check, ChevronDown, LoaderCircle } from 'lucide-react';
+import { Check, CircleAlert, LoaderCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import { numberValue, recordValue, stringValue } from '../lib/agentpress-assistant-runtime';
-import type { RunPart, RunProcessPresentation } from '../lib/agent-runtime-contracts';
+import type {
+  ConsumerExecutionItem,
+  RunPart,
+  RunProcessPresentation,
+} from '../lib/agent-runtime-contracts';
 import { parseRunPart, statusLabel } from './agent-view-model';
 
 const toolLabels: Readonly<Record<string, string>> = {
@@ -22,31 +27,36 @@ export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX
   const view = processSummary(process);
   if (!process.terminal) {
     return (
-      <div className="run-process-status">
-        <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
-        <span role="status">{view.label}</span>
-        {view.meta ? <small>{view.meta}</small> : null}
+      <div className="run-process-live">
+        <div className="run-process-status">
+          <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
+          <span role="status">{view.label}</span>
+          {view.meta ? <small>{view.meta}</small> : null}
+        </div>
+        {process.items.length > 0 ? (
+          <div className="run-process-items">
+            {process.items.map((item) => (
+              <ExecutionItemView item={item} key={item.id} />
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
-  const steps = processSteps(process.parts);
-  if (steps.length === 0) return null;
+  if (process.items.length === 0) return null;
 
   return (
-    <details className="run-process-details">
-      <summary>
+    <div className="run-process-details">
+      <div className="run-process-heading">
         <span>{view.label}</span>
-        <ChevronDown className="run-process-chevron" aria-hidden="true" size={13} />
-      </summary>
-      <ol className="run-process-steps">
-        {steps.map((step) => (
-          <li key={step.id}>
-            <Check aria-hidden="true" size={12} />
-            <span>{step.label}</span>
-          </li>
+        {process.durationMs > 0 ? <small>{formatProcessDuration(process.durationMs)}</small> : null}
+      </div>
+      <div className="run-process-items">
+        {process.items.map((item) => (
+          <ExecutionItemView item={item} key={item.id} />
         ))}
-      </ol>
-    </details>
+      </div>
+    </div>
   );
 }
 
@@ -67,6 +77,7 @@ export function parseProcessPresentation(data: unknown): RunProcessPresentation 
     terminal: record.terminal,
     durationMs: numberValue(record.durationMs),
     parts,
+    items: Array.isArray(record.items) ? parseExecutionItems(record.items) : legacyItems(parts),
   };
 }
 
@@ -85,10 +96,32 @@ export function processSummary(process: RunProcessPresentation) {
   return {
     label,
     meta:
-      !process.terminal && totalSteps > 0
-        ? `${String(completedSteps)}/${String(totalSteps)}`
-        : '',
+      !process.terminal && totalSteps > 0 ? `${String(completedSteps)}/${String(totalSteps)}` : '',
   } as const;
+}
+
+function legacyItems(parts: readonly RunPart[]): readonly ConsumerExecutionItem[] {
+  return processSteps(parts).map((step) => ({
+    kind: 'pipeline',
+    id: step.id,
+    label: step.label,
+    status: 'completed',
+    durationMs: 0,
+    stages: [{ id: step.id, label: step.label, status: 'completed' }],
+    sequence: 0,
+  }));
+}
+
+function parseExecutionItems(value: unknown): readonly ConsumerExecutionItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is ConsumerExecutionItem => {
+    if (!item || typeof item !== 'object') return false;
+    const candidate = item as Record<string, unknown>;
+    return (
+      (candidate.kind === 'pipeline' || candidate.kind === 'utility-group') &&
+      typeof candidate.id === 'string'
+    );
+  });
 }
 
 function processSteps(parts: readonly RunPart[]): readonly { id: string; label: string }[] {
@@ -104,6 +137,94 @@ function processSteps(parts: readonly RunPart[]): readonly { id: string; label: 
     seen.add(key);
     return [{ id: key, label }];
   });
+}
+
+function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): React.JSX.Element {
+  const active = item.status === 'running' || item.status === 'processing';
+  const [open, setOpen] = useState(active);
+  useEffect(() => {
+    if (active) {
+      setOpen(true);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setOpen(false);
+    }, 500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [active]);
+  if (item.kind === 'utility-group') {
+    return (
+      <details
+        className="run-process-utility"
+        open={open}
+        onToggle={(event) => {
+          setOpen(event.currentTarget.open);
+        }}
+      >
+        <summary>
+          <span>{item.count} 个文件操作</span>
+          <span className={`execution-status is-${item.status}`}>{statusText(item.status)}</span>
+        </summary>
+        <ul>
+          {item.items.map((child) => (
+            <li key={child.id}>
+              <Check size={12} aria-hidden="true" />
+              <span>{child.label}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    );
+  }
+  return (
+    <details
+      className="run-process-pipeline"
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary>
+        {item.status === 'error' ? (
+          <CircleAlert size={13} aria-hidden="true" />
+        ) : item.status === 'completed' ? (
+          <Check size={13} aria-hidden="true" />
+        ) : (
+          <LoaderCircle className="activity-spinner" size={13} aria-hidden="true" />
+        )}
+        <span>{item.label}</span>
+        {item.durationMs > 0 ? (
+          <small className="execution-duration">{formatProcessDuration(item.durationMs)}</small>
+        ) : null}
+        <span className={`execution-status is-${item.status}`}>{statusText(item.status)}</span>
+      </summary>
+      {item.result ? <div className="execution-result">{resultSummary(item.result)}</div> : null}
+      <ol>
+        {item.stages.map((stage) => (
+          <li key={stage.id}>
+            <span className={`stage-dot is-${stage.status}`} />
+            <span>{stage.label}</span>
+          </li>
+        ))}
+      </ol>
+      {item.error ? <p className="execution-error">{item.error}</p> : null}
+    </details>
+  );
+}
+
+function statusText(status: ConsumerExecutionItem['status']): string {
+  return status === 'completed' ? '已完成' : status === 'error' ? '未完成' : '进行中';
+}
+
+function resultSummary(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return stringValue(record.summary) || stringValue(record.title) || '结果已生成';
+  }
+  return '结果已生成';
 }
 
 function activeActivityLabel(part: RunPart): string {

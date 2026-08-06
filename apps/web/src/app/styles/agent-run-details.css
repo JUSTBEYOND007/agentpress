@@ -17,26 +17,16 @@
   font-size: 10px;
 }
 
-.run-process-details > summary {
+.run-process-heading {
   display: flex;
   min-height: 28px;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
-  list-style: none;
 }
 
-.run-process-details > summary::-webkit-details-marker {
-  display: none;
-}
-
-.run-process-chevron {
-  margin-left: auto;
-  transition: transform 160ms ease;
-}
-
-.run-process-details[open] .run-process-chevron {
-  transform: rotate(180deg);
+.run-process-heading small {
+  color: #999a94;
+  font-size: 10px;
 }
 
 .run-process-steps {
@@ -52,6 +42,101 @@
   align-items: center;
   gap: 6px;
   color: #666762;
+}
+
+.run-process-items {
+  display: grid;
+  gap: 5px;
+  margin: 4px 0 8px;
+  padding-left: 2px;
+}
+
+.run-process-pipeline,
+.run-process-utility {
+  border-left: 1px solid #e3e3df;
+  padding-left: 10px;
+}
+
+.run-process-pipeline > summary,
+.run-process-utility > summary {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 6px;
+  color: #4a4b47;
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-process-pipeline > summary::-webkit-details-marker,
+.run-process-utility > summary::-webkit-details-marker {
+  display: none;
+}
+
+.execution-status {
+  margin-left: auto;
+  color: #92938e;
+  font-size: 10px;
+}
+
+.execution-duration {
+  color: #999a94;
+  font-size: 10px;
+}
+
+.execution-status.is-error {
+  color: #b34b43;
+}
+
+.execution-status.is-completed {
+  color: #4e986c;
+}
+
+.run-process-pipeline ol,
+.run-process-utility ul {
+  display: grid;
+  gap: 5px;
+  margin: 3px 0 7px;
+  padding-left: 19px;
+  color: #777873;
+  font-size: 11px;
+  list-style: none;
+}
+
+.run-process-pipeline li,
+.run-process-utility li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stage-dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid #b8b9b4;
+  border-radius: 50%;
+}
+
+.stage-dot.is-completed {
+  border-color: #4e986c;
+  background: #4e986c;
+}
+
+.stage-dot.is-error {
+  border-color: #b34b43;
+  background: #b34b43;
+}
+
+.execution-result {
+  margin: 4px 0 5px 19px;
+  color: #565752;
+  font-size: 11px;
+}
+
+.execution-error {
+  margin: 4px 0 7px 19px;
+  color: #b34b43;
+  font-size: 11px;
 }
 
 .run-inspector {
