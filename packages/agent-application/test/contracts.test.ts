@@ -295,6 +295,11 @@ describe('agent application contracts', () => {
     expect(() => {
       assertSpecialistArtifactPolicy('writer', [{ type: 'AssetProposal' }]);
     }).toThrow(/writer cannot submit AssetProposal/u);
+    expect(() => {
+      assertSpecialistArtifactPolicy('researcher', [
+        { type: 'ResearchBrief', content: { schemaVersion: 1 } },
+      ]);
+    }).toThrow(/ResearchBrief/u);
   });
 
   it('strips Main action capabilities from the Specialist model-visible turn', () => {

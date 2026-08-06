@@ -126,6 +126,18 @@ truncation state. Run context still freezes article revisions, Evidence, attachm
 memory retrieval version and compaction before execution; current request remains a separate typed
 runtime turn. Untrusted content is escaped and never becomes a capability or a new user message.
 
+Skill behavior reuses the existing AgentPress `validateSkillConformance`, deterministic discovery
+precedence, `loadStaticSkillResources`, `pinSkills`, `Run Skill Binding`, and `PiSkillPreselector`
+paths. These were compared with InkOS registry/loader/`use_skill` source and tests at the fixed
+commit. Explicit selections are preserved, model selection can only choose from the host catalog,
+disabled/hidden entries are excluded, and `narrowSkillTools` intersects rather than expands the
+host allowlist. Resource documents must be declared regular UTF-8 files under bounded per-file and
+total-size limits; symlink/duplicate/unsafe paths fail closed. Run bindings pin revision/hash and
+historical instructions are expired by transcript projection. The Composer projection already shows
+the compact Skill identity while revision/hash/resource diagnostics remain persisted details. The
+online `pnpm eval:skill` target-model gate remains intentionally unchecked until credentials and a
+provider/model manifest are supplied.
+
 Review/revision behavior was audited at the same fixed InkOS commit in
 `packages/core/src/pipeline/chapter-review-cycle.ts` and
 `packages/core/src/__tests__/chapter-review-cycle.test.ts`. The reusable contract is the order

@@ -291,16 +291,16 @@ InkOS 证据起点：
 
 TODO：
 
-- [ ] 对照 InkOS registry/loader/use_skill 行为审计当前实现；已有 conformance、冲突诊断、hash 和
+- [x] 对照 InkOS registry/loader/use_skill 行为审计当前实现；已有 conformance、冲突诊断、hash 和
       resource safety 不得重写。
-- [ ] 保留“用户显式选择”和“模型从允许 catalog 选择”两条路径；显式禁用优先级最高。
-- [ ] Skill 只加载 Markdown 指令和声明的静态 regular-file resource；不执行脚本、不扫描系统目录、
+- [x] 保留“用户显式选择”和“模型从允许 catalog 选择”两条路径；显式禁用优先级最高。
+- [x] Skill 只加载 Markdown 指令和声明的静态 regular-file resource；不执行脚本、不扫描系统目录、
       不隐式发现凭据。
-- [ ] 资源读取复用现有安全路径、symlink、类型、单文件/总量和 UTF-8 限制，不新增第二套文件读取工具。
-- [ ] Skill 只能缩小 Tool allowlist，不能授予平台、Workspace、Agent 或 Task 未拥有的 capability。
-- [ ] Run 固定 Skill revision/hash；历史 Skill instructions 在后续 turn 中过期，除非再次显式绑定。
-- [ ] Composer 只展示 Skill chip、名称和用途；版本、来源、hash、资源和诊断进入详情或管理页。
-- [ ] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
+- [x] 资源读取复用现有安全路径、symlink、类型、单文件/总量和 UTF-8 限制，不新增第二套文件读取工具。
+- [x] Skill 只能缩小 Tool allowlist，不能授予平台、Workspace、Agent 或 Task 未拥有的 capability。
+- [x] Run 固定 Skill revision/hash；历史 Skill instructions 在后续 turn 中过期，除非再次显式绑定。
+- [x] Composer 只展示 Skill chip、名称和用途；版本、来源、hash、资源和诊断进入详情或管理页。
+- [x] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
       prompt injection、历史过期和 Skill 越权。
 - [ ] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
 

@@ -28,6 +28,7 @@
     "@agentpress/contracts": "workspace:*",
     "@agentpress/database": "workspace:*",
     "@agentpress/editor-patch": "workspace:*",
+    "@agentpress/web-research": "workspace:*",
     "@agentpress/tool-runtime": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
     "@sinclair/typebox": "catalog:",

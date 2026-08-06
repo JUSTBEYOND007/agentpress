@@ -5,6 +5,7 @@ import {
   type RuntimeUsage,
 } from '@agentpress/agent-runtime';
 import { Type } from '@sinclair/typebox';
+import { assertResearchBriefContent } from '@agentpress/web-research';
 
 import type { SpecialistRole } from './specialist-task-contract.js';
 
@@ -275,12 +276,17 @@ export function assertStrictSchema(
 
 export function assertSpecialistArtifactPolicy(
   owner: SpecialistRole,
-  artifacts: readonly Pick<StructuredArtifact, 'type'>[],
+  artifacts: readonly { readonly type: ArtifactType; readonly content?: unknown }[],
 ): void {
   const allowed = specialistArtifactPolicy[owner];
   const forbidden = artifacts.find(({ type }) => !allowed.has(type));
   if (forbidden) {
     throw new Error(`Specialist ${owner} cannot submit ${forbidden.type}`);
+  }
+  for (const artifact of artifacts) {
+    if (artifact.type === 'ResearchBrief' && artifact.content !== undefined) {
+      assertResearchBriefContent(artifact.content);
+    }
   }
 }
 
