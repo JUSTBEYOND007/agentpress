@@ -30,7 +30,7 @@
     "demo": "node scripts/demo.mjs",
     "demo:prepare": "node scripts/demo.mjs --prepare-only",
     "local:prepare": "node scripts/demo.mjs --prepare-only",
-    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
+    "dev": "node --env-file-if-exists=.env --env-file-if-exists=.env.agent-model scripts/dev.mjs",
     "eval:online": "pnpm --filter @agentpress/agent-evals eval:online",
     "eval:pr": "pnpm --filter @agentpress/domain test && pnpm --filter @agentpress/tool-runtime test && pnpm --filter @agentpress/agent-runtime test && pnpm --filter @agentpress/agent-application test && pnpm --filter @agentpress/database test && pnpm --filter @agentpress/agent-evals test",
     "eval:rag": "pnpm --filter @agentpress/agent-evals eval:rag",
