@@ -9,6 +9,7 @@ import {
   DATABASE_AGENT_RUN_STATES,
   DATABASE_AGENT_TASK_STATES,
   DATABASE_TOOL_CALL_STATES,
+  evidenceRecords,
   inboxMessages,
   memoryCandidates,
   outboxMessages,
@@ -36,6 +37,15 @@ describe('database schema', () => {
   it('defines durable specialist task ownership', () => {
     expect(getTableConfig(agentTaskLeases).name).toBe('agent_task_leases');
     expect(getTableConfig(agentTaskLeases).columns.map(({ name }) => name)).toContain('id');
+  });
+
+  it('links Evidence to the Tool Call fact that produced it', () => {
+    const config = getTableConfig(evidenceRecords);
+    expect(config.columns.map(({ name }) => name)).toContain('source_tool_call_id');
+    expect(config.foreignKeys).toHaveLength(3);
+    expect(
+      config.indexes.map(({ config }) => ({ name: config.name, unique: config.unique })),
+    ).toContainEqual({ name: 'evidence_records_tool_source_unique', unique: true });
   });
 
   it('keeps memory consolidation provenance in PostgreSQL', () => {

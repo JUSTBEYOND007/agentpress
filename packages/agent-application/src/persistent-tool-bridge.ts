@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import type { RuntimeTool, RuntimeToolResultMessage } from '@agentpress/agent-runtime';
 import { parseActionEnvelope } from '@agentpress/contracts';
@@ -7,7 +7,6 @@ import {
   conversationBranches,
   conversations,
   type AgentPressDatabase,
-  evidenceRecords,
   rootRequests,
   runSkillBindings,
   skillRevisions,
@@ -20,6 +19,7 @@ import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import type { RuntimeToolFactory } from './contracts.js';
 import { effectiveActionCapabilities } from './action-capability-policy.js';
 import { ToolCallApplicationError, ToolCallService } from './tool-call-service.js';
+import { ToolEvidenceStore } from './tool-evidence-store.js';
 
 type PersistentToolBridgeOptions = {
   readonly database: AgentPressDatabase;
@@ -31,7 +31,11 @@ type PersistentToolBridgeOptions = {
 const ARTICLE_CONTEXT_CAPABILITIES = new Set(['article.read', 'article.propose']);
 
 export class PersistentToolBridge implements RuntimeToolFactory {
-  public constructor(private readonly options: PersistentToolBridgeOptions) {}
+  private readonly evidence: ToolEvidenceStore;
+
+  public constructor(private readonly options: PersistentToolBridgeOptions) {
+    this.evidence = new ToolEvidenceStore({ database: options.database });
+  }
 
   public async listCapabilities(runId: string): Promise<readonly string[]> {
     const { definitions } = await this.authorize(runId);
@@ -132,33 +136,18 @@ export class PersistentToolBridge implements RuntimeToolFactory {
               `Tool Call ${proposal.toolCallId} settled as ${result.status}`,
             );
           }
-          const evidence = extractToolEvidence(result.output);
-          if (evidence.length === 0) return result.output;
-          const persisted = evidence.map((item) => ({
-            id: randomUUID(),
+          const evidence = await this.evidence.persist({
             runId,
             ...(taskId ? { taskId } : {}),
-            sourceType: 'tool',
-            sourceUri: item.sourceUri,
-            title: item.title,
-            excerpt: item.excerpt,
-            sourceRevision: item.sourceRevision,
-            contentHash: createHash('sha256').update(item.excerpt).digest('hex'),
-            metadata: {
-              toolCallId: proposal.toolCallId,
-              toolId: definition.toolId,
-              toolVersion: definition.version,
-            },
-          }));
-          await this.options.database.insert(evidenceRecords).values(persisted);
+            toolCallId: proposal.toolCallId,
+            toolId: definition.toolId,
+            toolVersion: definition.version,
+            output: result.output,
+          });
+          if (evidence.length === 0) return result.output;
           return {
             output: result.output,
-            evidence: persisted.map(({ id, title, sourceUri, sourceRevision }) => ({
-              evidenceId: id,
-              title,
-              source: sourceUri,
-              sourceRevision,
-            })),
+            evidence,
           };
         },
       }));
@@ -293,55 +282,6 @@ function serializeToolResult(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === undefined) return 'null';
   return JSON.stringify(value);
-}
-
-type ToolEvidence = {
-  readonly sourceUri: string;
-  readonly title: string;
-  readonly excerpt: string;
-  readonly sourceRevision: string;
-};
-
-function extractToolEvidence(output: unknown): readonly ToolEvidence[] {
-  const root = recordValue(output);
-  const candidates = Array.isArray(root.value)
-    ? root.value
-    : Array.isArray(root.results)
-      ? root.results
-      : Array.isArray(output)
-        ? output
-        : [];
-  return candidates.flatMap((candidate) => {
-    const item = recordValue(candidate);
-    const sourceUri = firstString(item.url, item.pageUrl, item.uri, item.source);
-    const excerpt = firstString(item.excerpt, item.text, item.content, item.snippet);
-    if (!sourceUri || !excerpt) return [];
-    return [
-      {
-        sourceUri,
-        title: firstString(item.title, excerpt.slice(0, 160), sourceUri),
-        excerpt: excerpt.slice(0, 20_000),
-        sourceRevision: firstString(
-          item.revisionHash,
-          item.contentHash,
-          item.updatedAt,
-          createHash('sha256').update(excerpt).digest('hex'),
-        ),
-      },
-    ];
-  });
-}
-
-function recordValue(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : {};
-}
-
-function firstString(...values: readonly unknown[]): string {
-  return (
-    values.find((value): value is string => typeof value === 'string' && value.length > 0) ?? ''
-  );
 }
 
 export function runtimeToolName(toolId: string, version: string): string {

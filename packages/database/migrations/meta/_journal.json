@@ -281,6 +281,13 @@
       "when": 1786043843932,
       "tag": "0039_jazzy_tana_nile",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786058701237,
+      "tag": "0040_unusual_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

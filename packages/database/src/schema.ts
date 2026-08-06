@@ -1045,6 +1045,9 @@ export const evidenceRecords = pgTable(
       .notNull()
       .references(() => agentRuns.id, { onDelete: 'cascade' }),
     taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
+    sourceToolCallId: uuid('source_tool_call_id').references((): AnyPgColumn => toolCalls.id, {
+      onDelete: 'set null',
+    }),
     sourceType: varchar('source_type', { length: 32 }).notNull(),
     sourceUri: text('source_uri'),
     title: text('title').notNull(),
@@ -1054,7 +1057,14 @@ export const evidenceRecords = pgTable(
     metadata: jsonb('metadata').$type<Readonly<Record<string, unknown>>>().notNull(),
     createdAt,
   },
-  (table) => [index('evidence_records_run_idx').on(table.runId, table.createdAt)],
+  (table) => [
+    index('evidence_records_run_idx').on(table.runId, table.createdAt),
+    uniqueIndex('evidence_records_tool_source_unique').on(
+      table.sourceToolCallId,
+      table.sourceUri,
+      table.contentHash,
+    ),
+  ],
 );
 
 export const artifactEvidence = pgTable(

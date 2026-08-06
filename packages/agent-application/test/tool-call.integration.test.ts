@@ -6,6 +6,8 @@ import {
   agentTasks,
   appUsers,
   approvals,
+  artifacts,
+  artifactVersions,
   checkpoints,
   connectDatabase,
   conversationBranches,
@@ -31,6 +33,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   DirectRunService,
   PersistentToolBridge,
+  ToolEvidenceStore,
   ToolCallService,
   type LiveRunEvent,
 } from '../src/index.js';
@@ -228,27 +231,107 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(rows).toEqual([{ status: 'succeeded' }]);
   });
 
-  it('persists the result URL instead of the provider label as Evidence source URI', async () => {
+  it('links the result URL Evidence to its exact Specialist Tool Call attempt', async () => {
     const runId = await createRunningRun();
+    const taskId = await createRunningTask(runId, 1);
     const bridge = new PersistentToolBridge({
       database: connection.db,
       registry,
       toolCalls: service,
     });
-    const search = (await bridge.createForRun(runId, ['web.research'])).find(
+    const search = (await bridge.createForRun(runId, ['web.research'], taskId, 1)).find(
       (tool) => tool.label === 'web.search',
     );
 
-    await search?.execute(
-      { query: 'source URI' },
-      { runId, providerToolCallId: randomUUID() },
-    );
+    const providerToolCallId = randomUUID();
+    await search?.execute({ query: 'source URI' }, { runId, providerToolCallId });
+    await search?.execute({ query: 'source URI' }, { runId, providerToolCallId });
 
     const rows = await connection.db
-      .select({ sourceUri: evidenceRecords.sourceUri })
+      .select({
+        sourceUri: evidenceRecords.sourceUri,
+        sourceToolCallId: evidenceRecords.sourceToolCallId,
+        taskAttempt: toolCalls.taskAttempt,
+      })
+      .from(evidenceRecords)
+      .innerJoin(toolCalls, eq(toolCalls.id, evidenceRecords.sourceToolCallId))
+      .where(eq(evidenceRecords.runId, runId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sourceUri: 'https://example.com/source',
+      taskAttempt: 1,
+    });
+    expect(rows[0]?.sourceToolCallId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+  });
+
+  it('recovers Evidence from an oversized ToolOutput Artifact idempotently', async () => {
+    const runId = await createRunningRun();
+    const taskId = await createRunningTask(runId, 1);
+    const proposal = await service.propose({
+      runId,
+      taskId,
+      taskAttempt: 1,
+      providerToolCallId: randomUUID(),
+      toolId: 'web.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'artifact source' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['web.research']),
+    });
+    const artifactId = randomUUID();
+    const versionId = randomUUID();
+    await connection.db.transaction(async (transaction) => {
+      await transaction.insert(artifacts).values({
+        id: artifactId,
+        runId,
+        taskId,
+        type: 'ToolOutput',
+        title: `Tool output ${proposal.toolCallId}`,
+      });
+      await transaction.insert(artifactVersions).values({
+        id: versionId,
+        artifactId,
+        version: 1,
+        summary: 'Oversized web search output',
+        content: {
+          toolCallId: proposal.toolCallId,
+          output: [
+            {
+              url: 'https://example.com/artifact-source',
+              title: 'Artifact source',
+              text: 'Evidence recovered from durable oversized output.',
+            },
+          ],
+        },
+        contentHash: createHash('sha256').update(versionId).digest('hex'),
+      });
+    });
+    const evidence = new ToolEvidenceStore({ database: connection.db });
+    const input = {
+      runId,
+      taskId,
+      toolCallId: proposal.toolCallId,
+      toolId: 'web.search',
+      toolVersion: '1.0.0',
+      output: { value: { artifactId } },
+    } as const;
+
+    const first = await evidence.persist(input);
+    const replay = await evidence.persist(input);
+
+    expect(first).toHaveLength(1);
+    expect(replay).toEqual(first);
+    expect(first[0]).toMatchObject({
+      source: 'https://example.com/artifact-source',
+      title: 'Artifact source',
+    });
+    const rows = await connection.db
+      .select({ sourceToolCallId: evidenceRecords.sourceToolCallId })
       .from(evidenceRecords)
       .where(eq(evidenceRecords.runId, runId));
-    expect(rows).toEqual([{ sourceUri: 'https://example.com/source' }]);
+    expect(rows).toEqual([{ sourceToolCallId: proposal.toolCallId }]);
   });
 
   it('replays a settled provider Tool Call without executing its side effect twice', async () => {
