@@ -9,7 +9,6 @@ import {
   type LiveRunEvent,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
-import { PiRuntimeAdapter } from '@agentpress/agent-runtime';
 import { loadWorkerEnvironment, type WorkerEnvironment } from '@agentpress/config';
 import {
   claimOutboxMessages,
@@ -40,12 +39,8 @@ import {
 } from './kafka-topics.js';
 import { RedisRunLeaseManager } from './redis-run-lease.js';
 import { handleAgentTaskCommand, parseAgentTaskCommandPayload } from './task-command-handler.js';
-import {
-  createModelPolicies,
-  parseIndexCommand,
-  parseRunCommand,
-  parseSteeringCommand,
-} from './worker-protocol.js';
+import { parseIndexCommand, parseRunCommand, parseSteeringCommand } from './worker-protocol.js';
+import { createWorkerRuntimeFactory } from './worker-runtime-factory.js';
 import { acknowledgeWorkerCommand } from './worker-inbox.js';
 import { isStaleWorkerSettlementError } from './worker-errors.js';
 const RUN_EVENT_CHANNEL_PREFIX = 'agentpress:run:events:';
@@ -96,38 +91,7 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
     database: this.database.db,
     publisher: this.createEventPublisher(),
     runtimeToolFactory: this.builtInTools.bridge,
-    runtimeFactory: {
-      create: (task = 'direct') => {
-        const proModel = this.environment.agentModelPro ?? this.environment.arkModelPro;
-        if (!proModel) {
-          throw new Error(
-            'AGENT_MODEL_PRO or ARK_MODEL_PRO is required to execute a real Agent Run',
-          );
-        }
-        const turboModel = this.environment.agentModelPro
-          ? this.environment.agentModelTurbo
-          : this.environment.arkModelTurbo;
-        const selection = createModelPolicies(proModel, turboModel).select(task);
-        if (
-          this.environment.agentModelApiKey &&
-          this.environment.agentModelBaseUrl &&
-          this.environment.agentModelPro
-        ) {
-          return PiRuntimeAdapter.forOpenAICompatible({
-            providerId: 'agent-model',
-            providerName: 'Agent model',
-            modelId: selection.model,
-            baseUrl: this.environment.agentModelBaseUrl,
-            apiKey: this.environment.agentModelApiKey,
-          });
-        }
-        return PiRuntimeAdapter.forArk({
-          modelId: selection.model,
-          baseUrl: this.environment.arkBaseUrl,
-          ...(this.environment.arkApiKey ? { apiKey: this.environment.arkApiKey } : {}),
-        });
-      },
-    },
+    runtimeFactory: createWorkerRuntimeFactory(this.environment),
     systemPrompt:
       'You are AgentPress, a precise long-form writing agent. Use available research tools when facts need evidence. Preserve citations and state uncertainty. For illustrated articles, generate an image first, then call article.propose_edits to insert an image block containing assetId, contentUrl as src, prompt, model and provenance. Never claim the article changed until the user accepts the proposal.',
   });

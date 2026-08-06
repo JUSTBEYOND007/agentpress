@@ -72,7 +72,7 @@ export class ActionProposalService {
         },
         { additionalProperties: false },
       ),
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       executionMode: 'sequential',
       terminateOnSuccess: true,
       execute: async (arguments_) => {

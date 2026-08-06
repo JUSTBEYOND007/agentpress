@@ -17,7 +17,10 @@ import {
   isRuntimeCompactionSummary,
   isRuntimeCurrentTurn,
 } from './current-turn.js';
-import { adaptProviderSchema, providerFromId } from './schema-compatibility.js';
+import {
+  createProviderToolSchemaCodec,
+  type ProviderToolSchemaCapability,
+} from './provider-tool-schema-codec.js';
 import type {
   RuntimeAssistantContentBlock,
   RuntimeAssistantMessage,
@@ -201,21 +204,23 @@ export function applyCompactionResult(
 export function toPiTool(
   tool: RuntimeTool,
   runId: string,
-  provider: ReturnType<typeof providerFromId>,
+  capability: ProviderToolSchemaCapability,
 ): AgentTool {
-  const adaptation = adaptProviderSchema(tool.parameters, {
-    provider,
-    strict: tool.constrainedSampling !== false && tool.constrainedSampling?.strict === 'require',
-  });
+  const codec = createProviderToolSchemaCodec(
+    tool.parameters,
+    capability,
+    tool.constrainedSampling === false ? false : (tool.constrainedSampling?.strict ?? false),
+  );
   return {
     name: tool.name,
     label: tool.label,
     description: tool.description,
-    parameters: adaptation.schema,
+    parameters: codec.wireSchema,
+    prepareArguments: codec.prepareArguments,
     ...(tool.constrainedSampling ? { constrainedSampling: tool.constrainedSampling } : {}),
     ...(tool.executionMode ? { executionMode: tool.executionMode } : {}),
     execute: async (providerToolCallId, parameters, signal, onUpdate) => {
-      const output = await tool.execute(parameters as Readonly<Record<string, unknown>>, {
+      const output = await tool.execute(codec.decodeArguments(parameters), {
         runId,
         providerToolCallId,
         ...(signal ? { signal } : {}),

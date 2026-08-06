@@ -79,7 +79,7 @@ describe('PiConversationSummaryGenerator', () => {
     expect(capturedRequest?.tools?.[0]).toMatchObject({
       name: 'conversation_compaction_complete',
       terminateOnSuccess: true,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
     });
     expect(capturedRequest?.currentTurn.request).toContain('Earlier intent.');
     expect(capturedRequest?.currentTurn.request).toContain('Use the verified source.');

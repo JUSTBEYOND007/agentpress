@@ -73,7 +73,7 @@ export class PiConversationSummaryGenerator {
       description:
         'Return the updated semantic conversation summary after preserving current intent, decisions, evidence, unresolved actions, and protected fact references.',
       parameters: completionSchema,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       executionMode: 'sequential',
       output: 'json',
       terminateOnSuccess: true,

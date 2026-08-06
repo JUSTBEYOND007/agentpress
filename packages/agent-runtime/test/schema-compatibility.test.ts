@@ -1,11 +1,7 @@
 import { Type, type TSchema } from 'typebox';
 import { describe, expect, it } from 'vitest';
 
-import {
-  adaptProviderSchema,
-  providerFromId,
-  validateSchemaResult,
-} from '../src/schema-compatibility.js';
+import { adaptProviderSchema, validateSchemaResult } from '../src/schema-compatibility.js';
 
 describe('provider schema compatibility', () => {
   it('dereferences local definitions and removes provider metadata', () => {
@@ -129,13 +125,5 @@ describe('provider schema compatibility', () => {
       expect(result.failures?.length).toBeGreaterThan(0);
       expect(result.value).toBe(value);
     }
-  });
-
-  it('maps provider ids deterministically', () => {
-    expect(providerFromId('openai-compatible')).toBe('openai');
-    expect(providerFromId('claude')).toBe('anthropic');
-    expect(providerFromId('gemini-pro')).toBe('google');
-    expect(providerFromId('local-ollama')).toBe('ollama');
-    expect(providerFromId('custom')).toBe('generic');
   });
 });

@@ -103,7 +103,7 @@ export class PlanRevisionService {
       description:
         'Retain unaffected pending tasks and add only tasks required by the steering input.',
       parameters: planRevisionSchema,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       executionMode: 'sequential',
       terminateOnSuccess: true,
       execute: (arguments_) => {

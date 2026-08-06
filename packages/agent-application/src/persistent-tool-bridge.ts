@@ -69,7 +69,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
         label: definition.toolId,
         description: appendToolGuidance(definition),
         parameters: definition.inputSchema,
-        constrainedSampling: { type: 'json_schema' as const, strict: 'require' as const },
+        constrainedSampling: { type: 'json_schema' as const, strict: 'prefer' as const },
         executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
         execute: async (arguments_, context) => {
           const taskOperation =

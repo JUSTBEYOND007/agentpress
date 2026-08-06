@@ -59,7 +59,7 @@ export class PiSkillPreselector {
       label: 'Complete Skill selection',
       description: 'Select zero or more Skill IDs from the supplied catalog.',
       parameters: selectionSchema,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       executionMode: 'sequential',
       output: 'json',
       terminateOnSuccess: true,

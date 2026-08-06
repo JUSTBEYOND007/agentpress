@@ -32,6 +32,8 @@ export function loadOnlineModelConfiguration(
           apiKey: customApiKey,
           baseUrl: customBaseUrl,
           modelId,
+          acceptsStrictTools: true,
+          enforcesStrictTools: false,
         }),
     };
   }

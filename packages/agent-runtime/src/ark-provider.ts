@@ -21,6 +21,8 @@ export function createArkBackend(config: ArkRuntimeConfig): ArkBackend {
     apiKeyEnvironmentVariable: 'ARK_API_KEY',
     baseUrl: config.baseUrl ?? 'https://ark.cn-beijing.volces.com/api/v3',
     modelId: config.modelId,
+    acceptsStrictTools: true,
+    enforcesStrictTools: true,
     ...(config.apiKey ? { apiKey: config.apiKey } : {}),
     ...(config.modelName ? { modelName: config.modelName } : {}),
     ...(config.contextWindow ? { contextWindow: config.contextWindow } : {}),

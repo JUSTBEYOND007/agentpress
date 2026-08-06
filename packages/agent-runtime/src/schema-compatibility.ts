@@ -72,16 +72,6 @@ export function adaptProviderSchema(
   return { schema: normalized, provider, strict, degradations };
 }
 
-export function providerFromId(provider: string): SchemaProvider {
-  const normalized = provider.toLocaleLowerCase();
-  if (normalized.includes('anthropic') || normalized.includes('claude')) return 'anthropic';
-  if (normalized.includes('google') || normalized.includes('gemini')) return 'google';
-  if (normalized.includes('ollama')) return 'ollama';
-  if (normalized.includes('mcp')) return 'mcp';
-  if (normalized.includes('openai') || normalized.includes('azure')) return 'openai';
-  return 'generic';
-}
-
 function normalizeNode(
   value: unknown,
   path: string,

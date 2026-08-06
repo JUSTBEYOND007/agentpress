@@ -93,7 +93,7 @@ describe('PiSkillPreselector', () => {
     expect(request?.tools?.[0]).toMatchObject({
       name: 'skill_selection_complete',
       terminateOnSuccess: true,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
     });
   });
 

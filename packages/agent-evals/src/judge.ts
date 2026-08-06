@@ -88,7 +88,7 @@ export async function judgePair(
     label: 'Complete evaluation judgment',
     description: 'Return a schema-valid blind comparison judgment.',
     parameters: judgeSchema,
-    constrainedSampling: { type: 'json_schema', strict: 'require' },
+    constrainedSampling: { type: 'json_schema', strict: 'prefer' },
     terminateOnSuccess: true,
     execute: (arguments_) => {
       const validation = validateSchemaResult(judgeSchema, arguments_, 'strict');

@@ -7,6 +7,8 @@ import {
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 
+import type { ProviderToolSchemaCapability } from './provider-tool-schema-codec.js';
+
 export type OpenAICompatibleRuntimeConfig = {
   readonly providerId: string;
   readonly providerName: string;
@@ -19,11 +21,14 @@ export type OpenAICompatibleRuntimeConfig = {
   readonly maxTokens?: number;
   readonly inputCostPerMillion?: number;
   readonly outputCostPerMillion?: number;
+  readonly acceptsStrictTools: boolean;
+  readonly enforcesStrictTools: boolean;
 };
 
 export type OpenAICompatibleBackend = {
   readonly models: Models;
   readonly model: Model<'openai-completions'>;
+  readonly toolSchemaCapability: ProviderToolSchemaCapability;
 };
 
 function staticApiKeyAuth(providerName: string, apiKey: string) {
@@ -56,7 +61,7 @@ export function createOpenAICompatibleBackend(
       supportsDeveloperRole: false,
       supportsReasoningEffort: false,
       supportsUsageInStreaming: true,
-      supportsStrictMode: true,
+      supportsStrictMode: config.acceptsStrictTools,
     },
   };
   const provider = createProvider({
@@ -81,5 +86,13 @@ export function createOpenAICompatibleBackend(
     throw new Error(`${config.providerName} model ${config.modelId} was not registered`);
   }
 
-  return { models, model };
+  return {
+    models,
+    model,
+    toolSchemaCapability: {
+      dialect: 'openai',
+      acceptsStrictTools: config.acceptsStrictTools,
+      enforcesStrictTools: config.enforcesStrictTools,
+    },
+  };
 }

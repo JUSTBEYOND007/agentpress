@@ -26,7 +26,7 @@ import type {
   RuntimeUserMessage,
 } from './contracts.js';
 import { convertAgentPressMessages } from './current-turn.js';
-import { providerFromId } from './schema-compatibility.js';
+import type { ProviderToolSchemaCapability } from './provider-tool-schema-codec.js';
 import { ToolLoopGuard } from './tool-loop-guard.js';
 import {
   applyCompactionResult,
@@ -46,6 +46,7 @@ import {
 type PiBackend = {
   readonly models: Models;
   readonly model: Model<Api>;
+  readonly toolSchemaCapability: ProviderToolSchemaCapability;
 };
 
 class ExecutionState {
@@ -123,6 +124,11 @@ export class PiRuntimeAdapter implements AgentRuntime {
     return new PiRuntimeAdapter(
       {
         models,
+        toolSchemaCapability: {
+          dialect: 'generic',
+          acceptsStrictTools: true,
+          enforcesStrictTools: true,
+        },
         model: {
           ...fauxModel,
           contextWindow: config.contextWindow ?? fauxModel.contextWindow,
@@ -223,7 +229,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
         messages: initialHistory.map(toPiMessage),
         tools:
           request.tools?.map((tool) =>
-            toPiTool(tool, request.runId, providerFromId(this.backend.model.provider)),
+            toPiTool(tool, request.runId, this.backend.toolSchemaCapability),
           ) ?? [],
         thinkingLevel: 'off',
       },

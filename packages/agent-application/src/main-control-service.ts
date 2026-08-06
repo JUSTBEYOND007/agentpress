@@ -70,7 +70,7 @@ export class MainControlService {
         description:
           'Submit a concrete task DAG only when the authoritative current request needs specialist work or tools.',
         parameters: planSubmitSchema,
-        constrainedSampling: { type: 'json_schema', strict: 'require' },
+        constrainedSampling: { type: 'json_schema', strict: 'prefer' },
         executionMode: 'sequential',
         terminateOnSuccess: true,
         execute: (arguments_) => {
@@ -96,7 +96,7 @@ export class MainControlService {
           },
           { additionalProperties: false },
         ),
-        constrainedSampling: { type: 'json_schema', strict: 'require' },
+        constrainedSampling: { type: 'json_schema', strict: 'prefer' },
         executionMode: 'sequential',
         terminateOnSuccess: true,
         execute: (arguments_) => {

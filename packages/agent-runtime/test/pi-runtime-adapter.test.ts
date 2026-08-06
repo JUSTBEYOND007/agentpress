@@ -44,12 +44,19 @@ describe('PiRuntimeAdapter', () => {
       modelId: 'gpt-compatible',
       baseUrl: 'https://models.example/v1',
       apiKey: 'test-key',
+      acceptsStrictTools: true,
+      enforcesStrictTools: true,
     });
 
     expect(backend.model).toMatchObject({
       provider: 'agent-model',
       id: 'gpt-compatible',
       baseUrl: 'https://models.example/v1',
+    });
+    expect(backend.toolSchemaCapability).toEqual({
+      dialect: 'openai',
+      acceptsStrictTools: true,
+      enforcesStrictTools: true,
     });
     await expect(backend.models.getAuth(backend.model)).resolves.toMatchObject({
       auth: { apiKey: 'test-key' },
