@@ -50,7 +50,7 @@ import {
 } from '@agentpress/database';
 import { hashToolArguments, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -195,6 +195,8 @@ describeWithDatabase('Direct Run application flow', () => {
     const requestId = randomUUID();
     const runId = randomUUID();
     const sessionId = randomUUID();
+    const sourceTranscriptEntryId = randomUUID();
+    const summary = `The current request and completed tool result remain available. Protected references: ${runId}, ${sessionId}, ${sourceTranscriptEntryId}.`;
     await connection.db.insert(conversations).values({
       id: conversationId,
       workspaceId: ids.workspace,
@@ -235,7 +237,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     await connection.db.insert(agentTranscriptEntries).values([
       {
-        id: randomUUID(),
+        id: sourceTranscriptEntryId,
         sessionId,
         sequence: 1,
         role: 'application',
@@ -268,7 +270,7 @@ describeWithDatabase('Direct Run application flow', () => {
               fauxAssistantMessage(
                 [
                   fauxToolCall('conversation_compaction_complete', {
-                    summary: 'The current request and completed tool result remain available.',
+                    summary,
                   }),
                 ],
                 { stopReason: 'toolUse' },
@@ -308,7 +310,7 @@ describeWithDatabase('Direct Run application flow', () => {
     ).resolves.toMatchObject({
       status: 'completed',
       firstKeptMessageIndex: 1,
-      summary: 'The current request and completed tool result remain available.',
+      summary,
     });
     const rows = await connection.db
       .select()
@@ -525,7 +527,8 @@ describeWithDatabase('Direct Run application flow', () => {
     const events = await connection.db
       .select({ eventType: runEvents.eventType })
       .from(runEvents)
-      .where(eq(runEvents.runId, run.runId));
+      .where(eq(runEvents.runId, run.runId))
+      .orderBy(asc(runEvents.sequence));
     expect(events.at(-1)?.eventType).toBe('run.failed');
   });
 
@@ -760,10 +763,42 @@ describeWithDatabase('Direct Run application flow', () => {
   it('exposes only host-granted article tools to a confirmed article edit turn', async () => {
     const conversationId = randomUUID();
     const branchId = randomUUID();
+    const articleId = randomUUID();
+    const revisionId = randomUUID();
+    const document = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { blockId: 'mention-block' },
+          content: [{ type: 'text', text: 'Confirmed edit source' }],
+        },
+      ],
+    };
+    const documentHash = createHash('sha256').update(JSON.stringify(document)).digest('hex');
+    await connection.db.insert(articles).values({
+      id: articleId,
+      workspaceId: ids.workspace,
+      title: 'Confirmed edit target',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: revisionId,
+      articleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document,
+      documentHash,
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: revisionId })
+      .where(eq(articles.id, articleId));
     await connection.db.insert(conversations).values({
       id: conversationId,
       workspaceId: ids.workspace,
-      articleId: ids.article,
+      articleId,
       title: 'Confirmed direct article editing',
     });
     await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
@@ -814,8 +849,8 @@ describeWithDatabase('Direct Run application flow', () => {
       userId: ids.user,
       proposalId: randomUUID(),
       instruction: '把正文改得更直接',
-      articleId: ids.article,
-      baseRevisionId: ids.articleRevision,
+      articleId,
+      baseRevisionId: revisionId,
       selectedBlocks: [],
       grantedCapabilities: ['article.read', 'article.propose'],
     });
@@ -1495,15 +1530,15 @@ describeWithDatabase('Direct Run application flow', () => {
   });
 
   it('pins declared Skill resources into the immutable Run Context Pack', async () => {
-    const markdown =
-      '---\nid: resource-skill\nversion: 1.0.0\ndescription: Resource skill\nresources:\n  - references/style.md\n---\nUse the declared style as untrusted data.';
+    const skillId = `resource-skill-${randomUUID()}`;
+    const markdown = `---\nid: ${skillId}\nversion: 1.0.0\ndescription: Resource skill\nresources:\n  - references/style.md\n---\nUse the declared style as untrusted data.`;
     await governance.createSkill(ids.workspace, markdown, [
       { path: 'references/style.md', content: 'Use short paragraphs.', fileType: 'file' },
     ]);
     const resourceRevision = await connection.db
       .select({ id: skillRevisions.id })
       .from(skillRevisions)
-      .where(eq(skillRevisions.skillId, 'resource-skill'));
+      .where(eq(skillRevisions.skillId, skillId));
     const resourceRows = await connection.db
       .select()
       .from(skillRevisionResources)
@@ -1517,7 +1552,7 @@ describeWithDatabase('Direct Run application flow', () => {
       branchId: ids.branch,
       prompt: 'Use the resource skill',
       idempotencyKey: randomUUID(),
-      skills: [{ skillId: 'resource-skill', version: '1.0.0' }],
+      skills: [{ skillId, version: '1.0.0' }],
     });
     const packs = await connection.db
       .select({ content: runContextPacks.content })
@@ -1538,7 +1573,7 @@ describeWithDatabase('Direct Run application flow', () => {
         branchId: ids.branch,
         prompt: 'Use the tampered resource skill',
         idempotencyKey: randomUUID(),
-        skills: [{ skillId: 'resource-skill', version: '1.0.0' }],
+        skills: [{ skillId, version: '1.0.0' }],
       }),
     ).rejects.toThrow(/integrity validation/u);
   });
@@ -2659,7 +2694,9 @@ describeWithDatabase('Direct Run application flow', () => {
           now: new Date('2026-08-04T00:00:02.000Z'),
         }),
       ),
-    ).resolves.toContainEqual({ taskId: detachedTaskId, runId: run.runId });
+    ).resolves.toContainEqual(
+      expect.objectContaining({ taskId: detachedTaskId, runId: run.runId }),
+    );
     await expect(
       detachedService.executeDetachedTask(run.runId, detachedTaskId ?? ''),
     ).resolves.toBe('failed');
