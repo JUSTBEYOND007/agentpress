@@ -37,7 +37,6 @@ import {
   selectMainControlTools,
   type AgentTurnProfile,
 } from './agent-turn-profile.js';
-import { specialistConcurrencyLimit } from './specialist-task-contract.js';
 import {
   mainCompletionPrompt,
   mainPlanningPrompt,
@@ -51,6 +50,7 @@ import { PlannedRunStore } from './planned-run-store.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
 import { PlannedTaskExecutor } from './planned-task-executor.js';
 import { PlanRevisionService } from './plan-revision-service.js';
+import { PlannedDagScheduler } from './planned-dag-scheduler.js';
 import {
   applicationTurn,
   articleEditResult,
@@ -102,6 +102,7 @@ export class PlannedRunExecutor {
   private readonly results: SpecialistResultStore;
   private readonly tasks: PlannedTaskExecutor;
   private readonly revisions: PlanRevisionService;
+  private readonly scheduler: PlannedDagScheduler;
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
@@ -152,6 +153,17 @@ export class PlannedRunExecutor {
       createId: this.createId,
       now: this.now,
       ...(options.runtimeToolFactory ? { runtimeToolFactory: options.runtimeToolFactory } : {}),
+    });
+    this.scheduler = new PlannedDagScheduler({
+      tasks: this.tasks,
+      results: this.results,
+      revisions: this.revisions,
+      ...(options.maxSpecialistConcurrency
+        ? { maxSpecialistConcurrency: options.maxSpecialistConcurrency }
+        : {}),
+      ...(options.maxProviderConcurrency
+        ? { maxProviderConcurrency: options.maxProviderConcurrency }
+        : {}),
     });
   }
 
@@ -556,149 +568,14 @@ export class PlannedRunExecutor {
     };
   }
 
-  private async executeDag(
+  private executeDag(
     runId: string,
     tasks: readonly PlannedTaskSpec[],
     rootPrompt: RuntimeCurrentTurn,
     signal?: AbortSignal,
     initialSettled: ReadonlyMap<string, SettledTask> = new Map(),
   ): Promise<readonly SettledTask[]> {
-    const settled = new Map(initialSettled);
-    const pending = new Map(
-      tasks.filter((task) => !settled.has(task.id)).map((task) => [task.id, task]),
-    );
-    const orderedTasks = [...tasks];
-    while (pending.size > 0) {
-      if (signal?.aborted) {
-        for (const task of pending.values()) {
-          settled.set(task.id, {
-            ...task,
-            status: 'cancelled',
-            artifacts: [],
-            warnings: [],
-            failure: 'run_cancelled',
-          });
-        }
-        break;
-      }
-      for (const task of [...pending.values()]) {
-        if (
-          task.dependencyIds.some((id) => {
-            const dependency = settled.get(id);
-            return dependency && dependency.status !== 'succeeded';
-          })
-        ) {
-          pending.delete(task.id);
-          settled.set(task.id, {
-            ...task,
-            status: 'skipped',
-            artifacts: [],
-            warnings: [],
-            failure: 'dependency_failed',
-          });
-          await this.updateTaskStatus(runId, task, 'skipped', 'dependency_failed');
-        }
-      }
-      const ready = [...pending.values()]
-        .filter((task) => task.dependencyIds.every((id) => settled.get(id)?.status === 'succeeded'))
-        .slice(
-          0,
-          specialistConcurrencyLimit(
-            this.options.maxSpecialistConcurrency,
-            this.options.maxProviderConcurrency,
-          ),
-        );
-      if (ready.length === 0) {
-        if (pending.size === 0) break;
-        throw new Error(`Planned Run ${runId} scheduler made no progress`);
-      }
-      const wave = await Promise.all(
-        ready.map((task) =>
-          task.detached
-            ? this.waitForDetachedTask(runId, task, signal)
-            : this.executeInlineTask(runId, task, rootPrompt, settled, signal),
-        ),
-      );
-      for (const task of wave) {
-        pending.delete(task.id);
-        settled.set(task.id, task);
-      }
-      const revision = await this.revisePlanAtBoundary(
-        runId,
-        rootPrompt,
-        orderedTasks,
-        pending,
-        settled,
-        signal,
-      );
-      if (revision) {
-        for (const task of [...pending.values()]) {
-          if (!revision.retainedTaskIds.has(task.id)) {
-            pending.delete(task.id);
-            const cancelled: SettledTask = {
-              ...task,
-              status: 'cancelled',
-              artifacts: [],
-              warnings: ['Replaced by Main Agent plan revision'],
-              failure: 'plan_revised',
-            };
-            settled.set(task.id, cancelled);
-            await this.updateTaskStatus(runId, task, 'skipped', 'plan_revised');
-          }
-        }
-        for (const task of revision.newTasks) {
-          orderedTasks.push(task);
-          pending.set(task.id, task);
-        }
-      }
-    }
-    return orderedTasks.map(
-      (task) =>
-        settled.get(task.id) ?? {
-          ...task,
-          status: 'skipped',
-          artifacts: [],
-          warnings: [],
-          failure: 'not_scheduled',
-        },
-    );
-  }
-
-  private revisePlanAtBoundary(
-    runId: string,
-    rootPrompt: RuntimeCurrentTurn,
-    orderedTasks: readonly PlannedTaskSpec[],
-    pending: ReadonlyMap<string, PlannedTaskSpec>,
-    settled: ReadonlyMap<string, SettledTask>,
-    signal?: AbortSignal,
-  ) {
-    return this.revisions.reviseAtBoundary(
-      runId,
-      rootPrompt,
-      orderedTasks,
-      pending,
-      settled,
-      signal,
-    );
-  }
-
-  private executeInlineTask(
-    runId: string,
-    task: PlannedTaskSpec,
-    rootPrompt: RuntimeCurrentTurn,
-    settled: ReadonlyMap<string, SettledTask>,
-    signal?: AbortSignal,
-  ): Promise<SettledTask> {
-    return this.tasks.executeInline(runId, task, rootPrompt, settled, signal);
-  }
-
-  /** Waits on the durable TaskResult produced by a detached worker. */
-  private waitForDetachedTask(
-    runId: string,
-    task: PlannedTaskSpec,
-    signal?: AbortSignal,
-  ): Promise<SettledTask> {
-    return this.tasks.waitForDetached(runId, task, signal);
+    return this.scheduler.execute(runId, tasks, rootPrompt, signal, initialSettled);
   }
 
   private claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
@@ -743,15 +620,6 @@ export class PlannedRunExecutor {
     tasks: readonly PlannedTaskSpec[],
   ): Promise<ReadonlyMap<string, SettledTask>> {
     return this.store.loadPersistedTaskResults(tasks);
-  }
-
-  private updateTaskStatus(
-    runId: string,
-    task: PlannedTaskSpec,
-    status: 'skipped',
-    failure?: string,
-  ): Promise<number | undefined> {
-    return this.results.updateTaskStatus(runId, task, status, failure);
   }
 
   private assertRunReferences(
