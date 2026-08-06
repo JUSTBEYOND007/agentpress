@@ -38,6 +38,9 @@ describe('built-in MCP tools', () => {
     );
     expect(output).toMatchObject({ redactions: 1 });
     expect(call).toHaveBeenCalledTimes(1);
+    await expect(
+      registry.execute(tool, { query: 'Kafka', limit: 4 }, { runId: 'run', toolCallId: 'call-2' }),
+    ).rejects.toThrow();
   });
 
   it('passes oversized output to the Artifact writer with ToolCall identity', async () => {

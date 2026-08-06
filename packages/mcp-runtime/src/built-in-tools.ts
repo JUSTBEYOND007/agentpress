@@ -29,6 +29,13 @@ const searchInput = Type.Object(
   },
   { additionalProperties: false },
 );
+const webSearchInput = Type.Object(
+  {
+    query: Type.String({ minLength: 1, maxLength: 2_000 }),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
+  },
+  { additionalProperties: false },
+);
 const guardedOutput = Type.Object({
   source: Type.Literal('mcp'),
   trust: Type.Literal('untrusted'),
@@ -75,7 +82,7 @@ export function registerBuiltInMcpTools(
         },
       ],
       capabilities: [tool.capability],
-      inputSchema: searchInput,
+      inputSchema: tool.toolId === 'web.search' ? webSearchInput : searchInput,
       outputSchema: guardedOutput,
       risk: 'read_only',
       sideEffect: 'Reads a bounded built-in MCP source',

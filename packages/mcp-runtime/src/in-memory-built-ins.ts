@@ -35,6 +35,8 @@ async function createLinkedClient(
   serverId: BuiltInMcpServerId,
   handler: BuiltInSearchHandlers[BuiltInMcpServerId],
 ): Promise<Client> {
+  const maximumResults = serverId === 'web_research' ? 3 : 20;
+  const defaultResults = serverId === 'web_research' ? 3 : 8;
   const server = new McpServer(
     { name: `agentpress-${serverId}`, version: '1.0.0' },
     {
@@ -121,13 +123,13 @@ async function createLinkedClient(
       description: `Search the AgentPress ${serverId} source`,
       inputSchema: {
         query: z.string().min(1).max(2_000),
-        limit: z.number().int().min(1).max(20).optional(),
+        limit: z.number().int().min(1).max(maximumResults).optional(),
         _agentpressRunId: z.uuid(),
       },
     },
     async ({ query, limit, _agentpressRunId }, extra) => {
       const value = await handler(
-        { query, limit: limit ?? 8, runId: _agentpressRunId },
+        { query, limit: limit ?? defaultResults, runId: _agentpressRunId },
         extra.signal,
       );
       return {

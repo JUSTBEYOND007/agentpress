@@ -14,6 +14,7 @@ import {
   type AgentPressDatabase,
 } from '@agentpress/database';
 import { and, desc, eq, inArray } from 'drizzle-orm';
+import { researchExecutionPolicy } from '@agentpress/web-research';
 
 import { AgentSessionRunner } from './agent-session-runner.js';
 import { AgentTaskWaitService } from './agent-task-wait-service.js';
@@ -41,6 +42,7 @@ import { SpecialistResultStore } from './specialist-result-store.js';
 
 const INLINE_TASK_TIMEOUT_MS = 120_000;
 const TASK_LEASE_GRACE_MS = 30_000;
+const RESEARCH_TASK_MAX_TOOL_CALLS = researchExecutionPolicy('deep').maxQueries;
 
 type PlannedTaskExecutorOptions = {
   readonly database: AgentPressDatabase;
@@ -270,6 +272,9 @@ export class PlannedTaskExecutor {
         : [];
     });
     const recoveredHistory = await this.loadApprovedToolContinuation(runId, task.id);
+    const maxToolCalls = task.capabilities.includes('web.research')
+      ? RESEARCH_TASK_MAX_TOOL_CALLS
+      : undefined;
     const immutableTaskContext = JSON.stringify({
       task: {
         id: task.id,
@@ -293,6 +298,7 @@ export class PlannedTaskExecutor {
           [...domainTools, taskComplete],
           signal,
           true,
+          maxToolCalls,
         )
       : await this.options.sessions.execute(
           runId,
@@ -305,6 +311,8 @@ export class PlannedTaskExecutor {
           specialistApplicationTurn(rootPrompt, immutableTaskContext),
           [...domainTools, taskComplete],
           signal,
+          false,
+          maxToolCalls,
         );
     for (let repair = 1; !completion && result.status !== 'cancelled' && repair <= 2; repair += 1) {
       result = await this.options.sessions.execute(
@@ -321,6 +329,8 @@ export class PlannedTaskExecutor {
         ),
         [...domainTools, taskComplete],
         signal,
+        false,
+        maxToolCalls,
       );
     }
     const assistant = findAssistant(result);

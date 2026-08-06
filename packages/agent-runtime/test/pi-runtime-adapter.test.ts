@@ -832,6 +832,63 @@ describe('PiRuntimeAdapter', () => {
     expect(completed).toBe(true);
   });
 
+  it('does not terminate a parallel turn before the completion tool can follow a blocked batch', async () => {
+    let domainExecutions = 0;
+    let completed = false;
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage(
+          [
+            fauxToolCall('domain_tool', { query: 'allowed' }, { id: 'parallel-1' }),
+            fauxToolCall('domain_tool', { query: 'blocked-1' }, { id: 'parallel-2' }),
+            fauxToolCall('domain_tool', { query: 'blocked-2' }, { id: 'parallel-3' }),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+        fauxAssistantMessage([fauxToolCall('task_complete', {}, { id: 'parallel-complete' })], {
+          stopReason: 'toolUse',
+        }),
+      ],
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'run-parallel-tool-budget',
+        systemPrompt: 'Complete after the domain tool budget is exhausted.',
+        history: [],
+        currentTurn: currentTurn('执行并发受限任务'),
+        maxToolCalls: 1,
+        tools: [
+          {
+            name: 'domain_tool',
+            label: 'Domain Tool',
+            description: 'A budgeted domain tool',
+            parameters: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+            execute: () => {
+              domainExecutions += 1;
+              return Promise.resolve({ ok: true });
+            },
+          },
+          {
+            name: 'task_complete',
+            label: 'Complete Task',
+            description: 'The protocol completion tool',
+            parameters: Type.Object({}, { additionalProperties: false }),
+            terminateOnSuccess: true,
+            execute: () => {
+              completed = true;
+              return Promise.resolve({ accepted: true });
+            },
+          },
+        ],
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('completed');
+    expect(domainExecutions).toBe(1);
+    expect(completed).toBe(true);
+  });
+
   it('ends a Pi loop after repeated invalid completion tool calls', async () => {
     let executions = 0;
     const runtime = PiRuntimeAdapter.forTests({

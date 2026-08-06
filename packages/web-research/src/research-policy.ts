@@ -80,6 +80,10 @@ const policies: Readonly<Record<ResearchDepth, ResearchExecutionPolicy>> = {
   },
 };
 
+export function researchExecutionPolicy(depth: ResearchDepth): ResearchExecutionPolicy {
+  return policies[depth];
+}
+
 export function createResearchPlan(input: {
   readonly topic: string;
   readonly purpose: ResearchPurpose;

@@ -191,13 +191,11 @@ export class PiRuntimeAdapter implements AgentRuntime {
     const terminatingTools = new Set(
       request.tools?.filter(({ terminateOnSuccess }) => terminateOnSuccess).map(({ name }) => name),
     );
-    const blockedByToolLimit = new Map<string, boolean>();
     const blockedByLoopGuard = new Map<string, boolean>();
     const toolLoopGuard = new ToolLoopGuard(
       request.toolLoopGuard?.maxConsecutiveIdenticalCalls ?? 3,
     );
     let domainToolCalls = 0;
-    let blockedToolCalls = 0;
     let failedCompletionCalls = 0;
     let providerToolCallsObserved = 0;
     let overflowMessage: AssistantMessage | undefined;
@@ -260,8 +258,6 @@ export class PiRuntimeAdapter implements AgentRuntime {
                 return { block: true, reason: loopDecision.reason };
               }
               if (request.maxToolCalls !== undefined && domainToolCalls >= request.maxToolCalls) {
-                blockedToolCalls += 1;
-                blockedByToolLimit.set(toolCall.id, blockedToolCalls > 1);
                 return {
                   block: true,
                   reason: `Tool call limit reached (${String(request.maxToolCalls)}). Submit the protocol completion tool now.`,
@@ -282,11 +278,9 @@ export class PiRuntimeAdapter implements AgentRuntime {
                 arguments: args,
                 result: normalized,
               });
-              const terminateForLimit = blockedByToolLimit.get(toolCall.id);
-              blockedByToolLimit.delete(toolCall.id);
               const terminateForLoop = blockedByLoopGuard.get(toolCall.id);
               blockedByLoopGuard.delete(toolCall.id);
-              const terminate = terminateForLimit || terminateForLoop ? true : update?.terminate;
+              const terminate = terminateForLoop ? true : update?.terminate;
               return update || terminate
                 ? {
                     ...(update?.content === undefined

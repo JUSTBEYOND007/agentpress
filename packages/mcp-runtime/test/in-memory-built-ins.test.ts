@@ -80,4 +80,45 @@ describe('in-memory built-in MCP servers', () => {
     ).rejects.toThrow(/Unknown built-in MCP capability/u);
     await manager.stop('workspace_knowledge');
   });
+
+  it('allocates the bounded source budget only to web research', async () => {
+    const search = vi.fn((request: unknown) => Promise.resolve([{ request }]));
+    const manager = new McpServerManager();
+    for (const definition of createInMemoryBuiltInDefinitions({
+      web_research: search,
+      workspace_knowledge: search,
+      licensed_media: search,
+    })) {
+      manager.register(definition);
+    }
+    const gateway = new McpClientGateway(manager);
+    const context = {
+      runId: '0f911cbe-9cb5-465f-b9ae-267597d95f37',
+      toolCallId: 'call-budget',
+      signal: new AbortController().signal,
+    };
+
+    await gateway.call({
+      serverId: 'web_research',
+      toolName: 'search',
+      arguments: { query: 'Kafka' },
+      context,
+    });
+    await gateway.call({
+      serverId: 'workspace_knowledge',
+      toolName: 'search',
+      arguments: { query: 'Kafka' },
+      context,
+    });
+
+    expect(search.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining({ limit: 3 }),
+      expect.objectContaining({ limit: 8 }),
+    ]);
+    await Promise.all([
+      manager.stop('web_research'),
+      manager.stop('workspace_knowledge'),
+      manager.stop('licensed_media'),
+    ]);
+  });
 });

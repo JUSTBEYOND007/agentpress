@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createResearchPlan, deduplicateResearchHits } from '../src/index.js';
+import {
+  createResearchPlan,
+  deduplicateResearchHits,
+  researchExecutionPolicy,
+} from '../src/index.js';
 
 describe('research execution policy', () => {
   it('owns bounded query expansion by research depth', () => {
@@ -27,6 +31,17 @@ describe('research execution policy', () => {
       'https://example.com/a?utm_source=test#section',
       'https://example.com/b',
     ]);
+  });
+
+  it('exposes immutable depth budgets to provider adapters and Agent runtimes', () => {
+    expect(researchExecutionPolicy('deep')).toEqual({
+      maxQueries: 8,
+      resultsPerQuery: 10,
+      maxSources: 24,
+      fetchConcurrency: 6,
+      maxSourceBytes: 1_000_000,
+      maxSynthesisTokens: 16_000,
+    });
   });
 });
 
