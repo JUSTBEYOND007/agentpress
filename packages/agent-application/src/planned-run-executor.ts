@@ -16,12 +16,10 @@ import {
   executionPlans,
   editProposals,
   editProposalBatches,
-  planRevisionTasks,
   planRevisions,
-  runDirectives,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
-import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 
 import type {
   AgentRuntimeFactory,
@@ -43,8 +41,6 @@ import { specialistConcurrencyLimit } from './specialist-task-contract.js';
 import {
   mainCompletionPrompt,
   mainPlanningPrompt,
-  mainRevisionPrompt,
-  planRevisionSchema,
   planSubmitSchema,
   validateSubmittedPlan as validatePlan,
   type PlannedTaskSpec,
@@ -54,6 +50,7 @@ import {
 import { PlannedRunStore } from './planned-run-store.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
 import { PlannedTaskExecutor } from './planned-task-executor.js';
+import { PlanRevisionService } from './plan-revision-service.js';
 import {
   applicationTurn,
   articleEditResult,
@@ -104,6 +101,7 @@ export class PlannedRunExecutor {
   private readonly store: PlannedRunStore;
   private readonly results: SpecialistResultStore;
   private readonly tasks: PlannedTaskExecutor;
+  private readonly revisions: PlanRevisionService;
 
   public constructor(private readonly options: PlannedRunExecutorOptions) {
     this.now = options.now ?? (() => new Date());
@@ -142,6 +140,15 @@ export class PlannedRunExecutor {
       transcripts: this.transcripts,
       taskWaits: this.taskWaits,
       results: this.results,
+      createId: this.createId,
+      now: this.now,
+      ...(options.runtimeToolFactory ? { runtimeToolFactory: options.runtimeToolFactory } : {}),
+    });
+    this.revisions = new PlanRevisionService({
+      database: options.database,
+      publisher: options.publisher,
+      sessions: this.sessions,
+      store: this.store,
       createId: this.createId,
       now: this.now,
       ...(options.runtimeToolFactory ? { runtimeToolFactory: options.runtimeToolFactory } : {}),
@@ -657,216 +664,22 @@ export class PlannedRunExecutor {
     );
   }
 
-  private async revisePlanAtBoundary(
+  private revisePlanAtBoundary(
     runId: string,
     rootPrompt: RuntimeCurrentTurn,
     orderedTasks: readonly PlannedTaskSpec[],
     pending: ReadonlyMap<string, PlannedTaskSpec>,
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
-  ): Promise<
-    | {
-        readonly retainedTaskIds: ReadonlySet<string>;
-        readonly newTasks: readonly PlannedTaskSpec[];
-      }
-    | undefined
-  > {
-    const directives = await this.options.database
-      .select({ id: runDirectives.id, content: runDirectives.content })
-      .from(runDirectives)
-      .where(
-        and(
-          eq(runDirectives.runId, runId),
-          eq(runDirectives.kind, 'steering'),
-          eq(runDirectives.status, 'pending'),
-        ),
-      )
-      .orderBy(asc(runDirectives.sequence));
-    if (directives.length === 0) return undefined;
-    const revisionRows = await this.options.database
-      .select({
-        planId: executionPlans.id,
-        revisionId: planRevisions.id,
-        revisionNumber: planRevisions.revisionNumber,
-      })
-      .from(agentRuns)
-      .innerJoin(planRevisions, eq(planRevisions.id, agentRuns.activePlanRevisionId))
-      .innerJoin(executionPlans, eq(executionPlans.id, planRevisions.planId))
-      .where(eq(agentRuns.id, runId))
-      .limit(1);
-    const current = revisionRows[0];
-    if (!current || current.revisionNumber >= 4) {
-      await this.options.database
-        .update(runDirectives)
-        .set({ status: 'consumed', appliedAt: this.now() })
-        .where(
-          inArray(
-            runDirectives.id,
-            directives.map(({ id }) => id),
-          ),
-        );
-      return undefined;
-    }
-    const availableCapabilities = this.options.runtimeToolFactory
-      ? await this.options.runtimeToolFactory.listCapabilities(runId)
-      : [];
-    let submitted:
-      | {
-          readonly goal: string;
-          readonly retainedTaskIds: readonly string[];
-          readonly tasks: readonly PlannedTaskSpec[];
-        }
-      | undefined;
-    const planRevise: RuntimeTool = {
-      name: 'plan_revise',
-      label: 'Revise execution plan',
-      description:
-        'Retain unaffected pending tasks and add only tasks required by the steering input.',
-      parameters: planRevisionSchema,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
-      executionMode: 'sequential',
-      terminateOnSuccess: true,
-      execute: (arguments_) => {
-        const retainedTaskIds = arguments_.retainedTaskIds as readonly string[];
-        if (retainedTaskIds.some((id) => !pending.has(id))) {
-          throw new Error('plan_revise can retain only currently pending tasks');
-        }
-        const plan = validatePlan(
-          { goal: arguments_.goal, tasks: arguments_.tasks },
-          availableCapabilities,
-          this.createId,
-        );
-        if (retainedTaskIds.length + plan.tasks.length > 12) {
-          throw new Error('Revised plan exceeds 12 active tasks');
-        }
-        submitted = { goal: plan.goal, retainedTaskIds, tasks: plan.tasks };
-        return Promise.resolve({ accepted: true });
-      },
-    };
-    const steering = directives.map(({ content }) => content).join('\n');
-    const envelope = {
-      rootRequest: rootPrompt,
-      steering,
-      pendingTasks: [...pending.values()].map(publicTask),
-      acceptedResults: [...settled.values()]
-        .filter(({ status }) => status === 'succeeded')
-        .map(({ id, owner, summary, artifacts: produced }) => ({
-          taskId: id,
-          owner,
-          summary,
-          artifacts: produced.map(({ type, title, summary: artifactSummary }) => ({
-            type,
-            title,
-            summary: artifactSummary,
-          })),
-        })),
-    };
-    let result = await this.sessions.execute(
+  ) {
+    return this.revisions.reviseAtBoundary(
       runId,
-      undefined,
-      'main',
-      current.revisionNumber + 1,
-      'main',
-      mainRevisionPrompt(availableCapabilities),
-      [],
-      applicationTurn(rootPrompt, JSON.stringify(envelope)),
-      [planRevise],
+      rootPrompt,
+      orderedTasks,
+      pending,
+      settled,
       signal,
     );
-    for (let repair = 1; !submitted && result.status === 'completed' && repair <= 2; repair += 1) {
-      result = await this.sessions.execute(
-        runId,
-        undefined,
-        'main',
-        current.revisionNumber + 1 + repair,
-        'main',
-        mainRevisionPrompt(availableCapabilities),
-        [],
-        applicationTurn(
-          rootPrompt,
-          'Protocol repair: call plan_revise exactly once with a schema-valid revision.',
-        ),
-        [planRevise],
-        signal,
-      );
-    }
-    if (!submitted) throw new Error('Main Agent did not call plan_revise for persisted steering');
-    const retained = new Set(submitted.retainedTaskIds);
-    const revisionId = this.createId();
-    const revisionNumber = current.revisionNumber + 1;
-    const revisionEvents = await this.options.database.transaction(async (transaction) => {
-      await transaction.insert(planRevisions).values({
-        id: revisionId,
-        planId: current.planId,
-        revisionNumber,
-        reason: 'steering',
-        summary: submitted?.goal ?? '',
-      });
-      const revisionMembers = orderedTasks.filter(
-        ({ id }) => settled.get(id)?.status === 'succeeded' || retained.has(id),
-      );
-      if (revisionMembers.length > 0) {
-        await transaction.insert(planRevisionTasks).values(
-          revisionMembers.map((task, position) => ({
-            planRevisionId: revisionId,
-            taskId: task.id,
-            position,
-            sourceRevisionId: current.revisionId,
-          })),
-        );
-      }
-      await this.persistRevisionTasks(
-        transaction,
-        runId,
-        revisionId,
-        submitted?.tasks ?? [],
-        rootPrompt,
-        revisionMembers.length,
-      );
-      await transaction
-        .update(agentRuns)
-        .set({
-          activePlanRevisionId: revisionId,
-          updatedAt: this.now(),
-          version: sql`${agentRuns.version} + 1`,
-        })
-        .where(eq(agentRuns.id, runId));
-      await transaction
-        .update(runDirectives)
-        .set({ status: 'consumed', appliedAt: this.now() })
-        .where(
-          inArray(
-            runDirectives.id,
-            directives.map(({ id }) => id),
-          ),
-        );
-      await appendCheckpoint(transaction, {
-        id: this.createId(),
-        runId,
-        reason: 'plan_revised',
-        state: { revisionId, revisionNumber, directiveIds: directives.map(({ id }) => id) },
-      });
-      const revised = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'plan.revised',
-        payload: {
-          revisionId,
-          revisionNumber,
-          summary: submitted?.goal,
-          tasks: [...revisionMembers, ...(submitted?.tasks ?? [])].map(publicTask),
-        },
-      });
-      const applied = await appendRunEvent(transaction, {
-        id: this.createId(),
-        runId,
-        eventType: 'steering.applied',
-        payload: { directiveIds: directives.map(({ id }) => id), revisionNumber },
-      });
-      return [revised, applied].map(toDurableEvent);
-    });
-    await this.publishAll(revisionEvents);
-    return { retainedTaskIds: retained, newTasks: submitted.tasks };
   }
 
   private executeInlineTask(
