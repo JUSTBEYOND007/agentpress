@@ -42,8 +42,8 @@ export async function searchPublicSources(
       : AbortSignal.timeout(SEARCH_TIMEOUT_MS),
   });
   if (!response.ok) {
-    const detail = redactCredential((await response.text()).slice(0, 300), apiKey);
-    throw new Error(`AnySearch API error ${String(response.status)}${detail ? `: ${detail}` : ''}`);
+    await response.body?.cancel();
+    throw new Error(`AnySearch API error ${String(response.status)}`);
   }
   const results = parseResponse(await response.json());
   return results.slice(0, normalizeLimit(limit)).map((result) => ({
@@ -87,10 +87,6 @@ function normalizeLimit(value: number): number {
 
 function invalidResponse(message: string): Error {
   return new Error(`AnySearch API returned invalid response: ${message}`);
-}
-
-function redactCredential(value: string, credential: string | undefined): string {
-  return credential ? value.replaceAll(credential, '[redacted]') : value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

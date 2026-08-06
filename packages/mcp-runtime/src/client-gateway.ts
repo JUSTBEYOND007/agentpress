@@ -160,6 +160,9 @@ async function callTool(
     undefined,
     { signal: input.context.signal },
   );
+  if (result.isError === true) {
+    throw new Error(`MCP tool ${input.toolName} returned an error`);
+  }
   const structured = result.structuredContent;
   return typeof structured === 'object' && structured !== null && 'value' in structured
     ? structured.value

@@ -12,6 +12,7 @@ import {
   conversationMessages,
   conversations,
   executionPlans,
+  evidenceRecords,
   planRevisions,
   rootRequests,
   runEvents,
@@ -67,6 +68,29 @@ describeWithDatabase('Tool Call application flow', () => {
       searchExecutions += 1;
       return Promise.resolve({ result: query });
     },
+  });
+  registry.register({
+    toolId: 'web.search',
+    version: '1.0.0',
+    owner: 'research',
+    description: 'Search public sources',
+    capabilities: ['web.research'],
+    inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Array(Type.Unknown()),
+    risk: 'read_only',
+    sideEffect: 'No side effect',
+    idempotency: 'none',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () =>
+      Promise.resolve([
+        {
+          source: 'AnySearch',
+          url: 'https://example.com/source',
+          title: 'Primary source',
+          text: 'Citable source text',
+        },
+      ]),
   });
   registry.register({
     toolId: 'publication.delayed_publish',
@@ -202,6 +226,29 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(toolCalls)
       .where(eq(toolCalls.runId, runId));
     expect(rows).toEqual([{ status: 'succeeded' }]);
+  });
+
+  it('persists the result URL instead of the provider label as Evidence source URI', async () => {
+    const runId = await createRunningRun();
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    });
+    const search = (await bridge.createForRun(runId, ['web.research'])).find(
+      (tool) => tool.label === 'web.search',
+    );
+
+    await search?.execute(
+      { query: 'source URI' },
+      { runId, providerToolCallId: randomUUID() },
+    );
+
+    const rows = await connection.db
+      .select({ sourceUri: evidenceRecords.sourceUri })
+      .from(evidenceRecords)
+      .where(eq(evidenceRecords.runId, runId));
+    expect(rows).toEqual([{ sourceUri: 'https://example.com/source' }]);
   });
 
   it('replays a settled provider Tool Call without executing its side effect twice', async () => {

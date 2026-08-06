@@ -313,7 +313,7 @@ function extractToolEvidence(output: unknown): readonly ToolEvidence[] {
         : [];
   return candidates.flatMap((candidate) => {
     const item = recordValue(candidate);
-    const sourceUri = firstString(item.source, item.url, item.pageUrl, item.uri);
+    const sourceUri = firstString(item.url, item.pageUrl, item.uri, item.source);
     const excerpt = firstString(item.excerpt, item.text, item.content, item.snippet);
     if (!sourceUri || !excerpt) return [];
     return [

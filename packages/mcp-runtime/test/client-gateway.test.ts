@@ -72,6 +72,32 @@ describe('MCP client gateway', () => {
     expect(retryManager.state('web_research')).toBe('degraded');
   });
 
+  it('fails closed on an MCP error result without retaining remote content', async () => {
+    const callTool = vi.fn(() =>
+      Promise.resolve({
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: 'username=generated password=generated api_key=generated',
+          },
+        ],
+      }),
+    );
+    const manager = managerWithClients([
+      { callTool, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+
+    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.toThrow(
+      'MCP tool search returned an error',
+    );
+    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.not.toThrow(
+      /password|api_key|generated/u,
+    );
+    expect(callTool).toHaveBeenCalledTimes(2);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
   it('coalesces concurrent reconnects and does not let stale failures evict the new client', async () => {
     const transportFailure = new Error('fetch failed');
     const oldCall = vi.fn(() => Promise.reject(transportFailure));

@@ -59,13 +59,23 @@ describe('public web search', () => {
     );
   });
 
-  it('sends an optional credential and redacts it from HTTP errors', async () => {
+  it('sends an optional credential without retaining provider error bodies', async () => {
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(new Response('provider exposed secret-key', { status: 401 }));
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            'provider exposed username=generated password=generated api_key=secret-key',
+            { status: 401 },
+          ),
+        ),
+      );
     await expect(
       searchPublicSources('keyed', 5, { fetch: request, apiKey: 'secret-key' }),
-    ).rejects.toThrow('AnySearch API error 401: provider exposed [redacted]');
+    ).rejects.toThrow('AnySearch API error 401');
+    await expect(
+      searchPublicSources('keyed', 5, { fetch: request, apiKey: 'secret-key' }),
+    ).rejects.not.toThrow(/secret-key|generated|password/u);
     expect(new Headers(request.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(
       'Bearer secret-key',
     );
