@@ -1651,6 +1651,78 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(branchRuns).toHaveLength(1);
   });
 
+  it('aborts a timed-out Specialist and persists task_timeout instead of hanging', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const main = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Exercise the Specialist timeout boundary',
+          tasks: [plannedTask('timeout-writer', 'writer', [], 'optional')],
+        }),
+        runCompleteResponse('Specialist timed out; the run completed with degradation.'),
+      ],
+    });
+    const hangingSpecialist: AgentRuntime = {
+      execute(_request, _sink, signal) {
+        return new Promise((resolve) => {
+          const settle = () => {
+            resolve({ status: 'cancelled', messages: [] });
+          };
+          if (signal?.aborted) settle();
+          else signal?.addEventListener('abort', settle, { once: true });
+        });
+      },
+    };
+    const timeoutService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: (purpose) => (purpose === 'writer' ? hangingSpecialist : main) },
+      systemPrompt: 'You are AgentPress.',
+      taskTimeoutMs: 25,
+    });
+    const run = await timeoutService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: 'Run the bounded timeout scenario',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(timeoutService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'completed_with_degradation',
+    });
+    await expect(
+      connection.db
+        .select({ status: taskResults.status, failure: taskResults.failure })
+        .from(taskResults)
+        .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+        .where(eq(agentTasks.runId, run.runId)),
+    ).resolves.toEqual([
+      {
+        status: 'failed',
+        failure: { code: 'task_timeout', message: 'task_timeout' },
+      },
+    ]);
+  });
+
+  it('rejects an invalid Specialist timeout instead of falling back to the default', () => {
+    expect(
+      () =>
+        new DirectRunService({
+          database: connection.db,
+          publisher,
+          runtimeFactory: { create: () => runtime },
+          systemPrompt: 'You are AgentPress.',
+          taskTimeoutMs: 0,
+        }),
+    ).toThrow('Specialist Task timeout must be between 1 ms and 10 minutes');
+  });
+
   it('persists and executes a five-Specialist DAG with isolated Context Packs', async () => {
     const plannedBranch = randomUUID();
     await connection.db.insert(conversationBranches).values({

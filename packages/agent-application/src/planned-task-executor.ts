@@ -51,11 +51,14 @@ type PlannedTaskExecutorOptions = {
   readonly results: SpecialistResultStore;
   readonly createId: () => string;
   readonly now: () => Date;
+  readonly inlineTaskTimeoutMs?: number;
   readonly runtimeToolFactory?: RuntimeToolFactory;
 };
 
 export class PlannedTaskExecutor {
-  public constructor(private readonly options: PlannedTaskExecutorOptions) {}
+  public constructor(private readonly options: PlannedTaskExecutorOptions) {
+    assertTaskTimeout(options.inlineTaskTimeoutMs ?? INLINE_TASK_TIMEOUT_MS);
+  }
 
   public async executeDetached(
     runId: string,
@@ -105,6 +108,7 @@ export class PlannedTaskExecutor {
       `task:${String(process.pid)}`,
     );
     if (!claim) return 'skipped';
+    const execution = taskExecutionSignal(signal, request.timeoutMs);
     try {
       const result = await this.execute(
         runId,
@@ -112,7 +116,8 @@ export class PlannedTaskExecutor {
         envelope.rootRequest,
         new Map(),
         claim.claim.attempt,
-        signal,
+        execution.signal,
+        execution.didTimeout,
       );
       return result.status;
     } finally {
@@ -131,10 +136,11 @@ export class PlannedTaskExecutor {
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
+    const timeoutMs = this.options.inlineTaskTimeoutMs ?? INLINE_TASK_TIMEOUT_MS;
     const claim = await this.claimTaskAttempt(
       runId,
       task,
-      INLINE_TASK_TIMEOUT_MS,
+      timeoutMs,
       `planned:${String(process.pid)}`,
     );
     if (!claim) {
@@ -146,8 +152,17 @@ export class PlannedTaskExecutor {
         failure: 'attempt_budget_exhausted',
       };
     }
+    const execution = taskExecutionSignal(signal, timeoutMs);
     try {
-      return await this.execute(runId, task, rootPrompt, settled, claim.claim.attempt, signal);
+      return await this.execute(
+        runId,
+        task,
+        rootPrompt,
+        settled,
+        claim.claim.attempt,
+        execution.signal,
+        execution.didTimeout,
+      );
     } finally {
       await releaseAgentTaskLease(this.options.database, {
         leaseToken: claim.claim.lease.leaseToken,
@@ -210,6 +225,7 @@ export class PlannedTaskExecutor {
     settled: ReadonlyMap<string, SettledTask>,
     attempt: number,
     signal?: AbortSignal,
+    didTimeout: () => boolean = () => false,
   ): Promise<SettledTask> {
     let completion:
       | {
@@ -309,12 +325,17 @@ export class PlannedTaskExecutor {
     }
     const assistant = findAssistant(result);
     if (!completion) {
+      const timedOut = didTimeout();
       const failed: SettledTask = {
         ...task,
-        status: result.status === 'cancelled' ? 'cancelled' : 'failed',
+        status: timedOut ? 'failed' : result.status === 'cancelled' ? 'cancelled' : 'failed',
         artifacts: [],
         warnings: [],
-        failure: result.status === 'failed' ? result.error.code : 'protocol_error',
+        failure: timedOut
+          ? 'task_timeout'
+          : result.status === 'failed'
+            ? result.error.code
+            : 'protocol_error',
         ...(assistant ? { usage: assistant.usage } : {}),
       };
       return (await this.options.results.persistTaskResult(runId, failed, attempt))
@@ -401,5 +422,19 @@ export class PlannedTaskExecutor {
     );
     if (!toolResult) return undefined;
     return [message, toolResult];
+  }
+}
+
+function taskExecutionSignal(parent: AbortSignal | undefined, timeoutMs: number) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return {
+    signal: parent ? AbortSignal.any([parent, timeout]) : timeout,
+    didTimeout: () => timeout.aborted && parent?.aborted !== true,
+  };
+}
+
+function assertTaskTimeout(timeoutMs: number): void {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10 * 60_000) {
+    throw new RangeError('Specialist Task timeout must be between 1 ms and 10 minutes');
   }
 }
