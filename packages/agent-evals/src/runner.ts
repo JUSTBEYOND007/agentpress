@@ -54,6 +54,14 @@ export function evaluatePersistedRun(
       : expected.actionProposal === 'forbidden'
         ? observed?.actionProposals === 0
         : true;
+  const artifactBoundaryCorrect = (expected.forbiddenArtifactTypes ?? []).every(
+    (type) => !artifacts.has(type),
+  );
+  const statusCorrect = expected.allowedStatuses
+    ? observed !== undefined && expected.allowedStatuses.includes(observed.status)
+    : observed !== undefined &&
+      (['completed', 'completed_with_degradation'].includes(observed.status) ||
+        (expected.allowWaitingForUser === true && observed.status === 'waiting_for_user'));
   const parallelExecutionCorrect =
     scenario.category !== 'parallelism' || observed?.parallelExecutionValid === true;
   const toolProtocolCorrect = evaluateToolProtocol(scenario, observed);
@@ -68,8 +76,7 @@ export function evaluatePersistedRun(
     scenarioId: scenario.id,
     routingCorrect: Boolean(
       observed &&
-      (['completed', 'completed_with_degradation'].includes(observed.status) ||
-        (expected.allowWaitingForUser === true && observed.status === 'waiting_for_user')) &&
+      statusCorrect &&
       expected.allowedModes.includes(observed.mode) &&
       rejectionCorrect,
     ),
@@ -78,6 +85,7 @@ export function evaluatePersistedRun(
       expected.requiredRoles.every((role) => roles.has(role)) &&
       expected.requiredCapabilities.every((capability) => capabilities.has(capability)) &&
       expected.requiredArtifactTypes.every((type) => artifacts.has(type)) &&
+      artifactBoundaryCorrect &&
       actionProposalCorrect &&
       parallelExecutionCorrect &&
       toolProtocolCorrect &&

@@ -120,6 +120,70 @@ describe('Agent eval suite', () => {
     ).toBe(true);
   });
 
+  it('enforces workflow terminal states and forbidden artifacts', () => {
+    const researchOnly = evalScenarios.find(({ id }) => id === 'agentpress-workflow-02');
+    const conflict = evalScenarios.find(({ id }) => id === 'agentpress-workflow-04');
+    if (!researchOnly || !conflict) throw new Error('Workflow fixtures are missing');
+    const base = {
+      mode: 'planned' as const,
+      tasks: [{ role: 'researcher' as const, capabilities: ['web.research'] }],
+      evidenceCount: 1,
+      approvalRequests: 0,
+      actionProposals: 0,
+      schemaValid: true,
+      unauthorizedWrites: 0,
+      unknownOutcomeRetries: 0,
+      crossWorkspaceMemoryHits: 0,
+    };
+
+    expect(
+      evaluatePersistedRuns(
+        [researchOnly],
+        [
+          {
+            ...base,
+            scenarioId: researchOnly.id,
+            status: 'completed',
+            artifactTypes: ['ResearchBrief'],
+          },
+        ],
+      )[0]?.delegationCorrect,
+    ).toBe(true);
+    expect(
+      evaluatePersistedRuns(
+        [researchOnly],
+        [
+          {
+            ...base,
+            scenarioId: researchOnly.id,
+            status: 'completed',
+            artifactTypes: ['ResearchBrief', 'EditProposal'],
+          },
+        ],
+      )[0]?.delegationCorrect,
+    ).toBe(false);
+
+    const conflictObservation = {
+      ...base,
+      scenarioId: conflict.id,
+      tasks: [
+        { role: 'researcher' as const, capabilities: ['web.research'] },
+        { role: 'fact_checker' as const, capabilities: [] },
+      ],
+      artifactTypes: ['ResearchBrief', 'ClaimReview'],
+    };
+    expect(
+      evaluatePersistedRuns([conflict], [{ ...conflictObservation, status: 'completed' }])[0]
+        ?.routingCorrect,
+    ).toBe(false);
+    expect(
+      evaluatePersistedRuns(
+        [conflict],
+        [{ ...conflictObservation, status: 'completed_with_degradation' }],
+      )[0]?.routingCorrect,
+    ).toBe(true);
+  });
+
   it('rejects unnecessary tools and duplicate successful writes', () => {
     const noTool = evalScenarios.find(({ id }) => id === 'agentpress-tool-03');
     const edit = evalScenarios.find(({ id }) => id === 'agentpress-tool-01');

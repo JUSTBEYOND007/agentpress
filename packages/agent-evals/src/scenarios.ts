@@ -12,6 +12,7 @@ export const EVAL_CATEGORIES = [
   'cancellation',
   'recovery',
   'stale_edit',
+  'workflow',
 ] as const;
 
 export type EvalCategory = (typeof EVAL_CATEGORIES)[number];
@@ -21,6 +22,8 @@ export type EvalExpectation = {
   readonly requiredRoles: readonly EvalRole[];
   readonly requiredCapabilities: readonly string[];
   readonly requiredArtifactTypes: readonly string[];
+  readonly forbiddenArtifactTypes?: readonly string[];
+  readonly allowedStatuses?: readonly string[];
   readonly evidence: 'required' | 'optional' | 'forbidden';
   readonly approval: 'required' | 'forbidden' | 'optional';
   readonly recovery?: 'checkpoint' | 'outcome_unknown' | 'event_replay';
@@ -34,7 +37,7 @@ export type EvalExpectation = {
 };
 export type EvalScenario = {
   readonly id: string;
-  readonly version: 3;
+  readonly version: 4;
   readonly category: EvalCategory;
   readonly prompt: string;
   readonly setup?: {
@@ -422,6 +425,85 @@ export const evalScenarios: readonly EvalScenario[] = [
     ),
     { bindArticle: true, confirmedArticleEdit: true },
   ),
+  scenario(
+    'workflow-01',
+    'workflow',
+    '围绕 Kafka 消费者组再均衡完成一条可审阅写作链：先联网研究并保留引用，再形成提纲和 800 字草稿，由事实核查与编辑角色审阅，最多修订两轮，最后只生成当前文章的修改提案并等待我接受或拒绝。',
+    expectation(
+      ['planned'],
+      ['researcher', 'writer', 'fact_checker', 'editor'],
+      ['web.research', 'article.propose'],
+      ['ResearchBrief', 'Outline', 'ArticleDraft', 'ClaimReview', 'EditProposal'],
+      'required',
+    ),
+    { bindArticle: true },
+  ),
+  scenario(
+    'workflow-02',
+    'workflow',
+    '只研究 Kafka cooperative rebalance 的工作机制并交付带来源的 ResearchBrief；不要写草稿、不要修改当前文章、不要创建任何修改提案。',
+    {
+      ...expectation(
+        ['planned'],
+        ['researcher'],
+        ['web.research'],
+        ['ResearchBrief'],
+        'required',
+        'forbidden',
+        undefined,
+        undefined,
+        'forbidden',
+      ),
+      forbiddenArtifactTypes: ['Outline', 'ArticleDraft', 'EditProposal'],
+    },
+    { bindArticle: true },
+  ),
+  scenario(
+    'workflow-03',
+    'workflow',
+    '审阅当前文章是否准确表达“Kafka exactly-once 只覆盖事务性读-处理-写链路，外部副作用仍需幂等”。文章已经完整表达该结论；若无需修改，返回 no_changes_needed，不要为了展示工作而制造 diff。',
+    {
+      ...expectation(['planned'], ['fact_checker'], [], ['ClaimReview']),
+      forbiddenArtifactTypes: ['ArticleDraft', 'EditProposal'],
+      allowedStatuses: ['completed'],
+    },
+    { bindArticle: true },
+  ),
+  scenario(
+    'workflow-04',
+    'workflow',
+    '研究 Kafka cooperative rebalance 是否能保证任何情况下都绝不重复处理。来源互相冲突或证据不足时，保留 unknown 和 conflict，返回降级报告，不要给出无依据的确定结论。',
+    {
+      ...expectation(
+        ['planned'],
+        ['researcher', 'fact_checker'],
+        ['web.research'],
+        ['ResearchBrief', 'ClaimReview'],
+        'required',
+      ),
+      allowedStatuses: ['completed_with_degradation'],
+    },
+  ),
+  scenario(
+    'workflow-05',
+    'workflow',
+    '从恢复点继续当前文章修改流程；保留已经完成的研究和审阅结果，不要重复外部调用，恢复后仍停在修改提案等待审批状态。',
+    {
+      ...expectation(
+        ['planned'],
+        ['editor'],
+        ['article.propose'],
+        ['EditProposal'],
+        'optional',
+        'optional',
+        'checkpoint',
+        undefined,
+        'required',
+      ),
+      allowedStatuses: ['completed'],
+    },
+    { bindArticle: true, confirmedArticleEdit: true },
+  ),
 ];
 
 function expectation(
@@ -457,7 +539,7 @@ function scenario(
 ): EvalScenario {
   return {
     id: `agentpress-${id}`,
-    version: 3,
+    version: 4,
     category,
     prompt,
     ...(setup ? { setup } : {}),
