@@ -106,6 +106,40 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 | Skill                           | `packages/agent-context/`、`packages/agent-application/` | 可执行脚本目录           |
 | Consumer projection             | `apps/web/src/lib/` 与小型 typed renderer                | PostgreSQL 写模型        |
 
+## 当前未完成执行队列
+
+以下顺序按事实源中的已知阻塞关系排列，不允许通过增加 Prompt、放宽 Schema、延长 timeout 或在 Web
+层伪造终态跳过前置项：
+
+- [ ] **P0：固化 ResearchBrief 完成协议。** `packages/web-research` 导出唯一的 strict TypeBox
+      `researchBriefContentSchema`；既有语义 validator 在结构校验后继续检查 Claim -> Source Evidence ID
+      引用、冲突/部分失败时置信度降级等跨字段规则。`task_complete`、Task Brief、持久化
+      `callerOutputSchema` 和执行时校验必须从同一 role-specific schema factory 取得 Researcher Schema，
+      不在 Agent Application 复制第二份 ResearchBrief 定义。其他 Specialist 暂时保持既有 Artifact policy。
+- [ ] ResearchBrief 契约测试覆盖缺失 `schemaVersion`、任意嵌套对象、额外字段、空 Evidence ID、Claim
+      引用未列 Source、重复 Source、冲突但满置信度，以及有效 canonical payload；真实评测中首次
+      `task_complete` 应可通过宿主 Schema，不依赖 protocol-repair Prompt。
+- [ ] **P0：固定 Provider Schema capability。** 不再仅从可自定义的 provider ID 名称猜测 OpenAI/
+      Anthropic/Google 兼容族；backend 显式声明 wire schema capability。任何 strict normalization 必须有
+      optional <-> required-nullable 的双向转换，并覆盖 unsupported keyword、嵌套对象、数组上限和
+      `failure:null` round-trip；未通过真实 provider contract test 前不得全局启用。
+- [ ] Researcher 输出体积预算必须从 `ResearchExecutionPolicy.maxSynthesisTokens` 进入真实 Pi
+      `streamSimple(maxTokens)`；同时保证 Provider wire schema 与 canonical 本地 Schema 的差异可审计，
+      不能因 wire 降级跳过 Evidence 引用、置信度或数组边界校验。
+- [x] **P0：接通研究执行预算。** `researchExecutionPolicy('deep')` 的 8 次 query 上限进入真实 Specialist
+      Pi Runtime；每次搜索最多保留 3 条结果，Researcher 总量上限为 24 条 Evidence；并行批次中的超额
+      调用被拒绝后仍允许同批 `task_complete` 结算。该行为由 Web Research、MCP、Pi Runtime 和 Agent
+      Application 分层测试覆盖，提交为 `f7281ab`。
+- [ ] **P0：复跑最小在线闭环。** 只运行 `workflow-02`，要求 Researcher 在 120 秒内结算、ToolCall <= 8、
+      Evidence <= 24、ResearchBrief 结构与引用合法、无证据 Claim 为 0，并从 PostgreSQL 核对 Root
+      Request、Run、transcript、ToolCall、Task、Evidence、Artifact 和 terminal projection。
+- [ ] **P1：复跑完整工作流矩阵。** `workflow-02` 通过后才运行 `workflow-01..05`；失败时先从
+      PostgreSQL 事实链定位所属层，再决定是否实现，不把单场景模型行为写成通用 coordinator 分支。
+- [ ] **P1：完成恢复与 MCP 失败矩阵。** 先接现有 recovery policy、validator、ToolCall ledger 和
+      settlement，不建立第二套恢复或 MCP manager；所有新增 Agent-facing 源文件继续保持 <= 500 行。
+- [ ] **P2：浏览器结果投影验收。** 真实 PostgreSQL replay 与 live SSE 使用同一 projector；Playwright
+      验证桌面/移动端的结果优先展示、折叠、错误脱敏、恢复和无重叠，不在 React 中推断运行状态。
+
 ## P0：结构化意图与工具授权
 
 InkOS 证据起点：
@@ -244,7 +278,16 @@ TODO：
       Specialist registry 只作为运行详情事实，不是工作区导航。现有 projection/renderer 测试覆盖。
 - [x] 合约测试覆盖 Schema precedence、工具越权、递归拒绝、预算耗尽、部分成功、并行结算、late result、
       cancel/recover race 和 private-thinking isolation。
+- [ ] 补齐 Specialist runtime timeout、模型/输出 Schema 失败、非法 TaskResult/Evidence、synthesis 失败、
+      Kafka 重复/乱序、并发分支同时耗尽预算、上游 degraded/failed 与 Main 部分成功终态的故障矩阵。
+- [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
+      store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
+- [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与
+      测试路径，只复用已验证行为，不复制成 AgentPress 的第二套 Task 状态机。
 - [ ] 真实模型验收至少覆盖“研究 -> 写作 -> 审阅 -> 修订 -> 提案”和“审阅认为无需修改”两个相反场景。
+- [ ] 在线矩阵还需覆盖部分成功、Specialist timeout、冲突 Evidence、取消/恢复和预算耗尽；量化门槛为
+      DAG/Task/Tool 不超宿主上限、重复副作用=0、非法 capability=0、private thinking 泄漏=0、Proposal
+      越权=0，并保存 PostgreSQL 完整事件链与浏览器投影证据。
 
 ## P0：审阅、修订与最佳版本选择
 
@@ -359,10 +402,18 @@ TODO：
 - [x] Composer 只展示 Skill chip、名称和用途；版本、来源、hash、资源和诊断进入详情或管理页。
 - [x] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
       prompt injection、历史过期和 Skill 越权。
+- [ ] 补齐 path traversal、非 UTF-8、单文件/总资源分别超限、发现后文件或 hash 改变、恢复时 revision
+      缺失、资源读取中断、模型选择 Schema 非法/timeout、显式选择与模型选择冲突的失败矩阵。
+- [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
+      `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
+- [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，
+      旧 Skill 指令不进入新 turn；Playwright 验证显式禁用、缺失/失效 Skill 与诊断详情。
 - [x] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
       2026-08-07 使用真实 Pi Runtime 与目标模型 `gpt-5.6-terra` 运行 5 个固定用例：5/5 exact match、
       0 forbidden selection、0 error。版本化报告为
       `.agentpress/evals/2026-08-06T21-25-03-167Z-gpt-5.6-terra-skill-selection.json`。
+- [ ] 将 Skill 在线门槛固定为 exact match、none precision、forbidden selection=0、恶意 description
+      bypass=0、Schema/error rate；扩大数据集前不得用当前 5/5 替代这些独立指标。
 
 ## P1：Web Research 与 Evidence
 
@@ -375,7 +426,9 @@ InkOS 证据起点：
 
 InkOS 使用 Tavily、简单 HTML 清洗和本地 Markdown 报告。AgentPress 不复制这些基础设施；优先复用
 现有 `packages/web-research`、SSRF guard、内置 `web_research` MCP、Evidence/Artifact persistence 和
-Tool output guard。
+Tool output guard。正文抽取继续直接依赖 `parse5@7.3.0`，PDF 抽取继续直接依赖 `unpdf@1.8.0`；
+provider 搜索复用 `nicobailon/pi-web-access@v0.15.0` 的 MIT 行为适配，不重新实现 HTML parser、PDF
+parser 或搜索 provider client。
 
 TODO：
 
@@ -395,7 +448,15 @@ TODO：
       互相冲突来源、恶意网页指令和全部失败的 degraded report。
       provider-neutral failure policy 与现有 SSRF/fetch 测试合计 22 个测试通过；失败产物继续使用
       ResearchBrief Schema，恶意网页指令只进入 ignored/partialFailures，不生成 Claim。
+- [ ] 补齐 search timeout/rate limit/部分 query 失败/provider Schema 非法、fetch timeout/cancel、DNS
+      失败、redirect loop、非法 URL、空正文、PDF 签名或页数失败、synthesis timeout/Schema 失败、
+      Token/费用耗尽以及 Evidence/Artifact 持久化失败的执行链矩阵。
+- [ ] partial query/fetch failure 必须保留已成功来源；全部 search/fetch/synthesis 失败只允许产出无 Claim、
+      `confidence=0` 的 typed degraded Artifact；持久化失败不能投影为成功 Artifact。
+- [ ] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
+- [ ] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝
+      硬结论通过率，并在报告记录 provider/model/Prompt/Tool/Skill/Context/Runtime revision。
 
 ## P1：MCP 边界
 
@@ -408,6 +469,18 @@ MCP manager。
 - [x] MCP Tool 必须通过同一 PersistentToolBridge、ToolCallService、capability、approval 和 settlement；
       不为 Multi-Agent 或 Skill 创建旁路。
 - [x] UI 显示用户目标和结果摘要，不默认显示 JSON-RPC、Server transport 和原始 JSON；技术详情可审计。
+- [ ] 在 `docs/references/pi-ecosystem.md` 逐项固定官方 MCP SDK client/session/transport、Oh My Pi
+      reconnect、`pi-mcp-adapter` Schema/output guard 以及本地 Tool Registry、PersistentToolBridge、
+      ToolCall ledger、Approval、Settlement 和 Run projection 的版本、许可证、源码/测试路径与 owner。
+- [ ] 明确 Adapter 边界：Server capability/tool-list revision 在 Run 冻结；MCP Schema -> 宿主 Tool Schema
+      转换由 Adapter 拥有；stdio/HTTP transport 和 JSON-RPC error 不进入 Domain 公共契约；远端 Server、
+      Skill 或网页内容永远不能授予 capability。
+- [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
+      变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
+      Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。
+- [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
+      replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置
+      Server 的调用；`docs/oh-my-pi-reuse-todo.md` 只能承载细节，不能替代本清单的完成门禁。
 
 ## P1：结果优先的消费者投影
 
@@ -436,12 +509,35 @@ timeline/outcome 顺序、折叠控制、错误脱敏和桌面/移动 Playwright
 ## P2：端到端写作产品行为
 
 离线验收契约进度：`workflow-01..05` 已固定完整研究写作链、research-only、no-change review、
-conflict degradation 和 recovery-pending-proposal 五个 schema version 4 场景；Eval scorer 新增禁止 Artifact 与精确
-终态断言，防止“只研究”偷偷产生 ArticleDraft/EditProposal，或把来源冲突的普通 completed 误判为降级。
-Agent Evals 42 个测试通过。使用真实 Pi Runtime 与目标模型启动 workflow 在线验收后，Researcher 在
-14 个 ToolCall 已成功结算后仍持续 `running`，由 PostgreSQL 事实链定位到 timeout 仅延长 Task lease、
-没有进入 Runtime `AbortSignal`。该根因已修复并通过 PostgreSQL 悬挂 Specialist 回归，但五个 workflow
-场景尚未在修复后全部复跑，完整 trace、质量指标和浏览器验收仍保持未完成。
+conflict degradation 和 recovery-pending-proposal 五个 schema version 4 场景；Eval scorer 新增禁止
+Artifact 与精确终态断言，防止“只研究”偷偷产生 ArticleDraft/EditProposal，或把来源冲突的普通
+completed 误判为降级。Agent Evals 42 个测试通过。
+
+真实 Pi Runtime 与目标模型评测先后暴露并确认两层根因：Specialist timeout 没有进入 Runtime
+`AbortSignal` 已由 `e6900d6` 修复；Researcher 无上限重复搜索已由 `f7281ab` 接通宿主预算。最新单场景
+报告 `.agentpress/evals/2026-08-06T22-08-33-858Z-gpt-5.6-terra-workflow-02.json` 已把 ToolCall 从 12
+降到 8、Evidence 从 96 降到 24，引用有效，但仍在 120 秒 deadline 失败。PostgreSQL Run
+`cfa218aa-51a6-42af-9e07-be8dd48eb11e` 的 transcript 证明 Researcher 已调用 `task_complete`，宿主因
+`ResearchBrief requires schemaVersion=1` 拒绝；当前暴露给模型的 `content` 只是通用
+`Record<string, unknown>`。因此下一步是当前执行队列中的 role-specific constrained completion Schema，
+不是增加 Prompt、放宽 validator 或延长 timeout。五个场景尚未全部复跑，完整 trace、质量指标和浏览器
+验收仍保持未完成。
+
+后三次真实复跑进一步收窄了剩余缺口：
+
+- `.agentpress/evals/2026-08-06T22-22-37-027Z-gpt-5.6-terra-workflow-02.json`：8 次 ToolCall、24 条
+  Evidence、引用有效；首次完成 payload 生成 4304 output tokens、耗时约 82 秒，遗漏
+  `content.summary`，自动修复在 deadline 前被取消。
+- `.agentpress/evals/2026-08-06T22-35-42-988Z-gpt-5.6-terra-workflow-02.json`：接入 6000 token
+  synthesis 上限后首次 payload 降至 3652 output tokens、约 70 秒，但仍遗漏 required 字段且 Claim
+  超出本地上限，23 秒修复窗口仍不足。
+- `.agentpress/evals/2026-08-06T22-41-23-136Z-gpt-5.6-terra-workflow-02.json`：将自定义
+  `agentpress-eval` 强制视为 OpenAI strict 的实验导致搜索参数上限从 wire schema 被移除、optional
+  字段 required-nullable 与本地 validator 不对称，最终 0 Evidence；该实验已撤销，不能作为采用方案。
+
+因此当前未完成项不仅是 ResearchBrief canonical Schema，还包括 Provider wire capability 与双向适配。
+在这两项同时通过真实 provider contract 前，不得把 role-specific completion、研究输出预算或
+`workflow-02` 标记为完成。
 
 - [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
       用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
