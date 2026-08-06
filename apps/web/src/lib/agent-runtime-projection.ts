@@ -143,8 +143,7 @@ export function projectionContent(
       name: 'agentpress-run-process',
       data: process,
     } as const;
-    if (projection.terminal) parts.push(processPart);
-    else parts.unshift(processPart);
+    parts.push(processPart);
   }
   return parts;
 }
@@ -398,7 +397,10 @@ function augmentedProjectionParts(projection: RunProjection): readonly RunPart[]
       payload: { artifacts: projection.artifacts },
     });
   }
-  if (!projection.terminal) {
+  if (
+    !projection.terminal &&
+    !projected.some(({ type }) => type === 'reasoning' || type === 'activity')
+  ) {
     projected.push({
       id: `${projection.runId}:status`,
       runId: projection.runId,

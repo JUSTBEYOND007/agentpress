@@ -51,13 +51,57 @@ describe('run presentation projection', () => {
     expect(names(content)).toEqual(['agentpress-run-part']);
   });
 
-  it('puts the compact process status first while a run is active and leaves warnings visible', () => {
+  it('keeps warnings visible before the stable process status', () => {
     const content = projectionContent(
       projection([part('warning', 'run.failed', 2, {})], false, 'running'),
     );
 
-    expect(content[0]).toMatchObject({ type: 'data', name: 'agentpress-run-process' });
-    expect(content[1]).toMatchObject({ type: 'data', name: 'agentpress-run-part' });
+    expect(content[0]).toMatchObject({ type: 'data', name: 'agentpress-run-part' });
+    expect(content[1]).toMatchObject({ type: 'data', name: 'agentpress-run-process' });
+  });
+
+  it('does not duplicate planning as a synthetic process status', () => {
+    const content = projectionContent(
+      projection([part('reasoning', 'run.planning', 1, {})], false, 'planning'),
+    );
+    expect(names(content)).toEqual(['agentpress-run-part']);
+  });
+
+  it('keeps the process position stable across terminal state changes', () => {
+    const running = projectionContent(
+      projection(
+        [
+          text('处理中。', 1),
+          part('activity', 'tool.executing', 2, {
+            toolId: 'article.read_current',
+            toolCallId: 'call-1',
+          }),
+        ],
+        false,
+        'running',
+      ),
+    );
+    const terminal = projectionContent(
+      projection(
+        [
+          text('已完成。', 1),
+          part('activity', 'tool.succeeded', 2, {
+            toolId: 'article.read_current',
+            toolCallId: 'call-1',
+          }),
+        ],
+        true,
+        'completed',
+      ),
+    );
+    expect(names(running)).toEqual(['agentpress-run-process']);
+    expect(names(terminal)).toEqual(['agentpress-run-process']);
+    expect(texts(running)).toEqual(['处理中。']);
+    expect(texts(terminal)).toEqual(['已完成。']);
+    if (typeof running !== 'string' && typeof terminal !== 'string') {
+      expect(running.map(({ type }) => type)).toEqual(['text', 'data']);
+      expect(terminal.map(({ type }) => type)).toEqual(['text', 'data']);
+    }
   });
 
   it('adds one terminal process only for consumer-relevant activity', () => {

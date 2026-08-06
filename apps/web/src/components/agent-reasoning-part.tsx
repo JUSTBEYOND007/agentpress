@@ -1,6 +1,6 @@
 'use client';
 
-import { Brain, ChevronDown, LoaderCircle } from 'lucide-react';
+import { Brain, LoaderCircle } from 'lucide-react';
 
 import { numberValue, type RunPart } from '../lib/agentpress-assistant-runtime';
 
@@ -32,8 +32,8 @@ export function ReasoningPart({
     );
   }
   return (
-    <details className={`run-part reasoning-part${active ? ' is-active' : ''}`} open={active}>
-      <summary>
+    <div className={`run-part reasoning-part${active ? ' is-active' : ''}`} role="status">
+      <div className="reasoning-summary">
         {active ? (
           <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
         ) : (
@@ -46,9 +46,8 @@ export function ReasoningPart({
               ? `思考了 ${formatDuration(durationMs)}`
               : '思考过程'}
         </span>
-        <ChevronDown className="reasoning-chevron" aria-hidden="true" size={13} />
-      </summary>
-    </details>
+      </div>
+    </div>
   );
 }
 

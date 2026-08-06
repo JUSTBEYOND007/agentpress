@@ -4,11 +4,10 @@ import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
 import { authenticatedFetch } from './authenticated-fetch';
-import { clearLiveRunContent, updateLiveRunContent, type LiveRunContent } from './agent-streaming';
+import { updateLiveRunContent, type LiveRunContent } from './agent-streaming';
 import { numberValue, parseEventData, stringValue } from './agent-runtime-api';
 import type { RunProjection } from './agent-runtime-contracts';
 import {
-  applyTerminalRunEvent,
   articleReviewChangeFromPayload,
   isTerminalRunEvent,
   type ArticleReviewChange,
@@ -99,17 +98,10 @@ export function useAgentRunStream({
         if (event.event === 'content.delta') return;
         if (isTerminalRunEvent(event.event)) {
           setPanelError(undefined);
-          setProjections((current) =>
-            current.map((projection) =>
-              projection.runId === activeRunId
-                ? applyTerminalRunEvent(projection, event.event)
-                : projection,
-            ),
-          );
-          setLiveContent((current) => clearLiveRunContent(current, activeRunId));
-          setActiveRunId(undefined);
-          stream.abort();
-          void refreshProjection(activeRunId).then(refreshThread, () => refreshThread());
+          // Refresh the durable projection first. Applying terminal state to the
+          // previous parts briefly renders a stale message tree and causes a
+          // visible reorder before the final transcript is available.
+          void sync();
           return;
         }
         const sequence = numberValue(data.sequence);

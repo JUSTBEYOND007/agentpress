@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, CircleAlert, LoaderCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { numberValue, recordValue, stringValue } from '../lib/agentpress-assistant-runtime';
 import type {
@@ -142,11 +142,15 @@ function processSteps(parts: readonly RunPart[]): readonly { id: string; label: 
 function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): React.JSX.Element {
   const active = item.status === 'running' || item.status === 'processing';
   const [open, setOpen] = useState(active);
+  const wasActive = useRef(active);
   useEffect(() => {
     if (active) {
       setOpen(true);
+      wasActive.current = true;
       return;
     }
+    if (!wasActive.current) return;
+    wasActive.current = false;
     const timer = window.setTimeout(() => {
       setOpen(false);
     }, 500);
