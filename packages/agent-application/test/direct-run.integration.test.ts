@@ -373,6 +373,43 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(published.some((event) => !event.durable)).toBe(true);
   });
 
+  it('preserves a provider failure instead of relabeling it as a protocol failure', async () => {
+    const providerFailureService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () =>
+          PiRuntimeAdapter.forTests({
+            responses: [
+              fauxAssistantMessage([], {
+                stopReason: 'error',
+                errorMessage: '503: model_not_found',
+              }),
+            ],
+          }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await providerFailureService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: '你好',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(providerFailureService.execute(run.runId)).resolves.toMatchObject({
+      status: 'failed',
+    });
+    const [storedRun] = await connection.db
+      .select({ finalOutcome: agentRuns.finalOutcome })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, run.runId));
+    expect(storedRun?.finalOutcome).toMatchObject({
+      error: { code: 'provider_error', message: '503: model_not_found' },
+    });
+  });
+
   it('rejects unauthorized, missing, and stale context bindings before creating a Run', async () => {
     const otherWorkspaceId = randomUUID();
     const otherArticleId = randomUUID();

@@ -174,6 +174,14 @@ export class AgentApplicationError extends Error {
   }
 }
 
+/** The command lost its durable worker lease before settlement could commit. */
+export class StaleWorkerSettlementError extends Error {
+  public constructor(runId: string) {
+    super(`Agent Run ${runId} rejected stale worker settlement during recovery`);
+    this.name = 'StaleWorkerSettlementError';
+  }
+}
+
 export type EnqueueRunDirectiveResult = {
   readonly directiveId: string;
   readonly runId: string;

@@ -7,6 +7,7 @@ import {
   AGENT_RUN_COMMAND_TOPIC,
   AGENT_TASK_COMMAND_TOPIC,
   DirectRunService,
+  StaleWorkerSettlementError,
   type LiveRunEvent,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
@@ -330,6 +331,21 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       );
       this.logger.info({ runId: command.runId, status: result.status }, 'Agent Run settled');
     } catch (error) {
+      if (isStaleWorkerSettlementError(error)) {
+        const inbox = await acknowledgeRunCommand(
+          this.database.db,
+          command.messageId,
+          topic,
+          partition,
+          offset,
+          rawPayload,
+        );
+        this.logger.warn(
+          { runId: command.runId, inbox },
+          'Acknowledged Agent Run command after losing its worker lease',
+        );
+        return;
+      }
       this.logger.error({ err: error, runId: command.runId }, 'Agent Run execution failed');
       throw error;
     } finally {
@@ -470,6 +486,34 @@ export class WorkerLifecycle implements OnModuleInit, OnApplicationShutdown {
       );
     }
   }
+}
+
+export function isStaleWorkerSettlementError(error: unknown): error is StaleWorkerSettlementError {
+  return error instanceof StaleWorkerSettlementError;
+}
+
+async function acknowledgeRunCommand(
+  database: Parameters<typeof processInboxMessage>[0],
+  messageId: string,
+  topic: string,
+  partition: number,
+  offset: number,
+  rawPayload: string | undefined,
+): Promise<'processed' | 'duplicate'> {
+  return processInboxMessage(
+    database,
+    {
+      consumerGroup: CONSUMER_GROUP,
+      messageId,
+      topic,
+      partition,
+      offset,
+      payloadHash: createHash('sha256')
+        .update(rawPayload ?? '')
+        .digest('hex'),
+    },
+    () => Promise.resolve(),
+  );
 }
 
 type RunCommand = {

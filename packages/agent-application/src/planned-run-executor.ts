@@ -507,6 +507,7 @@ export class PlannedRunExecutor {
     if (await this.actionProposals.getBySourceRun(runId)) return { kind: 'direct', result };
     if (submittedPlan) return { kind: 'plan', plan: submittedPlan, result };
     if (requestedQuestion) return { kind: 'question', ...requestedQuestion };
+    if (result.status === 'failed') return { kind: 'direct', result };
     if (result.status === 'completed' && findAssistant(result)) return { kind: 'direct', result };
     return {
       kind: 'direct',

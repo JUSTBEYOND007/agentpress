@@ -46,6 +46,7 @@ import { decideToolReplay, resolveToolReplaySafety } from '@agentpress/tool-runt
 import {
   AGENT_RUN_COMMAND_TOPIC,
   AgentApplicationError,
+  StaleWorkerSettlementError,
   type AgentRuntimeFactory,
   type CreateDirectRunInput,
   type CreateDirectRunResult,
@@ -1627,7 +1628,7 @@ export class DirectRunService {
       const events: DurableRunEvent[] = [];
 
       if (currentStatus === 'recovering' || currentStatus === 'interrupted') {
-        throw new Error(`Agent Run ${runId} rejected stale worker settlement during recovery`);
+        throw new StaleWorkerSettlementError(runId);
       }
 
       if (terminalOutcome === 'completed' && currentStatus === 'running') {
