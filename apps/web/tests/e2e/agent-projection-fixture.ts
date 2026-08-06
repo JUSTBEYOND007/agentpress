@@ -10,8 +10,15 @@ export const fixtureArtifactId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
 type FixtureState = 'idle' | 'running' | 'completed';
 
-export function installAgentProjectionFixture(page: Page): { getState: () => FixtureState } {
+export function installAgentProjectionFixture(page: Page): {
+  complete: () => void;
+  getState: () => FixtureState;
+} {
   let state: FixtureState = 'running';
+  let completeStream = (): void => undefined;
+  const streamCompletion = new Promise<void>((resolve) => {
+    completeStream = resolve;
+  });
 
   void page.route('**/v1/health/agent-runtime', async (route) => {
     await json(route, { provider: 'ark', ready: true, missing: [] });
@@ -101,6 +108,7 @@ export function installAgentProjectionFixture(page: Page): { getState: () => Fix
   });
 
   void page.route(`**/v1/runs/${fixtureRunId}/events`, async (route) => {
+    await streamCompletion;
     state = 'completed';
     await route.fulfill({
       status: 200,
@@ -136,7 +144,7 @@ export function installAgentProjectionFixture(page: Page): { getState: () => Fix
     });
   });
 
-  return { getState: () => state };
+  return { complete: completeStream, getState: () => state };
 }
 
 function projection(status: 'running' | 'completed', rootMessageId = fixtureUserMessageId) {

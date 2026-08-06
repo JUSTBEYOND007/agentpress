@@ -182,7 +182,9 @@ function isConsumerHiddenDiagnostic(type: RunPart['type']): boolean {
 }
 
 function isProcessPart(part: RunPart, terminal: boolean): boolean {
-  if (isConsumerHiddenDiagnostic(part.type)) return true;
+  if (part.type === 'reasoning') return true;
+  if (part.type === 'context' || part.type === 'plan' || part.type === 'progress' || part.type === 'usage')
+    return true;
   if (part.type !== 'activity') return false;
   if (terminal && /\.(started|executing)$/u.test(part.status)) return false;
   return !/\.(failed|cancelled|denied|expired|interrupted)$/u.test(part.status);
@@ -405,19 +407,29 @@ function lifecycleStagesForPart(part: RunPart, label: string): readonly Consumer
   const raw = Array.isArray(part.payload.lifecycleStages)
     ? part.payload.lifecycleStages
     : [{ status: part.status, eventAt: part.payload.eventAt }];
-  return raw.flatMap((value, index) => {
+  const stages = raw.flatMap((value, index) => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
-    const status = stringProperty(value as Record<string, unknown>, 'status');
+    const record = value as Record<string, unknown>;
+    const status = stringProperty(record, 'status');
     if (!status) return [];
+    const explicitLabel = stringProperty(record, 'label');
     return [
       {
         id: `${part.id}:${String(index)}`,
-        label: stageLabel(label, status),
+        label: explicitLabel ?? stageLabel(label, status),
         status: executionStatus(status),
       },
     ];
   });
+  const meaningful = stages.filter(
+    (stage) => stage.label !== label && !genericStageLabels.has(stage.label),
+  );
+  return meaningful.filter(
+    (stage, index) => index === 0 || stage.label !== meaningful[index - 1]?.label,
+  );
 }
+
+const genericStageLabels = new Set(['已开始', '结果已生成', '未完成']);
 
 function stageLabel(label: string, status: string): string {
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return '结果已生成';

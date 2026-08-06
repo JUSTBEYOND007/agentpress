@@ -48,21 +48,6 @@
   font-size: 10px;
 }
 
-.run-process-steps {
-  display: grid;
-  gap: 6px;
-  margin: 2px 0 6px;
-  padding: 2px 0 2px 18px;
-  list-style: none;
-}
-
-.run-process-steps li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #666762;
-}
-
 .run-process-items {
   display: grid;
   gap: 5px;

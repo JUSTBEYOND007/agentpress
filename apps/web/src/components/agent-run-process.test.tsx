@@ -77,7 +77,7 @@ describe('Agent run process disclosure', () => {
     expect(markup).not.toContain('<details open');
   });
 
-  it('shows only one current status line before details for an active run', () => {
+  it('keeps the active pipeline open while the run is streaming', () => {
     const markup = renderToStaticMarkup(
       <AgentRunProcess
         data={{
@@ -85,13 +85,81 @@ describe('Agent run process disclosure', () => {
           status: 'running',
           terminal: false,
           durationMs: 0,
+          items: [
+            {
+              kind: 'pipeline',
+              id: 'tool-1',
+              label: '生成修改稿',
+              status: 'processing',
+              durationMs: 0,
+              sequence: 1,
+              stages: [],
+            },
+          ],
           parts: [activity('activity-1', 1, 'tool.executing', 'article.propose_edits', 'call-1')],
         }}
       />,
     );
 
-    expect(markup.match(/正在生成修改稿/gu)).toHaveLength(1);
-    expect(markup).not.toContain('<details');
+    expect(markup.match(/生成修改稿/gu)).toHaveLength(2);
+    expect(markup).toContain('<details class="run-process-details" open="">');
+    expect(markup).toContain('进行中');
+  });
+
+  it('does not expose generic lifecycle labels as duplicate pipeline stages', () => {
+    const markup = renderToStaticMarkup(
+      <AgentRunProcess
+        data={{
+          runId: 'run-1',
+          status: 'completed',
+          terminal: true,
+          durationMs: 0,
+          items: [
+            {
+              kind: 'pipeline',
+              id: 'tool-1',
+              label: '生成修改稿',
+              status: 'completed',
+              durationMs: 1000,
+              sequence: 1,
+              stages: [],
+              result: { summary: '已生成修改' },
+            },
+          ],
+          parts: [],
+        }}
+      />,
+    );
+    expect(markup.match(/生成修改稿/gu)).toHaveLength(1);
+    expect(markup).toContain('已生成修改');
+    expect(markup).not.toContain('已开始');
+    expect(markup).not.toContain('结果已生成');
+  });
+
+  it('keeps active reasoning in the same open process disclosure', () => {
+    const markup = renderToStaticMarkup(
+      <AgentRunProcess
+        data={{
+          runId: 'run-1',
+          status: 'planning',
+          terminal: false,
+          durationMs: 0,
+          parts: [
+            {
+              id: 'reasoning-1',
+              runId: 'run-1',
+              sequence: 1,
+              type: 'reasoning',
+              status: 'run.planning',
+              payload: {},
+            },
+          ],
+          items: [],
+        }}
+      />,
+    );
+    expect(markup).toContain('<details class="run-process-details" open="">');
+    expect(markup).toContain('正在思考');
   });
 
   it('groups consecutive utility operations while keeping pipeline details available', () => {

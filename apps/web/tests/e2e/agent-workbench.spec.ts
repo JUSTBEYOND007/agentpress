@@ -33,14 +33,19 @@ test.describe('Agent workbench browser contracts', () => {
     });
     await page.reload();
     await openAgentWorkbench(page);
-    await expect(page.locator('.message-markdown').last()).toContainText('流式标题');
     const process = page.locator('.run-process-details').first();
     await expect(process).toBeVisible();
-    await expect(process.locator('.run-process-steps')).toBeHidden();
+    await expect(process).toHaveAttribute('open', '');
+    await expect(process.locator('.run-process-items')).toBeVisible();
+    await expect(process).toContainText('进行中');
+    fixture.complete();
+    await expect(page.locator('.message-markdown').last()).toContainText('流式标题');
+    await expect(process).not.toHaveAttribute('open', '');
     await process.locator('summary').click();
-    await expect(process.locator('.run-process-steps > li')).toHaveCount(2);
+    await expect(process.locator('.run-process-items')).toBeVisible();
     await expect(process).toContainText('搜索资料');
-    await expect(process).toContainText('生成 Markdown 内容');
+    await expect(process).not.toContainText('已开始');
+    await expect(process).not.toContainText('结果已生成');
     await expect(page.getByRole('complementary', { name: 'Agent 工作台' })).not.toContainText(
       'gpt-5.6-sol',
     );
@@ -137,7 +142,7 @@ test.describe('Agent workbench browser contracts', () => {
     await timeline.locator('summary').click();
     const after = await viewport.evaluate((node) => node.scrollTop);
     expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
-    await expect(timeline.locator('.run-process-steps')).toBeVisible();
+    await expect(timeline.locator('.run-process-items')).toBeVisible();
 
     await viewport.evaluate((node) => {
       node.scrollTop = node.scrollHeight;

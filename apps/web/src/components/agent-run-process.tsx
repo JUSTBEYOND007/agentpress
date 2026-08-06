@@ -23,11 +23,29 @@ const toolLabels: Readonly<Record<string, string>> = {
 };
 
 export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX.Element | null {
-  const [open, setOpen] = useState(false);
   const process = parseProcessPresentation(data);
+  const [open, setOpen] = useState(() => Boolean(process && !process.terminal));
+  const previousTerminal = useRef(Boolean(process?.terminal));
+  useEffect(() => {
+    if (!process) return;
+    if (!process.terminal) {
+      previousTerminal.current = false;
+      setOpen(true);
+      return;
+    }
+    if (previousTerminal.current) return;
+    previousTerminal.current = true;
+    const timer = window.setTimeout(() => {
+      setOpen(false);
+    }, 500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [process?.terminal]);
   if (!process) return null;
   const view = processSummary(process);
-  if (!process.terminal) {
+  const reasoningParts = process.parts.filter((part) => part.type === 'reasoning');
+  if (!process.terminal && process.items.length === 0 && reasoningParts.length === 0) {
     return (
       <div className="run-process-live">
         <div className="run-process-status">
@@ -38,7 +56,7 @@ export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX
       </div>
     );
   }
-  if (process.items.length === 0) {
+  if (process.terminal && process.items.length === 0) {
     const reasoning = process.parts.findLast((part) => part.type === 'reasoning');
     return reasoning ? <ReasoningPart part={reasoning} embedded /> : null;
   }
@@ -58,7 +76,10 @@ export function AgentRunProcess({ data }: { readonly data: unknown }): React.JSX
         ) : null}
         <ChevronDown aria-hidden="true" size={13} />
       </summary>
-      <div className="run-process-items">
+      <div className="run-process-items" aria-live={process.terminal ? undefined : 'polite'}>
+        {reasoningParts.map((part) => (
+          <ReasoningPart embedded key={part.id} part={part} />
+        ))}
         {process.items.map((item) => (
           <ExecutionItemView item={item} key={item.id} />
         ))}
