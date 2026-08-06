@@ -64,9 +64,17 @@ export function assembleContext(input: {
   const manifest = {
     maxInputTokens,
     reservedOutputTokens,
-    included: included.map(({ id, kind, revision }) =>
-      revision ? { id, kind, revision } : { id, kind },
-    ),
+    included: included.map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      ...(item.revision ? { revision: item.revision } : {}),
+      ...(item.origin ? { origin: item.origin } : {}),
+      ...(item.owner ? { owner: item.owner } : {}),
+      trust: item.trust ?? (item.trusted ? 'trusted' : 'untrusted'),
+      tokenCount: item.tokenCount,
+      ...(item.selectionReason ? { selectionReason: item.selectionReason } : {}),
+      ...(item.truncated === undefined ? {} : { truncated: item.truncated }),
+    })),
     dropped,
     tokenCount: included.reduce((sum, item) => sum + item.tokenCount, 0),
     skillVersions: input.skillVersions ?? {},

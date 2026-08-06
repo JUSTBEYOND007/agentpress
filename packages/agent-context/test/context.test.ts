@@ -74,6 +74,9 @@ describe('Agent context governance', () => {
     });
     expect(pack.manifest.dropped).toContainEqual({ id: 'pending', reason: 'unaccepted_memory' });
     expect(pack.content).toContain('trust="untrusted"');
+    expect(pack.manifest.included).toContainEqual(
+      expect.objectContaining({ id: 'web', trust: 'untrusted', tokenCount: 40 }),
+    );
     expect(() =>
       assembleContext({
         contextWindow: 100,
@@ -90,6 +93,40 @@ describe('Agent context governance', () => {
         ],
       }),
     ).toThrow(/Required context/);
+  });
+
+  it('preserves typed provenance and selection metadata in the frozen manifest', () => {
+    const pack = assembleContext({
+      contextWindow: 1_000,
+      acceptedMemoryIds: new Set(),
+      candidates: [
+        {
+          id: 'skill:writing',
+          kind: 'policy',
+          content: 'Use short paragraphs',
+          tokenCount: 12,
+          score: 1,
+          trusted: false,
+          trust: 'untrusted',
+          origin: 'skill',
+          owner: 'run-context',
+          revision: 'skill@1:hash',
+          selectionReason: 'explicit-user-selection',
+          truncated: false,
+        },
+      ],
+    });
+    expect(pack.manifest.included).toContainEqual({
+      id: 'skill:writing',
+      kind: 'policy',
+      revision: 'skill@1:hash',
+      origin: 'skill',
+      owner: 'run-context',
+      trust: 'untrusted',
+      tokenCount: 12,
+      selectionReason: 'explicit-user-selection',
+      truncated: false,
+    });
   });
 
   it('pins the effective conversation compaction in the immutable manifest', () => {

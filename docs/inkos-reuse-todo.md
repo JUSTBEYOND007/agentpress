@@ -263,14 +263,14 @@ Evidence 和 token budget 实现。
 
 TODO：
 
-- [ ] 建立 InkOS selection/filter/budget/validation 与 AgentPress Context Pack 的差距表，只补真实缺口。
-- [ ] 每个上下文项携带 typed origin、owner、revision/hash、trust、token cost、选择原因和截断状态。
-- [ ] 用户当前请求、宿主上下文、历史对话、Evidence、Attachment、Skill 和工具输出保持不同来源，
+- [x] 建立 InkOS selection/filter/budget/validation 与 AgentPress Context Pack 的差距表，只补真实缺口。
+- [x] 每个上下文项携带 typed origin、owner、revision/hash、trust、token cost、选择原因和截断状态。
+- [x] 用户当前请求、宿主上下文、历史对话、Evidence、Attachment、Skill 和工具输出保持不同来源，
       禁止把注入上下文伪装成新的 user message。
-- [ ] Context Pack 在 Run/Task 开始时冻结；运行中的 Composer 改动不能回写历史 Context。
-- [ ] 预算策略必须确定性排序并记录被丢弃项；权限和 trust 校验先于 token 裁剪。
-- [ ] 外部网页、附件、Skill、MCP 和 Tool Result 均为 untrusted，不能覆盖 system policy 或 capability。
-- [ ] 测试覆盖超预算、同名冲突、陈旧 revision、跨 workspace 引用、恶意指令、空上下文和恢复 replay。
+- [x] Context Pack 在 Run/Task 开始时冻结；运行中的 Composer 改动不能回写历史 Context。
+- [x] 预算策略必须确定性排序并记录被丢弃项；权限和 trust 校验先于 token 裁剪。
+- [x] 外部网页、附件、Skill、MCP 和 Tool Result 均为 untrusted，不能覆盖 system policy 或 capability。
+- [x] 测试覆盖超预算、同名冲突、陈旧 revision、跨 workspace 引用、恶意指令、空上下文和恢复 replay。
 
 ## P1：Skill 发现、选择与资源加载
 

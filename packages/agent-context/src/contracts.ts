@@ -5,6 +5,16 @@ export type ContextKind =
   | 'attachment'
   | 'evidence'
   | 'memory';
+export type ContextOrigin =
+  | 'system_policy'
+  | 'current_request'
+  | 'host_context'
+  | 'conversation_history'
+  | 'evidence'
+  | 'attachment'
+  | 'skill'
+  | 'tool_output'
+  | 'memory';
 export type ContextCandidate = {
   readonly id: string;
   readonly kind: ContextKind;
@@ -14,11 +24,26 @@ export type ContextCandidate = {
   readonly trusted: boolean;
   readonly required?: boolean;
   readonly revision?: string;
+  readonly origin?: ContextOrigin;
+  readonly owner?: string;
+  readonly trust?: 'trusted' | 'untrusted';
+  readonly selectionReason?: string;
+  readonly truncated?: boolean;
 };
 export type ContextManifest = {
   readonly maxInputTokens: number;
   readonly reservedOutputTokens: number;
-  readonly included: readonly { id: string; kind: ContextKind; revision?: string }[];
+  readonly included: readonly {
+    id: string;
+    kind: ContextKind;
+    revision?: string;
+    origin?: ContextOrigin;
+    owner?: string;
+    trust?: 'trusted' | 'untrusted';
+    tokenCount?: number;
+    selectionReason?: string;
+    truncated?: boolean;
+  }[];
   readonly dropped: readonly { id: string; reason: 'budget' | 'unaccepted_memory' }[];
   readonly tokenCount: number;
   readonly skillVersions: Readonly<Record<string, string>>;

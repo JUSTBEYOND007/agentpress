@@ -10,6 +10,7 @@ import {
   promptSnapshotsEqual,
   rankRelevantMemory,
   type ContextCandidate,
+  type ContextOrigin,
   type ContextPack,
   type SkillDefinition,
 } from '@agentpress/agent-context';
@@ -523,6 +524,7 @@ function contextCandidate(
   score: number,
   policy: { readonly required: boolean; readonly trusted: boolean },
 ): ContextCandidate {
+  const origin = contextOrigin(kind, id);
   return {
     id,
     kind,
@@ -531,8 +533,24 @@ function contextCandidate(
     tokenCount: Math.max(1, Math.ceil(Buffer.byteLength(content, 'utf8') / 4)),
     score,
     trusted: policy.trusted,
+    trust: policy.trusted ? 'trusted' : 'untrusted',
+    origin,
+    owner: 'run-context',
+    selectionReason: policy.required ? 'required-host-binding' : 'deterministic-relevance',
+    truncated: false,
     required: policy.required,
   };
+}
+
+function contextOrigin(kind: ContextCandidate['kind'], id: string): ContextOrigin {
+  if (id.startsWith('skill:') || id.startsWith('skill-resource:')) return 'skill';
+  if (id.startsWith('evidence:')) return 'evidence';
+  if (id.startsWith('attachment:')) return 'attachment';
+  if (id.startsWith('conversation-')) return 'conversation_history';
+  if (id.startsWith('article:')) return 'host_context';
+  if (kind === 'memory') return 'memory';
+  if (kind === 'policy') return 'system_policy';
+  return 'host_context';
 }
 
 function escapeUntrustedContext(value: string): string {

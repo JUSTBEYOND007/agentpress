@@ -117,6 +117,15 @@ acyclic dependency validation, Specialist recursion/depth policy, provider concu
 budget, lease/fencing, cancellation, and late-result tests remain the enforcement points for their
 respective concerns. The new limits are host policy, not model-provided values.
 
+Context governance reuses `packages/agent-context/src/context-assembler.ts` and the existing
+PostgreSQL Context Pack preparation path. Its deterministic kind/score ordering, required-item
+authorization, accepted-memory filter, fixed input/output budget and dropped-item manifest were
+already local behavior. The real gap was provenance detail: `ContextCandidate` and frozen manifest
+entries now carry typed `origin`, `owner`, `revision`, `trust`, token cost, selection reason, and
+truncation state. Run context still freezes article revisions, Evidence, attachments, Skills,
+memory retrieval version and compaction before execution; current request remains a separate typed
+runtime turn. Untrusted content is escaped and never becomes a capability or a new user message.
+
 Review/revision behavior was audited at the same fixed InkOS commit in
 `packages/core/src/pipeline/chapter-review-cycle.ts` and
 `packages/core/src/__tests__/chapter-review-cycle.test.ts`. The reusable contract is the order
