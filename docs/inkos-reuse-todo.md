@@ -56,6 +56,9 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       通过。需要 PostgreSQL 的 49 个集成测试仍必须在后续数据库门禁中运行。
 - [ ] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
       `utils.ts`、`helpers.ts` 或重新导出文件规避行数检查。
+      Context 来源装载已从 `RunContextService` 拆到独立 `run-context-sources.ts`，主服务降至 481 行；
+      仓库级门禁仍需处理 `pi-runtime-adapter.ts`、`tool-call-service.ts`、`worker-lifecycle.ts` 和
+      `schema-compatibility.ts` 等既有超限 owner，不能以白名单掩盖。
 - [ ] 一个模块只能拥有一种状态转换；跨模块协调通过显式 Port、Command、Event 或 typed result，
       禁止共享可变上下文对象和隐式回调链。
 - [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
@@ -63,6 +66,23 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       不把所有 RunPart 分支重新集中到单个消息组件。
 - [ ] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
       先减少职责和净行数，不允许以“后续再拆分”放行。
+
+架构门禁实施顺序（2026-08-07 只读审计）：
+
+- [ ] 先拆分核心 Agent 超限 owner：`pi-runtime-adapter.ts` 954 行、`tool-call-service.ts` 760 行、
+      `worker-lifecycle.ts` 629 行、`schema-compatibility.ts` 605 行；文章变更链同时处理
+      `proposal-service.ts` 791 行。按 protocol conversion、execution、settlement、lifecycle、provider
+      compatibility 等真实职责拆分，不创建笼统 helpers。
+- [ ] 将现有 Web walker 提升为根级文件长度命令，为 Agent-facing TS/TSX 建立 500 行硬门禁；普通 Web
+      源码的 1000 行规则独立保留。不得对白名单文件、文件名或目录名做例外来隐藏新增职责。
+- [ ] 固定并复用 `dependency-cruiser@18.1.1`（MIT）检查源码循环、Workspace deep import 和 Domain
+      边界；不自行实现 import parser 或图算法。当前只读审计未发现 Workspace package 环、deep import，
+      且 `@agentpress/domain` 无外部依赖，但尚无自动守护。
+- [ ] 固定并复用 `publint@0.3.23`（MIT）验证 20 个 package 的 `exports/main/types/files` 和构建产物；
+      若公共 API 需要防止意外增长，再使用 `@microsoft/api-extractor@7.58.12`（MIT）生成可审查的 API
+      report，不用手写 barrel diff，也不用 Knip 代替 API 合同。
+- [ ] 新增根 `check:architecture` 聚合上述门禁，并接入根 `pnpm check`；在 CI 中只保留这个统一入口，
+      避免 Web 局部检查被误报为全仓通过。
 
 建议本地所有权：
 
@@ -239,6 +259,12 @@ InkOS 证据起点：
 
 TODO：
 
+现状审计：AgentPress 已有 PostgreSQL Checkpoint、Run/Task lease fencing、ToolCall operation key、
+`decideToolReplay`、`outcome_unknown` 和 `completed_with_degradation`，因此不得创建第二套 Recovery
+状态机。InkOS 可复用的真实缺口是“仅重试 settlement、冻结已验证事实、恢复候选重新校验、结构化列出
+降级保留/缺失项”。实现应落在独立 application policy/service；`RunRecoveryService` 只保留 Run/Tool
+恢复编排，Article/Evidence/Artifact 校验继续调用各自现有 owner。
+
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
 - [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
@@ -357,16 +383,19 @@ InkOS 证据起点：
 
 现有完成项继续以 `docs/inkos-web-agent-alignment.md` 为事实，不重复实现。
 
-- [ ] 每次新增 domain part 前先扩展稳定 RunEvent -> RunPart projector，再添加 renderer；Web 不从文案、
+- [x] 每次新增 domain part 前先扩展稳定 RunEvent -> RunPart projector，再添加 renderer；Web 不从文案、
       timer 或 tool 名推断领域状态。
-- [ ] Product outcome（Research Artifact、Article Proposal、可打开结果）显示在 pipeline/log 前面。
-- [ ] active pipeline 自动展开，完成后折叠；摘要、耗时和终态保持可见。用户手动展开状态不能被 timer 抢夺。
-- [ ] 连续低价值工具操作按语义分组；审批、Ask User、Evidence、Article Change、Artifact、Warning 和
+- [x] Product outcome（Research Artifact、Article Proposal、可打开结果）显示在 pipeline/log 前面。
+- [x] active pipeline 自动展开，完成后折叠；摘要、耗时和终态保持可见。用户手动展开状态不能被 timer 抢夺。
+- [x] 连续低价值工具操作按语义分组；审批、Ask User、Evidence、Article Change、Artifact、Warning 和
       Recovery 不能被吞进普通工具组。
-- [ ] 原始结果和日志默认折叠并脱敏；错误显示可操作的公共信息，stack、credential 和私有 thinking 不投影。
-- [ ] 复用 assistant-ui、Streamdown、Lucide 和现有 typed renderer，不复制 InkOS React 组件。
-- [ ] Playwright 覆盖 streaming、自动折叠、用户手动展开、长结果、部分失败、恢复 replay、桌面/移动端
+- [x] 原始结果和日志默认折叠并脱敏；错误显示可操作的公共信息，stack、credential 和私有 thinking 不投影。
+- [x] 复用 assistant-ui、Streamdown、Lucide 和现有 typed renderer，不复制 InkOS React 组件。
+- [x] Playwright 覆盖 streaming、自动折叠、用户手动展开、长结果、部分失败、恢复 replay、桌面/移动端
       溢出和无重叠；截图之外还要断言真实交互和投影事实。
+
+以上完成证据集中记录在 `docs/inkos-web-agent-alignment.md`：RunEvent projector、typed renderer、
+timeline/outcome 顺序、折叠控制、错误脱敏和桌面/移动 Playwright 场景均已有测试与历史验收记录。
 
 ## P2：端到端写作产品行为
 
@@ -382,14 +411,18 @@ InkOS 证据起点：
 
 ## 明确不采用
 
-- [ ] 不采用 InkOS file/JSONL session、book truth file 或本地目录作为 AgentPress 事实源。
-- [ ] 不采用 InkOS `@mariozechner/pi-agent-core@0.67.1` 和 `pi-ai@0.67.1` 集成。
-- [ ] 不采用关键词 matcher 作为意图、权限、写作继续或终态判断。
-- [ ] 不向普通聊天 turn 暴露完整文章修改、封面、导入、truth-file 和 `sub_agent` 工具表。
-- [ ] 不把注入的文章/书籍上下文伪装为新的用户消息。
-- [ ] 不复制 InkOS React 组件、默认展开的原始结果、TUI/desktop 偏好或正则 HTML 抽取。
-- [ ] 不允许 Specialist、Skill、MCP 或网页结果绕过 Tool Registry、审批、Proposal 和 settlement。
-- [ ] 不为了表面一致性创建第二套 Plan、Task、Artifact、Evidence、Skill、MCP 或 Transcript 模型。
+- [x] 不采用 InkOS file/JSONL session、book truth file 或本地目录作为 AgentPress 事实源。
+- [x] 不采用 InkOS `@mariozechner/pi-agent-core@0.67.1` 和 `pi-ai@0.67.1` 集成。
+- [x] 不采用关键词 matcher 作为意图、权限、写作继续或终态判断。
+- [x] 不向普通聊天 turn 暴露完整文章修改、封面、导入、truth-file 和 `sub_agent` 工具表。
+- [x] 不把注入的文章/书籍上下文伪装为新的用户消息。
+- [x] 不复制 InkOS React 组件、默认展开的原始结果、TUI/desktop 偏好或正则 HTML 抽取。
+- [x] 不允许 Specialist、Skill、MCP 或网页结果绕过 Tool Registry、审批、Proposal 和 settlement。
+- [x] 不为了表面一致性创建第二套 Plan、Task、Artifact、Evidence、Skill、MCP 或 Transcript 模型。
+
+这些排除项由当前依赖图、PostgreSQL schema、Action/Tool capability、Context Pack、MCP adapter、
+`parse5` 抽取和 Web alignment 实现共同证明；详细采用/拒绝依据见
+`docs/references/pi-ecosystem.md` 的 InkOS adoption map 与 deliberate exclusions。
 
 ## 完成定义
 
