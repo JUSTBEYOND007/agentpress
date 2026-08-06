@@ -57,8 +57,9 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
 - [ ] 新增 Agent-facing TypeScript/TSX 文件控制在 500 行以内；目标是单一领域职责，而不是通过
       `utils.ts`、`helpers.ts` 或重新导出文件规避行数检查。
       Context 来源装载已从 `RunContextService` 拆到独立 `run-context-sources.ts`，主服务降至 481 行；
-      仓库级门禁仍需处理 `pi-runtime-adapter.ts`、`tool-call-service.ts`、`worker-lifecycle.ts` 和
-      `schema-compatibility.ts` 等既有超限 owner，不能以白名单掩盖。
+      `schema-compatibility.ts` 已拆为 258/357 行，`pi-runtime-adapter.ts` 已拆为 487/493 行，
+      `worker-lifecycle.ts` 已降至 500 行。仓库级门禁仍需处理 `tool-call-service.ts` 和
+      `proposal-service.ts` 两个超限 owner，不能以白名单掩盖。
 - [ ] 一个模块只能拥有一种状态转换；跨模块协调通过显式 Port、Command、Event 或 typed result，
       禁止共享可变上下文对象和隐式回调链。
 - [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
@@ -75,12 +76,13 @@ Web 展示层已经完成的对齐项见 `docs/inkos-web-agent-alignment.md`。�
       compatibility 等真实职责拆分，不创建笼统 helpers。
 - [ ] 将现有 Web walker 提升为根级文件长度命令，为 Agent-facing TS/TSX 建立 500 行硬门禁；普通 Web
       源码的 1000 行规则独立保留。不得对白名单文件、文件名或目录名做例外来隐藏新增职责。
-- [ ] 固定并复用 `dependency-cruiser@18.1.1`（MIT）检查源码循环、Workspace deep import 和 Domain
+- [x] 固定并复用 `dependency-cruiser@18.1.1`（MIT）检查源码循环、Workspace deep import 和 Domain
       边界；不自行实现 import parser 或图算法。当前只读审计未发现 Workspace package 环、deep import，
-      且 `@agentpress/domain` 无外部依赖，但尚无自动守护。
-- [ ] 固定并复用 `publint@0.3.23`（MIT）验证 20 个 package 的 `exports/main/types/files` 和构建产物；
+      且 `@agentpress/domain` 无外部依赖；门禁已巡检 5750 个模块、762 条依赖且无违规。
+- [x] 固定并复用 `publint@0.3.23`（MIT）验证 20 个 package 的 `exports/main/types/files` 和构建产物；
       若公共 API 需要防止意外增长，再使用 `@microsoft/api-extractor@7.58.12`（MIT）生成可审查的 API
-      report，不用手写 barrel diff，也不用 Knip 代替 API 合同。
+      report，不用手写 barrel diff，也不用 Knip 代替 API 合同。当前全部 package 打包表面已通过
+      `publint --strict`；API report 冻结仍随公共 API 稳定化继续实施。
 - [ ] 新增根 `check:architecture` 聚合上述门禁，并接入根 `pnpm check`；在 CI 中只保留这个统一入口，
       避免 Web 局部检查被误报为全仓通过。
 
@@ -265,13 +267,19 @@ TODO：
 降级保留/缺失项”。实现应落在独立 application policy/service；`RunRecoveryService` 只保留 Run/Tool
 恢复编排，Article/Evidence/Artifact 校验继续调用各自现有 owner。
 
+应用契约进度：`recovery-policy.ts` 已限制 settlement 最多重试一次，只允许显式 replay-safe 操作，
+重试后重新执行 validator；失败结果携带 preserved/missing/unverified/nextActions，已验证事实不会被
+重试结果覆盖。提交后断线可由 typed `SettlementOutcomeUnknownError` 保持为独立
+`outcome_unknown`，不降格为普通失败或 degraded。5 个纯策略测试已通过；接入 PostgreSQL store、
+Article/Evidence/Artifact validator 和故障注入矩阵前，本节其余集成项仍保持未完成。
+
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
 - [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
 - [ ] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分。
 - [ ] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
 - [ ] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
-- [ ] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。
+- [x] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。
 - [ ] 测试覆盖 provider timeout、worker crash、数据库提交前后断线、重复恢复、部分 Artifact、失效引用、
       stale worker 和恢复期间用户取消。
 
@@ -357,8 +365,10 @@ TODO：
 - [x] 外部内容始终为 untrusted；网页中的指令不能调用工具、改变 Skill、提升权限或直接写文章。
 - [x] Research Artifact 可打开和继续引用；消息流默认显示“查询数、保留来源数、部分失败、置信度”，
       Evidence chip/来源抽屉承载来源，不默认展开原始页面正文。
-- [ ] 测试覆盖无凭据、零结果、重复 URL、redirect-to-private、超大响应、非文本、部分 fetch 失败、
+- [x] 测试覆盖无凭据、零结果、重复 URL、redirect-to-private、超大响应、非文本、部分 fetch 失败、
       互相冲突来源、恶意网页指令和全部失败的 degraded report。
+      provider-neutral failure policy 与现有 SSRF/fetch 测试合计 22 个测试通过；失败产物继续使用
+      ResearchBrief Schema，恶意网页指令只进入 ignored/partialFailures，不生成 Claim。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
 
 ## P1：MCP 边界
