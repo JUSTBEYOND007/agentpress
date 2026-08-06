@@ -18,7 +18,6 @@ import {
   type AgentPressDatabase,
   type DatabaseTransaction,
   conversationBranches,
-  conversationCompactions,
   conversationMessages,
   conversations,
   enqueueOutboxMessage,
@@ -32,7 +31,7 @@ import {
   toolCalls,
   workspaceMembers,
 } from '@agentpress/database';
-import { and, asc, desc, eq, gte, inArray, lt, lte, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, max, sql } from 'drizzle-orm';
 import { decideToolReplay, resolveToolReplaySafety } from '@agentpress/tool-runtime';
 
 import {
@@ -67,6 +66,8 @@ import {
 } from './conversation-compaction-service.js';
 import { AgentRegistryService } from './agent-registry.js';
 import { RunProjectionService, isTerminalRunStatus } from './run-projection-service.js';
+import { ConversationBranchService } from './conversation-branch-service.js';
+import { decodeRuntimeMessage, encodeRuntimeMessage } from './runtime-message-codec.js';
 
 export { isTerminalRunStatus } from './run-projection-service.js';
 
@@ -94,6 +95,7 @@ export class DirectRunService {
   private readonly compactions: ConversationCompactionService;
   private readonly registry: AgentRegistryService;
   private readonly projections: RunProjectionService;
+  private readonly branches: ConversationBranchService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
     this.now = options.now ?? (() => new Date());
@@ -102,6 +104,7 @@ export class DirectRunService {
     this.artifactQueries = new ArtifactQueryService(options.database);
     this.registry = new AgentRegistryService(options.database);
     this.projections = new RunProjectionService(options.database, this.now);
+    this.branches = new ConversationBranchService(options.database, this.createId);
     this.compactions = new ConversationCompactionService({
       database: options.database,
       runtimeFactory: options.runtimeFactory,
@@ -120,35 +123,7 @@ export class DirectRunService {
     branchId: string,
     userId: string,
   ): Promise<readonly { id: string; role: 'user' | 'assistant'; content: string }[]> {
-    const rows = await this.options.database
-      .select({
-        id: conversationMessages.id,
-        role: conversationMessages.role,
-        content: conversationMessages.content,
-      })
-      .from(conversationMessages)
-      .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
-      .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
-      .innerJoin(
-        workspaceMembers,
-        and(
-          eq(workspaceMembers.workspaceId, conversations.workspaceId),
-          eq(workspaceMembers.userId, userId),
-        ),
-      )
-      .where(
-        and(
-          eq(conversations.id, conversationId),
-          eq(conversationBranches.id, branchId),
-          eq(conversationMessages.stable, true),
-          inArray(conversationMessages.role, ['user', 'assistant']),
-        ),
-      )
-      .orderBy(asc(conversationMessages.sequence));
-    return rows.flatMap((row) => {
-      const message = decodeRuntimeMessage(row.content);
-      return message ? [{ id: row.id, role: message.role, content: message.content }] : [];
-    });
+    return this.branches.listMessages(conversationId, branchId, userId);
   }
 
   public async forkBranch(
@@ -157,129 +132,8 @@ export class DirectRunService {
     messageId: string,
     userId: string,
   ) {
-    return this.options.database.transaction(async (transaction) => {
-      const rows = await transaction
-        .select({
-          workspaceId: conversations.workspaceId,
-          sequence: conversationMessages.sequence,
-        })
-        .from(conversationMessages)
-        .innerJoin(conversationBranches, eq(conversationBranches.id, conversationMessages.branchId))
-        .innerJoin(conversations, eq(conversations.id, conversationBranches.conversationId))
-        .innerJoin(
-          workspaceMembers,
-          and(
-            eq(workspaceMembers.workspaceId, conversations.workspaceId),
-            eq(workspaceMembers.userId, userId),
-          ),
-        )
-        .where(
-          and(
-            eq(conversationMessages.id, messageId),
-            eq(conversationMessages.branchId, branchId),
-            eq(conversations.id, conversationId),
-            eq(conversationMessages.stable, true),
-          ),
-        )
-        .limit(1);
-      const forkPoint = rows[0];
-      if (!forkPoint)
-        throw new AgentApplicationError(
-          'branch_not_found',
-          'Fork message does not exist on an authorized conversation branch',
-        );
-      const messages = await transaction
-        .select()
-        .from(conversationMessages)
-        .where(
-          and(
-            eq(conversationMessages.branchId, branchId),
-            eq(conversationMessages.stable, true),
-            lte(conversationMessages.sequence, forkPoint.sequence),
-          ),
-        )
-        .orderBy(asc(conversationMessages.sequence));
-      const newBranchId = this.createId();
-      const copied = messages.map((message) => ({
-        sourceId: message.id,
-        id: this.createId(),
-        message,
-      }));
-      await transaction.insert(conversationBranches).values({
-        id: newBranchId,
-        conversationId,
-        parentBranchId: branchId,
-        forkedFromMessageId: messageId,
-      });
-      if (copied.length > 0)
-        await transaction.insert(conversationMessages).values(
-          copied.map(({ id, message }) => ({
-            id,
-            branchId: newBranchId,
-            role: message.role,
-            sequence: message.sequence,
-            content: message.content,
-            stable: true,
-            createdAt: message.createdAt,
-          })),
-        );
-      const parentCompactions = await transaction
-        .select()
-        .from(conversationCompactions)
-        .where(
-          and(
-            eq(conversationCompactions.branchId, branchId),
-            eq(conversationCompactions.status, 'completed'),
-            lte(conversationCompactions.firstKeptMessageSequence, forkPoint.sequence),
-          ),
-        )
-        .orderBy(desc(conversationCompactions.version))
-        .limit(1);
-      const parentCompaction = parentCompactions[0];
-      if (parentCompaction && parentCompaction.firstKeptMessageSequence !== null) {
-        const sourceFrom = copied.find(
-          ({ message }) => message.sequence === parentCompaction.sourceFromSequence,
-        );
-        const sourceThrough = copied.find(
-          ({ message }) => message.sequence === parentCompaction.sourceThroughSequence,
-        );
-        const firstKept = copied.find(
-          ({ message }) => message.sequence === parentCompaction.firstKeptMessageSequence,
-        );
-        if (sourceFrom && sourceThrough && firstKept) {
-          await transaction.insert(conversationCompactions).values({
-            id: this.createId(),
-            branchId: newBranchId,
-            version: 1,
-            status: 'completed',
-            reason: 'branch_fork',
-            sourceFromMessageId: sourceFrom.id,
-            sourceFromSequence: parentCompaction.sourceFromSequence,
-            sourceThroughMessageId: sourceThrough.id,
-            sourceThroughSequence: parentCompaction.sourceThroughSequence,
-            firstKeptMessageId: firstKept.id,
-            firstKeptMessageSequence: parentCompaction.firstKeptMessageSequence,
-            summary: parentCompaction.summary,
-            shortSummary: parentCompaction.shortSummary,
-            tokensBefore: parentCompaction.tokensBefore,
-            tokenCount: parentCompaction.tokenCount,
-            preserveData: parentCompaction.preserveData,
-            model: parentCompaction.model,
-            promptVersion: parentCompaction.promptVersion,
-            reserveTokens: parentCompaction.reserveTokens,
-            reserveProvenance: parentCompaction.reserveProvenance,
-          });
-        }
-      }
-      return {
-        branchId: newBranchId,
-        parentBranchId: branchId,
-        forkedFromMessageId: messageId,
-        forkedMessageId: copied.find(({ sourceId }) => sourceId === messageId)?.id,
-      };
-    });
+    return this.branches.fork(conversationId, branchId, messageId, userId);
   }
-
   public async create(input: CreateDirectRunInput): Promise<CreateDirectRunResult> {
     return this.createWithEnvelope(input, {
       version: 1,
@@ -1728,39 +1582,8 @@ async function loadSkillPreselectionCandidates(
   });
 }
 
-function encodeRuntimeMessage(message: RuntimeMessage): readonly unknown[] {
-  return [{ type: 'agentpress.runtime-message', version: 1, message }];
-}
-
 function isRecoverableRunStatus(status: string): status is 'planning' | 'running' | 'interrupted' {
   return status === 'planning' || status === 'running' || status === 'interrupted';
-}
-
-function decodeRuntimeMessage(content: readonly unknown[]): RuntimeMessage | undefined {
-  const envelope = content[0];
-  if (
-    typeof envelope !== 'object' ||
-    envelope === null ||
-    !('type' in envelope) ||
-    envelope.type !== 'agentpress.runtime-message' ||
-    !('message' in envelope)
-  ) {
-    return undefined;
-  }
-  const message = envelope.message;
-  if (
-    typeof message !== 'object' ||
-    message === null ||
-    !('role' in message) ||
-    (message.role !== 'user' && message.role !== 'assistant') ||
-    !('content' in message) ||
-    typeof message.content !== 'string' ||
-    !('timestamp' in message) ||
-    typeof message.timestamp !== 'number'
-  ) {
-    return undefined;
-  }
-  return message as RuntimeMessage;
 }
 
 function findLastAssistantMessage(
