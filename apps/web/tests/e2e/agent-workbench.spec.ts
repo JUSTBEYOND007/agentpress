@@ -11,7 +11,7 @@ test.describe('Agent workbench browser contracts', () => {
   );
 
   test.beforeEach(async ({ page }, testInfo) => {
-    if (testInfo.title.includes('fixture renders streamed Markdown')) return;
+    if (testInfo.title.includes('fixture renders')) return;
     await page.goto('/');
     await openAgentWorkbench(page);
   });
@@ -74,6 +74,33 @@ test.describe('Agent workbench browser contracts', () => {
     await expect(page.locator('.aui-assistant-message')).toHaveCount(1);
     expect(fixture.getState()).toBe('completed');
     expect(fixtureArtifactId).toMatch(/[a-f0-9-]{36}/u);
+  });
+
+  test('fixture renders degraded completion with sanitized failure and recovery facts', async ({
+    page,
+  }) => {
+    const fixture = installAgentProjectionFixture(page, 'degraded');
+    await page.goto('/');
+    await page.evaluate(() => {
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith('agentpress:conversation-selection:')) {
+          window.localStorage.removeItem(key);
+        }
+      }
+    });
+    await page.reload();
+    await openAgentWorkbench(page);
+    fixture.complete();
+    await expect(page.locator('.message-markdown').last()).toContainText('部分完成');
+    await expect(
+      page.locator('.notice-part').filter({ hasText: '已完成，但部分步骤出现警告' }),
+    ).toBeVisible();
+    await expect(page.locator('.run-part.activity-part')).toContainText('搜索资料');
+    await expect(page.locator('.agent-panel')).not.toContainText('api_key=secret');
+    await expect(page.locator('.agent-panel')).not.toContainText('credentials redacted');
+    await expect(page.locator('.message-markdown').last()).toContainText('失败查询待恢复');
+    expect(fixture.getState()).toBe('completed');
   });
 
   test('keeps conversation drafts isolated while switching', async ({ page }, testInfo) => {

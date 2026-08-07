@@ -9,8 +9,12 @@ export const fixtureSiblingUserMessageId = '11111111-1111-4111-8111-111111111111
 export const fixtureArtifactId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
 type FixtureState = 'idle' | 'running' | 'completed';
+export type ProjectionFixtureScenario = 'streaming' | 'degraded';
 
-export function installAgentProjectionFixture(page: Page): {
+export function installAgentProjectionFixture(
+  page: Page,
+  scenario: ProjectionFixtureScenario = 'streaming',
+): {
   complete: () => void;
   getState: () => FixtureState;
 } {
@@ -69,7 +73,15 @@ export function installAgentProjectionFixture(page: Page): {
     async (route) => {
       await json(
         route,
-        state === 'idle' ? [] : [projection(state === 'completed' ? 'completed' : 'running')],
+        state === 'idle'
+          ? []
+          : [
+              projection(
+                state === 'completed' ? scenarioStatus(scenario) : 'running',
+                fixtureUserMessageId,
+                scenario,
+              ),
+            ],
       );
     },
   );
@@ -90,7 +102,7 @@ export function installAgentProjectionFixture(page: Page): {
   void page.route(
     `**/v1/conversations/${fixtureConversationId}/branches/${fixtureSiblingBranchId}/runs`,
     async (route) => {
-      await json(route, [projection('completed', fixtureSiblingUserMessageId)]);
+      await json(route, [projection('completed', fixtureSiblingUserMessageId, scenario)]);
     },
   );
 
@@ -104,12 +116,23 @@ export function installAgentProjectionFixture(page: Page): {
   });
 
   void page.route(`**/v1/runs/${fixtureRunId}/projection`, async (route) => {
-    await json(route, projection(state === 'completed' ? 'completed' : 'running'));
+    await json(
+      route,
+      projection(
+        state === 'completed' ? scenarioStatus(scenario) : 'running',
+        fixtureUserMessageId,
+        scenario,
+      ),
+    );
   });
 
   void page.route(`**/v1/runs/${fixtureRunId}/events`, async (route) => {
     await streamCompletion;
     state = 'completed';
+    const firstDelta =
+      scenario === 'degraded' ? '# 部分完成\\n\\n已保留成功来源，' : '# 流式标题\\n\\n这是第一段。';
+    const secondDelta =
+      scenario === 'degraded' ? '失败查询待恢复。' : '\\n\\n- 增量项目\\n- 第二个项目';
     await route.fulfill({
       status: 200,
       headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
@@ -118,10 +141,10 @@ export function installAgentProjectionFixture(page: Page): {
         'data: {"sequence":1}',
         '',
         'event: content.delta',
-        'data: {"sequence":2,"delta":"# 流式标题\\n\\n这是第一段。"}',
+        `data: {"sequence":2,"delta":"${firstDelta}"}`,
         '',
         'event: content.delta',
-        'data: {"sequence":3,"delta":"\\n\\n- 增量项目\\n- 第二个项目"}',
+        `data: {"sequence":3,"delta":"${secondDelta}"}`,
         '',
         'event: run.completed',
         'data: {"sequence":4}',
@@ -147,8 +170,19 @@ export function installAgentProjectionFixture(page: Page): {
   return { complete: completeStream, getState: () => state };
 }
 
-function projection(status: 'running' | 'completed', rootMessageId = fixtureUserMessageId) {
-  const terminal = status === 'completed';
+function scenarioStatus(
+  scenario: ProjectionFixtureScenario,
+): 'completed' | 'completed_with_degradation' {
+  return scenario === 'degraded' ? 'completed_with_degradation' : 'completed';
+}
+
+function projection(
+  status: 'running' | 'completed' | 'completed_with_degradation',
+  rootMessageId = fixtureUserMessageId,
+  scenario: ProjectionFixtureScenario = 'streaming',
+) {
+  const terminal = status !== 'running';
+  const degraded = scenario === 'degraded';
   return {
     runId: fixtureRunId,
     rootMessageId,
@@ -161,8 +195,18 @@ function projection(status: 'running' | 'completed', rootMessageId = fixtureUser
         runId: fixtureRunId,
         sequence: 5,
         type: 'activity',
-        status: terminal ? 'tool.succeeded' : 'tool.executing',
-        payload: { toolId: 'web.search', toolCallId: 'fixture-search', durationMs: 1200 },
+        status:
+          degraded && terminal ? 'tool.failed' : terminal ? 'tool.succeeded' : 'tool.executing',
+        payload:
+          degraded && terminal
+            ? {
+                toolId: 'web.search',
+                toolCallId: 'fixture-search',
+                failure: { message: 'Provider request failed (credentials redacted)' },
+                server: 'web-research-provider-with-an-intentionally-long-server-name',
+                revision: 'provider-revision-with-an-intentionally-long-value',
+              }
+            : { toolId: 'web.search', toolCallId: 'fixture-search', durationMs: 1200 },
       },
       {
         id: `${fixtureRunId}-activity-2`,
@@ -172,7 +216,8 @@ function projection(status: 'running' | 'completed', rootMessageId = fixtureUser
         status: terminal ? 'task.succeeded' : 'task.started',
         payload: {
           taskId: 'fixture-write',
-          objective: '生成 Markdown 内容',
+          owner: 'editor_with_a_deliberately_long_role_name',
+          objective: '生成 Markdown 内容并保留部分成功结果',
           summary: '内部任务摘要不应作为展示协议',
         },
       },
@@ -201,9 +246,29 @@ function projection(status: 'running' | 'completed', rootMessageId = fixtureUser
         runId: fixtureRunId,
         sequence: 8,
         type: 'recovery',
-        status: 'recovering',
-        payload: {},
+        status: degraded ? 'recovery.pending' : 'recovering',
+        payload: degraded
+          ? {
+              reason: 'provider_timeout',
+              nextAction: '等待恢复后重试',
+              privateError: 'api_key=secret',
+            }
+          : {},
       },
+      ...(degraded
+        ? [
+            {
+              id: `${fixtureRunId}-warning`,
+              runId: fixtureRunId,
+              sequence: 8.5,
+              type: 'warning' as const,
+              status: 'run.completed_with_degradation',
+              payload: {
+                error: { code: 'provider_error', message: 'api_key=secret should never render' },
+              },
+            },
+          ]
+        : []),
       {
         id: `${fixtureRunId}-artifact`,
         runId: fixtureRunId,
@@ -232,7 +297,9 @@ function projection(status: 'running' | 'completed', rootMessageId = fixtureUser
               status: 'text.completed',
               payload: {
                 message: {
-                  content: '# 流式标题\\n\\n这是第一段。\\n\\n- 增量项目\\n- 第二个项目',
+                  content: degraded
+                    ? '# 部分完成\\n\\n已保留成功来源，失败查询待恢复。'
+                    : '# 流式标题\\n\\n这是第一段。\\n\\n- 增量项目\\n- 第二个项目',
                 },
               },
             },

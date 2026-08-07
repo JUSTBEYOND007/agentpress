@@ -46,6 +46,9 @@ tool 名称、timer 或 provider 名称猜状态。
 - [ ] 补齐 partial success、Specialist timeout、预算耗尽、取消、恢复、late result 和 synthesis failure 的
       typed 消费者状态；同一事实在 live SSE 与 PostgreSQL replay 中必须同构。
 - [ ] 用 Playwright 验证桌面/移动端长角色名、长阶段名、并行 Task、折叠、失败、恢复和无重叠。
+      已新增可复用的 `degraded` fixture：部分成功、`completed_with_degradation`、恢复提示、长角色/服务
+      标识和凭据错误脱敏断言；原有 streaming fixture 仍通过。完整浏览器验收还需要刷新有效认证状态后重跑
+      桌面/移动端 degraded 场景，再补 timeout、cancel、budget exhausted 和 synthesis failure。
 
 #### Multi-Agent 证据级 TODO
 
