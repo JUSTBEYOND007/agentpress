@@ -11,9 +11,10 @@ import {
   evidenceRecords,
   settleAgentTaskAttempt,
   taskResults,
+  toolCalls,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import { AGENT_RUN_COMMAND_TOPIC, type RunEventPublisher } from './contracts.js';
 import type { PlannedTaskSpec, SettledTask } from './planned-run-protocol.js';
@@ -212,5 +213,61 @@ export class SpecialistResultStore {
     if (new Set(rows.map(({ id }) => id)).size !== new Set(evidenceIds).size) {
       throw new Error('task_complete references Evidence not produced for this task');
     }
+  }
+
+  public async resolveTaskEvidenceProviderRevision(
+    runId: string,
+    taskId: string,
+    evidenceIds: readonly string[],
+  ): Promise<string> {
+    const requestedIds = [...new Set(evidenceIds)];
+    const rows =
+      requestedIds.length > 0
+        ? await this.options.database
+            .select({
+              evidenceId: evidenceRecords.id,
+              providerRevision: toolCalls.evidenceProviderRevision,
+            })
+            .from(evidenceRecords)
+            .innerJoin(toolCalls, eq(toolCalls.id, evidenceRecords.sourceToolCallId))
+            .where(
+              and(
+                eq(evidenceRecords.runId, runId),
+                eq(evidenceRecords.taskId, taskId),
+                inArray(evidenceRecords.id, requestedIds),
+                eq(toolCalls.runId, runId),
+                eq(toolCalls.taskId, taskId),
+                eq(toolCalls.status, 'succeeded'),
+                isNotNull(toolCalls.evidenceProviderRevision),
+              ),
+            )
+        : await this.options.database
+            .select({
+              evidenceId: toolCalls.id,
+              providerRevision: toolCalls.evidenceProviderRevision,
+            })
+            .from(toolCalls)
+            .where(
+              and(
+                eq(toolCalls.runId, runId),
+                eq(toolCalls.taskId, taskId),
+                isNotNull(toolCalls.evidenceProviderRevision),
+              ),
+            );
+    if (
+      requestedIds.length > 0 &&
+      new Set(rows.map(({ evidenceId }) => evidenceId)).size !== requestedIds.length
+    ) {
+      throw new Error('ResearchBrief sources lack Tool Call provider provenance');
+    }
+    const revisions = new Set(
+      rows.flatMap(({ providerRevision }) => (providerRevision ? [providerRevision] : [])),
+    );
+    if (revisions.size !== 1) {
+      throw new Error('ResearchBrief sources must share one Tool Call provider revision');
+    }
+    const revision = revisions.values().next().value;
+    if (!revision) throw new Error('ResearchBrief provider revision is unavailable');
+    return revision;
   }
 }

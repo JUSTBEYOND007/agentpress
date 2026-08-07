@@ -106,7 +106,7 @@ export class CapabilityCatalog {
 function validateDefinition(
   definition: Pick<
     ToolDefinition,
-    'toolId' | 'version' | 'capabilities' | 'timeoutMs' | 'guidance'
+    'toolId' | 'version' | 'capabilities' | 'timeoutMs' | 'guidance' | 'evidence'
   >,
 ): void {
   if (!definition.toolId || !definition.version || definition.capabilities.length === 0) {
@@ -124,6 +124,17 @@ function validateDefinition(
     ids.add(item.id);
   }
   if (guidance.length > 16) throw new TypeError('Tool guidance is limited to 16 entries');
+  if (definition.evidence) validateEvidenceProvenance(definition.evidence);
+}
+
+function validateEvidenceProvenance(evidence: NonNullable<ToolDefinition['evidence']>): void {
+  if (
+    !evidence.providerRevision.trim() ||
+    evidence.providerRevision !== evidence.providerRevision.trim() ||
+    evidence.providerRevision.length > 160
+  ) {
+    throw new TypeError('Tool evidence provider revision must be 1-160 trimmed characters');
+  }
 }
 
 /** Renders deterministic, descriptive guidance for the model context. */

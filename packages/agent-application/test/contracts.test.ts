@@ -334,7 +334,6 @@ describe('agent application contracts', () => {
         confidence: 0.9,
         queryLog: [{ query: 'verification query', resultCount: 1 }],
         partialFailures: [],
-        providerRevision: 'anysearch-v1',
       },
       evidenceIds: [evidenceId],
     };
@@ -367,19 +366,25 @@ describe('agent application contracts', () => {
         'task_complete',
       );
     }).not.toThrow();
-    expect(normalizeSpecialistArtifacts('researcher', wireArtifacts)).toMatchObject([
-      {
-        content: { summary: 'Source-backed findings', confidence: 0.9 },
-        evidenceIds: [evidenceId],
-      },
-    ]);
-    expect(() =>
+    expect(normalizeSpecialistArtifacts('researcher', wireArtifacts, 'anysearch-v1')).toMatchObject(
+      [
+        {
+          content: {
+            summary: 'Source-backed findings',
+            confidence: 0.9,
+            providerRevision: 'anysearch-v1',
+          },
+          evidenceIds: [evidenceId],
+        },
+      ],
+    );
+    expect(() => {
       assertStrictSchema(
         researcherSchema,
         { ...completion, artifacts: [researchArtifact] },
         'task_complete',
-      ),
-    ).toThrow(/additional properties/u);
+      );
+    }).toThrow(/additional properties/u);
     expect(() => {
       assertStrictSchema(
         researcherSchema,

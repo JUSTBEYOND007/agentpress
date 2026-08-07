@@ -134,6 +134,23 @@ describe('ToolRegistry', () => {
     }).toThrow('guidance');
   });
 
+  it('keeps evidence provider provenance attached to an immutable tool definition', () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      ...tool('web.search', 'web.read'),
+      evidence: { providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0' },
+    });
+    expect(registry.get('web.search', '1.0.0').evidence).toEqual({
+      providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0',
+    });
+    expect(() => {
+      registry.register({
+        ...tool('web.invalid', 'web.read'),
+        evidence: { providerRevision: '  ' },
+      });
+    }).toThrow(/provider revision/u);
+  });
+
   it('hashes equivalent JSON arguments identically', () => {
     expect(hashToolArguments({ articleId: 'a', revision: 2 })).toBe(
       hashToolArguments({ revision: 2, articleId: 'a' }),

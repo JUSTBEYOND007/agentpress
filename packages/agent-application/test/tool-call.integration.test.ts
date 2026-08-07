@@ -94,6 +94,7 @@ describeWithDatabase('Tool Call application flow', () => {
     version: '1.0.0',
     owner: 'research',
     description: 'Search public sources',
+    evidence: { providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0' },
     capabilities: ['web.research'],
     inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
     outputSchema: Type.Array(Type.Unknown()),
@@ -226,6 +227,32 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(saved).toEqual([{ reason: 'tool_settled' }]);
   });
 
+  it('fails closed when the persisted evidence provider revision drifts', async () => {
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'web.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'revision drift' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['web.research']),
+    });
+    await connection.db
+      .update(toolCalls)
+      .set({ evidenceProviderRevision: 'retired-provider-revision' })
+      .where(eq(toolCalls.id, proposal.toolCallId));
+
+    await expect(service.execute(proposal.toolCallId)).rejects.toMatchObject({
+      code: 'approval_mismatch',
+    });
+    await expect(
+      connection.db
+        .select({ status: toolCalls.status })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([{ status: 'proposed' }]);
+  });
+
   it('settles an interrupted read-only provider call as outcome unknown', async () => {
     const runId = await createRunningRun();
     const proposal = await service.propose({
@@ -289,6 +316,7 @@ describeWithDatabase('Tool Call application flow', () => {
       .select({
         sourceUri: evidenceRecords.sourceUri,
         sourceToolCallId: evidenceRecords.sourceToolCallId,
+        providerRevision: toolCalls.evidenceProviderRevision,
         taskAttempt: toolCalls.taskAttempt,
       })
       .from(evidenceRecords)
@@ -297,6 +325,7 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       sourceUri: 'https://example.com/source',
+      providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0',
       taskAttempt: 1,
     });
     expect(rows[0]?.sourceToolCallId).toMatch(

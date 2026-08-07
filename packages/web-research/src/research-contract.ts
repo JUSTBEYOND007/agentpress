@@ -62,7 +62,7 @@ export const researchQueryLogEntrySchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Canonical persisted and model-output contract for ResearchBrief content. */
+/** Canonical host-owned persisted contract for ResearchBrief content. */
 export const researchBriefContentSchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -82,11 +82,13 @@ export const researchBriefContentSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const researchBriefModelContentSchema = Type.Omit(researchBriefContentSchema, ['providerRevision']);
+
 export const researchBriefSubmissionSchema = Type.Object(
   {
-    ...researchBriefContentSchema.properties,
-    summary: Type.Optional(researchBriefContentSchema.properties.summary),
-    confidence: Type.Optional(researchBriefContentSchema.properties.confidence),
+    ...researchBriefModelContentSchema.properties,
+    summary: Type.Optional(researchBriefModelContentSchema.properties.summary),
+    confidence: Type.Optional(researchBriefModelContentSchema.properties.confidence),
   },
   { additionalProperties: false },
 );
@@ -105,13 +107,14 @@ export type ResearchBriefSubmission = DeepReadonly<Static<typeof researchBriefSu
 export function normalizeResearchBriefSubmission(
   value: unknown,
   fallbackSummary: string,
+  providerRevision: string,
 ): ResearchBriefContent {
   if (!Value.Check(researchBriefSubmissionSchema, value)) {
     throwStructuralError(researchBriefSubmissionSchema, value, 'submission');
   }
   const summary = value.summary ?? fallbackSummary.trim();
   const confidence = value.confidence ?? deriveSubmissionConfidence(value);
-  const content = { ...value, summary, confidence };
+  const content = { ...value, summary, confidence, providerRevision };
   assertResearchBriefContent(content);
   return content;
 }

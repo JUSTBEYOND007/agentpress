@@ -194,14 +194,29 @@ export function taskCompleteSchemaForRole(role: SpecialistRole): TSchema {
 export function normalizeSpecialistArtifacts(
   owner: SpecialistRole,
   artifacts: readonly unknown[],
+  providerRevision?: string,
 ): readonly StructuredArtifact[] {
   if (owner !== 'researcher') return artifacts as readonly StructuredArtifact[];
   return artifacts.map((value) => {
+    if (!providerRevision) throw new Error('ResearchBrief provider revision is unavailable');
     const artifact = value as Omit<StructuredArtifact, 'evidenceIds'>;
-    const content = normalizeResearchBriefSubmission(artifact.content, artifact.summary);
+    const content = normalizeResearchBriefSubmission(
+      artifact.content,
+      artifact.summary,
+      providerRevision,
+    );
     const evidenceIds = content.sources.map(({ evidenceId }) => evidenceId);
     assertResearchBriefEvidenceClosure(content, evidenceIds);
     return { ...artifact, content, evidenceIds };
+  });
+}
+
+export function researcherSubmissionEvidenceIds(artifacts: readonly unknown[]): readonly string[] {
+  return artifacts.flatMap((value) => {
+    const artifact = value as {
+      readonly content: { readonly sources: readonly { evidenceId: string }[] };
+    };
+    return artifact.content.sources.map(({ evidenceId }) => evidenceId);
   });
 }
 

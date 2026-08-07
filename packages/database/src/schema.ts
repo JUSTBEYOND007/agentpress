@@ -1195,6 +1195,7 @@ export const toolCalls = pgTable(
     providerToolCallId: varchar('provider_tool_call_id', { length: 240 }),
     toolId: varchar('tool_id', { length: 180 }).notNull(),
     toolVersion: varchar('tool_version', { length: 80 }).notNull(),
+    evidenceProviderRevision: varchar('evidence_provider_revision', { length: 160 }),
     arguments: jsonb('arguments').$type<Readonly<Record<string, unknown>>>().notNull(),
     argumentsHash: varchar('arguments_hash', { length: 80 }).notNull(),
     risk: toolRiskEnum('risk').$type<ToolRisk>().notNull(),

@@ -46,6 +46,7 @@ export type ToolCall = {
   readonly taskId?: AgentTaskId;
   readonly toolId: string;
   readonly toolVersion: string;
+  readonly evidenceProviderRevision?: string;
   readonly argumentsHash: string;
   readonly risk: ToolRisk;
   readonly idempotencyKey?: string;
@@ -68,6 +69,9 @@ export function createToolCall(input: CreateToolCall): ToolCall {
     ...(input.taskId ? { taskId: input.taskId } : {}),
     toolId: input.toolId,
     toolVersion: input.toolVersion,
+    ...(input.evidenceProviderRevision
+      ? { evidenceProviderRevision: input.evidenceProviderRevision }
+      : {}),
     argumentsHash: input.argumentsHash,
     risk: input.risk,
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),

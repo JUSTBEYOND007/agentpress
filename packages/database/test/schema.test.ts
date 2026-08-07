@@ -46,6 +46,9 @@ describe('database schema', () => {
     expect(
       config.indexes.map(({ config }) => ({ name: config.name, unique: config.unique })),
     ).toContainEqual({ name: 'evidence_records_tool_source_unique', unique: true });
+    expect(getTableConfig(toolCalls).columns.map(({ name }) => name)).toContain(
+      'evidence_provider_revision',
+    );
   });
 
   it('keeps memory consolidation provenance in PostgreSQL', () => {

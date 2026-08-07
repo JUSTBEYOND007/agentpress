@@ -21,12 +21,17 @@ export type ToolGuidance = {
   readonly text: string;
 };
 
+export type ToolEvidenceProvenance = {
+  readonly providerRevision: string;
+};
+
 export type ToolDefinition<TInput extends TSchema = TSchema, TOutput extends TSchema = TSchema> = {
   readonly toolId: string;
   readonly version: string;
   readonly owner: string;
   readonly description: string;
   readonly guidance?: readonly ToolGuidance[];
+  readonly evidence?: ToolEvidenceProvenance;
   readonly capabilities: readonly string[];
   readonly inputSchema: TInput;
   readonly outputSchema: TOutput;

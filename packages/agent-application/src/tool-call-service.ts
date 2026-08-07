@@ -135,6 +135,7 @@ export class ToolCallService {
             existing.runId !== input.runId ||
             existing.toolId !== definition.toolId ||
             existing.toolVersion !== definition.version ||
+            existing.evidenceProviderRevision !== (definition.evidence?.providerRevision ?? null) ||
             existing.argumentsHash !== argumentsHash ||
             (!sameTaskOperation &&
               existing.providerToolCallId !== (input.providerToolCallId ?? null))
@@ -245,6 +246,9 @@ export class ToolCallService {
         ...(input.providerToolCallId ? { providerToolCallId: input.providerToolCallId } : {}),
         toolId: definition.toolId,
         toolVersion: definition.version,
+        ...(definition.evidence
+          ? { evidenceProviderRevision: definition.evidence.providerRevision }
+          : {}),
         arguments: input.arguments,
         argumentsHash,
         risk: definition.risk,
@@ -283,6 +287,9 @@ export class ToolCallService {
           toolCallId,
           toolId: definition.toolId,
           toolVersion: definition.version,
+          ...(definition.evidence
+            ? { evidenceProviderRevision: definition.evidence.providerRevision }
+            : {}),
           arguments: input.arguments,
           argumentsHash,
           risk: definition.risk,

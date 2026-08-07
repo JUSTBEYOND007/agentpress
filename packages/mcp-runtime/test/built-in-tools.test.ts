@@ -31,6 +31,9 @@ describe('built-in MCP tools', () => {
         .map(({ toolId }) => toolId),
     ).toEqual(['web.search']);
     const tool = registry.get('web.search', '1.0.0');
+    expect(tool.evidence).toEqual({
+      providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0',
+    });
     const output = await registry.execute(
       tool,
       { query: 'Kafka' },

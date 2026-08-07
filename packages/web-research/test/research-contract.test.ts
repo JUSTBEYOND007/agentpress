@@ -88,8 +88,11 @@ describe('ResearchBrief contract', () => {
     const submission: Record<string, unknown> = { ...valid };
     delete submission.summary;
     delete submission.confidence;
+    delete submission.providerRevision;
 
-    expect(normalizeResearchBriefSubmission(submission, 'Artifact summary')).toEqual({
+    expect(
+      normalizeResearchBriefSubmission(submission, 'Artifact summary', 'research-policy-v1'),
+    ).toEqual({
       ...valid,
       summary: 'Artifact summary',
       confidence: 0.8,
@@ -97,15 +100,16 @@ describe('ResearchBrief contract', () => {
   });
 
   it('does not use wire normalization to bypass canonical Evidence semantics', () => {
-    const submission = {
+    const submission: Record<string, unknown> = {
       ...valid,
       summary: undefined,
       confidence: undefined,
       claims: [{ ...valid.claims[0], evidenceIds: [missingEvidenceId] }],
     };
-    expect(() => normalizeResearchBriefSubmission(submission, 'Artifact summary')).toThrow(
-      /only listed Evidence IDs/u,
-    );
+    delete submission.providerRevision;
+    expect(() =>
+      normalizeResearchBriefSubmission(submission, 'Artifact summary', 'research-policy-v1'),
+    ).toThrow(/only listed Evidence IDs/u);
   });
 
   it('does not equate source count with confidence when research is degraded', () => {
@@ -118,14 +122,18 @@ describe('ResearchBrief contract', () => {
   });
 
   it('requires canonical sources and Artifact Evidence edges to form one exact set', () => {
-    expect(() => assertResearchBriefEvidenceClosure(valid, [evidenceId])).not.toThrow();
-    expect(() => assertResearchBriefEvidenceClosure(valid, [])).toThrow(/exactly match/u);
-    expect(() => assertResearchBriefEvidenceClosure(valid, [evidenceId, otherEvidenceId])).toThrow(
-      /exactly match/u,
-    );
-    expect(() => assertResearchBriefEvidenceClosure(valid, [evidenceId, evidenceId])).toThrow(
-      /must be unique/u,
-    );
+    expect(() => {
+      assertResearchBriefEvidenceClosure(valid, [evidenceId]);
+    }).not.toThrow();
+    expect(() => {
+      assertResearchBriefEvidenceClosure(valid, []);
+    }).toThrow(/exactly match/u);
+    expect(() => {
+      assertResearchBriefEvidenceClosure(valid, [evidenceId, otherEvidenceId]);
+    }).toThrow(/exactly match/u);
+    expect(() => {
+      assertResearchBriefEvidenceClosure(valid, [evidenceId, evidenceId]);
+    }).toThrow(/must be unique/u);
   });
 
   it('allows Claims to cite a subset of the closed source directory', () => {
@@ -134,9 +142,11 @@ describe('ResearchBrief contract', () => {
       sources: [...valid.sources, { evidenceId: otherEvidenceId, title: 'Background source' }],
     };
 
-    expect(() => assertResearchBriefContent(content)).not.toThrow();
-    expect(() =>
-      assertResearchBriefEvidenceClosure(content, [otherEvidenceId, evidenceId]),
-    ).not.toThrow();
+    expect(() => {
+      assertResearchBriefContent(content);
+    }).not.toThrow();
+    expect(() => {
+      assertResearchBriefEvidenceClosure(content, [otherEvidenceId, evidenceId]);
+    }).not.toThrow();
   });
 });

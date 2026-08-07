@@ -24,6 +24,7 @@ import {
   assertSpecialistArtifactPolicy,
   assertStrictSchema,
   normalizeSpecialistArtifacts,
+  researcherSubmissionEvidenceIds,
   specialistApplicationTurn,
   specialistPrompt,
   taskCompleteSchemaForRole,
@@ -252,7 +253,19 @@ export class PlannedTaskExecutor {
       execute: async (arguments_) => {
         assertStrictSchema(taskCompleteSchema, arguments_, 'task_complete');
         const submitted = arguments_ as typeof completion & {};
-        const artifacts = normalizeSpecialistArtifacts(task.owner, submitted.artifacts);
+        const providerRevision =
+          task.owner === 'researcher' && submitted.artifacts.length > 0
+            ? await this.options.results.resolveTaskEvidenceProviderRevision(
+                runId,
+                task.id,
+                researcherSubmissionEvidenceIds(submitted.artifacts),
+              )
+            : undefined;
+        const artifacts = normalizeSpecialistArtifacts(
+          task.owner,
+          submitted.artifacts,
+          providerRevision,
+        );
         assertSpecialistArtifactPolicy(task.owner, artifacts);
         const evidenceIds = artifacts.flatMap((artifact) => artifact.evidenceIds);
         await this.options.results.assertTaskEvidence(runId, task.id, evidenceIds);

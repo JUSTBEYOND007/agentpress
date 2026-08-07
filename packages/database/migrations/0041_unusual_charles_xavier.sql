@@ -1,0 +1,1 @@
+ALTER TABLE "tool_calls" ADD COLUMN "evidence_provider_revision" varchar(160);

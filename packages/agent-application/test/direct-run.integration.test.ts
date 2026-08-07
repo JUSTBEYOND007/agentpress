@@ -1951,6 +1951,7 @@ describeWithDatabase('Direct Run application flow', () => {
       conversationId: ids.conversation,
     });
     const task = plannedTask('research-brief-evidence-closure', 'researcher');
+    const sourceToolCallId = randomUUID();
     const runtime = PiRuntimeAdapter.forTests({
       responses: [
         toolResponse('plan_submit', { goal: 'Persist a ResearchBrief', tasks: [task] }),
@@ -1979,7 +1980,6 @@ describeWithDatabase('Direct Run application flow', () => {
                 ],
                 queryLog: [{ query: 'verified query', resultCount: 1 }],
                 partialFailures: [],
-                providerRevision: 'web.search@1.0.0',
               },
             },
           ],
@@ -1998,10 +1998,24 @@ describeWithDatabase('Direct Run application flow', () => {
         async createForRun(runId, _capabilities, taskId) {
           if (taskId && !insertedTasks.has(taskId)) {
             insertedTasks.add(taskId);
+            await connection.db.insert(toolCalls).values({
+              id: sourceToolCallId,
+              runId,
+              taskId,
+              toolId: 'web.search',
+              toolVersion: '1.0.0',
+              evidenceProviderRevision: 'anysearch-api-v1+pi-web-access-v0.15.0',
+              arguments: { query: 'verified query' },
+              argumentsHash: hashToolArguments({ query: 'verified query' }),
+              risk: 'read_only',
+              sideEffect: 'No side effect',
+              status: 'succeeded',
+            });
             await connection.db.insert(evidenceRecords).values({
               id: evidenceId,
               runId,
               taskId,
+              sourceToolCallId,
               sourceType: 'tool',
               sourceUri: 'https://example.com/source',
               title: 'Primary source',
@@ -2033,16 +2047,16 @@ describeWithDatabase('Direct Run application flow', () => {
       .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))
       .innerJoin(artifactEvidence, eq(artifactEvidence.artifactVersionId, artifactVersions.id))
       .where(eq(artifacts.runId, run.runId));
-    expect(persisted).toEqual([
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]?.evidenceId).toBe(evidenceId);
+    expect(persisted[0]?.content).toEqual(
       expect.objectContaining({
-        evidenceId,
-        content: expect.objectContaining({
-          summary: 'One verified finding',
-          confidence: 0.9,
-          sources: [expect.objectContaining({ evidenceId })],
-        }),
+        summary: 'One verified finding',
+        confidence: 0.9,
+        sources: [expect.objectContaining({ evidenceId })],
+        providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0',
       }),
-    ]);
+    );
   });
 
   it('repairs a failed Specialist protocol twice before accepting task_complete', async () => {

@@ -176,6 +176,12 @@ export class ToolCallExecutionService {
         );
       }
       const definition = this.options.registry.get(call.toolId, call.toolVersion);
+      if (call.evidenceProviderRevision !== (definition.evidence?.providerRevision ?? null)) {
+        throw new ToolCallApplicationError(
+          'approval_mismatch',
+          'Stored Tool Call evidence provider revision no longer matches its definition',
+        );
+      }
       if (hashToolArguments(call.arguments) !== call.argumentsHash) {
         throw new ToolCallApplicationError(
           'approval_mismatch',
