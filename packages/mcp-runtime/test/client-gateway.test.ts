@@ -205,6 +205,47 @@ describe('MCP client gateway', () => {
     ]);
   });
 
+  it('fails closed on duplicate or non-object MCP tool schemas', async () => {
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'workspace_knowledge',
+      version: '1',
+      displayName: 'Knowledge',
+      createClient: () =>
+        Promise.resolve({
+          listTools: vi.fn(() =>
+            Promise.resolve({
+              tools: [
+                { name: 'search', inputSchema: { type: 'object' as const } },
+                { name: 'search', inputSchema: { type: 'object' as const } },
+              ],
+            }),
+          ),
+          close: () => Promise.resolve(),
+        } as unknown as Client),
+    });
+    await expect(new McpClientGateway(manager).listTools('workspace_knowledge')).rejects.toThrow(
+      /duplicate/u,
+    );
+
+    const invalidManager = new McpServerManager();
+    invalidManager.register({
+      serverId: 'licensed_media',
+      version: '1',
+      displayName: 'Media',
+      createClient: () =>
+        Promise.resolve({
+          listTools: vi.fn(() =>
+            Promise.resolve({ tools: [{ name: 'media', inputSchema: { type: 'string' } }] }),
+          ),
+          close: () => Promise.resolve(),
+        } as unknown as Client),
+    });
+    await expect(new McpClientGateway(invalidManager).listTools('licensed_media')).rejects.toThrow(
+      /invalid input schema/u,
+    );
+  });
+
   it('reuses SDK prompt/resource APIs with deterministic listing order', async () => {
     const client = {
       listPrompts: vi.fn(() => Promise.resolve({ prompts: [{ name: 'z' }, { name: 'a' }] })),

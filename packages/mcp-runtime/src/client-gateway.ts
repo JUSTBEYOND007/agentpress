@@ -64,7 +64,9 @@ export class McpClientGateway implements BuiltInMcpGateway {
     const client = await this.manager.getClient(serverId);
     try {
       const result = await client.listTools();
-      return [...result.tools].sort((left, right) => left.name.localeCompare(right.name));
+      const tools = [...result.tools];
+      validateListedTools(tools);
+      return tools.sort((left, right) => left.name.localeCompare(right.name));
     } catch (error) {
       if (isConnectionFailure(error)) await this.manager.markDegraded(serverId, client);
       throw error;
@@ -169,6 +171,28 @@ export class McpClientGateway implements BuiltInMcpGateway {
       return this.manager.getClient(serverId);
     }
   }
+}
+
+function validateListedTools(tools: readonly ListedMcpTool[]): void {
+  const names = new Set<string>();
+  for (const tool of tools) {
+    if (!tool.name.trim() || names.has(tool.name)) {
+      throw new Error('MCP tool list contains an empty or duplicate tool name');
+    }
+    names.add(tool.name);
+    if (!isObjectSchema(tool.inputSchema)) {
+      throw new Error(`MCP tool ${tool.name} has an invalid input schema`);
+    }
+  }
+}
+
+function isObjectSchema(value: unknown): value is { readonly type: 'object' } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as { readonly type?: unknown }).type === 'object'
+  );
 }
 
 async function callTool(

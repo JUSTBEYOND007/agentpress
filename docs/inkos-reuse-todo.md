@@ -635,7 +635,9 @@ MCP manager。
       Skill 或网页内容永远不能授予 capability。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
-      Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。
+      Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，32 个 MCP Runtime 测试通过；
+      其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置
       Server 的调用；`docs/oh-my-pi-reuse-todo.md` 只能承载细节，不能替代本清单的完成门禁。
