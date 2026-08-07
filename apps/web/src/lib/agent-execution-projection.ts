@@ -224,20 +224,34 @@ export function executionItems(
 }
 
 function executionStatus(status: string): ConsumerExecutionStatus {
+  if (status.endsWith('.timed_out') || status.endsWith('.timeout') || status === 'task_timeout')
+    return 'timed_out';
+  if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return 'cancelled';
+  if (status.endsWith('.interrupted')) return 'interrupted';
+  if (status.endsWith('.stale')) return 'stale';
   if (
     status.endsWith('.failed') ||
     status.endsWith('.denied') ||
-    status.endsWith('.expired') ||
-    status.endsWith('.interrupted')
+    status.endsWith('.expired')
   )
-    return 'error';
+    return 'failed';
+  if (status.endsWith('.degraded') || status === 'completed_with_degradation') return 'degraded';
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return 'completed';
   if (status.endsWith('.executing') || status.endsWith('.started')) return 'processing';
   return 'running';
 }
 
 function aggregateStatus(statuses: readonly ConsumerExecutionStatus[]): ConsumerExecutionStatus {
-  if (statuses.some((status) => status === 'error')) return 'error';
+  const terminalFailure: ConsumerExecutionStatus[] = [
+    'failed',
+    'cancelled',
+    'timed_out',
+    'interrupted',
+    'stale',
+  ];
+  const failure = terminalFailure.find((status) => statuses.includes(status));
+  if (failure) return failure;
+  if (statuses.includes('degraded')) return 'degraded';
   if (statuses.some((status) => status === 'processing' || status === 'running'))
     return 'processing';
   return 'completed';
@@ -281,12 +295,13 @@ const genericStageLabels = new Set(['已开始', '结果已生成', '未完成']
 
 function stageLabel(label: string, status: string): string {
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return '结果已生成';
-  if (
-    status.endsWith('.failed') ||
-    status.endsWith('.denied') ||
-    status.endsWith('.expired') ||
-    status.endsWith('.interrupted')
-  )
+  if (status.endsWith('.timed_out') || status.endsWith('.timeout') || status === 'task_timeout')
+    return '已超时';
+  if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return '已取消';
+  if (status.endsWith('.interrupted')) return '已中断';
+  if (status.endsWith('.stale')) return '已过期';
+  if (status.endsWith('.degraded')) return '部分完成';
+  if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
     return '未完成';
   if (status.endsWith('.executing') || status.endsWith('.started')) return '已开始';
   return label;

@@ -217,7 +217,7 @@ function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): 
       }}
     >
       <summary>
-        {item.status === 'error' ? (
+        {isFailureStatus(item.status) ? (
           <CircleAlert size={13} aria-hidden="true" />
         ) : item.status === 'completed' ? (
           <Check size={13} aria-hidden="true" />
@@ -247,7 +247,22 @@ function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): 
 }
 
 function statusText(status: ConsumerExecutionItem['status']): string {
-  return status === 'completed' ? '已完成' : status === 'error' ? '未完成' : '进行中';
+  const labels: Readonly<Record<ConsumerExecutionItem['status'], string>> = {
+    running: '进行中',
+    processing: '进行中',
+    completed: '已完成',
+    degraded: '部分完成',
+    failed: '失败',
+    cancelled: '已取消',
+    timed_out: '已超时',
+    interrupted: '已中断',
+    stale: '已过期',
+  };
+  return labels[status];
+}
+
+function isFailureStatus(status: ConsumerExecutionItem['status']): boolean {
+  return ['failed', 'cancelled', 'timed_out', 'interrupted', 'stale'].includes(status);
 }
 
 function resultSummary(value: unknown): string {

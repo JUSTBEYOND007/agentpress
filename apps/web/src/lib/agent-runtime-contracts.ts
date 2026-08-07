@@ -65,7 +65,16 @@ export type RunProcessPresentation = {
   readonly items: readonly ConsumerExecutionItem[];
 };
 
-export type ConsumerExecutionStatus = 'running' | 'processing' | 'completed' | 'error';
+export type ConsumerExecutionStatus =
+  | 'running'
+  | 'processing'
+  | 'completed'
+  | 'degraded'
+  | 'failed'
+  | 'cancelled'
+  | 'timed_out'
+  | 'interrupted'
+  | 'stale';
 
 export type ConsumerExecutionStage = {
   readonly id: string;

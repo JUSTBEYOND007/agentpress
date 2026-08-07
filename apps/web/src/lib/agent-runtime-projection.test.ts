@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RunPart, RunProjection } from './agent-runtime-contracts';
+import { executionItems } from './agent-execution-projection';
 import { projectionContent } from './agent-runtime-projection';
 
 describe('run presentation projection', () => {
@@ -250,6 +251,31 @@ describe('run presentation projection', () => {
     expect(JSON.stringify(content)).not.toContain('SHA-256');
     expect(JSON.stringify(content)).toContain('task-1');
     expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-process']);
+  });
+
+  it('preserves typed timeout, cancellation, interruption, stale and degraded stage outcomes', () => {
+    const activity = part('activity', 'task.succeeded', 1, {
+      taskId: 'task-typed-outcomes',
+      lifecycleStages: [
+        { status: 'task.timed_out' },
+        { status: 'task.cancelled' },
+        { status: 'task.interrupted' },
+        { status: 'task.stale' },
+        { status: 'task.degraded' },
+      ],
+    });
+    const [item] = executionItems([activity], [activity]);
+    expect(item).toMatchObject({
+      kind: 'pipeline',
+      status: 'completed',
+      stages: [
+        { status: 'timed_out', label: '已超时' },
+        { status: 'cancelled', label: '已取消' },
+        { status: 'interrupted', label: '已中断' },
+        { status: 'stale', label: '已过期' },
+        { status: 'degraded', label: '部分完成' },
+      ],
+    });
   });
 });
 

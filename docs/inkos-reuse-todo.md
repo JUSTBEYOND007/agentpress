@@ -60,7 +60,9 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
 - [ ] 为 Plan/Task/Attempt/ToolCall/Artifact/Evidence/Proposal/Settlement 建立一个 PostgreSQL
       event-chain fixture；同一 fixture 的 live SSE 和 replay 必须输出深相等的 `RunPart[]`。
 - [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale`；
-      projector 不得把 degraded 映射为 completed 或普通 error。
+      projector 不得把 degraded 映射为 completed 或普通 error。当前 Web consumer status 已保留
+      `degraded|failed|cancelled|timed_out|interrupted|stale` 并有 92 个投影测试，但还需把该 outcome
+      作为 host-owned RunPart fact 接入 PostgreSQL/live-SSE 同构链后才能勾选。
 - [ ] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
       本地化只发生在 projector/consumer；React 不得匹配日志或阶段文案来推断状态。
 - [ ] 为 execution/task/attempt 统一 correlation id；所有 progress/log/result 必须带归属，缺 id 时
