@@ -68,7 +68,7 @@ export class AgentSessionRunner {
     tools: readonly RuntimeTool[],
     signal?: AbortSignal,
     continuation = false,
-    maxToolCalls?: number,
+    limits?: { readonly maxToolCalls?: number; readonly maxOutputTokens?: number },
   ): Promise<RuntimeResult> {
     const runtime = this.options.runtimeFactory.create(modelPurpose);
     const selectedModel = runtime.identity?.model ?? modelPurpose;
@@ -146,7 +146,11 @@ export class AgentSessionRunner {
           continuation,
           ...(claimedToolChoice ? { toolChoice: claimedToolChoice.choice } : {}),
           ...(kind === 'specialist'
-            ? { maxToolCalls: maxToolCalls ?? 12, maxFailedCompletionCalls: 2 }
+            ? {
+                maxToolCalls: limits?.maxToolCalls ?? 12,
+                maxFailedCompletionCalls: 2,
+                ...(limits?.maxOutputTokens ? { maxOutputTokens: limits.maxOutputTokens } : {}),
+              }
             : {}),
           compactContext: async (request) => {
             const compaction = await this.compactions.compact(request);

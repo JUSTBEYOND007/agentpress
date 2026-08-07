@@ -7,12 +7,15 @@ import {
   parseAgentTaskExecuteCommand,
   AgentApplicationError,
   assertSpecialistArtifactPolicy,
+  assertStrictSchema,
   createSpecialistTaskRequest,
+  normalizeSpecialistArtifacts,
   parseSpecialistTaskRequest,
   assertSpecialistOutputSchema,
   resolveSpecialistOutputSchema,
   specialistConcurrencyLimit,
   specialistApplicationTurn,
+  taskCompleteSchemaForRole,
   validateSubmittedPlan,
   assertBoundedPlan,
   type PlannedTaskSpec,
@@ -310,6 +313,105 @@ describe('agent application contracts', () => {
         { type: 'ResearchBrief', content: { schemaVersion: 1 } },
       ]);
     }).toThrow(/ResearchBrief/u);
+  });
+
+  it('constrains Researcher completion content to the canonical ResearchBrief schema', () => {
+    const evidenceId = '0195557f-1696-4af7-a7a6-30e7c35a4682';
+    const researchArtifact = {
+      type: 'ResearchBrief' as const,
+      title: 'Research brief',
+      summary: 'Source-backed findings',
+      content: {
+        schemaVersion: 1,
+        purpose: 'fact-check',
+        depth: 'deep',
+        summary: 'Canonical research summary',
+        claims: [{ text: 'Verified claim', evidenceIds: [evidenceId], confidence: 0.9 }],
+        conflicts: [],
+        unknowns: [],
+        implications: [],
+        sources: [{ evidenceId, title: 'Primary source' }],
+        confidence: 0.9,
+        queryLog: [{ query: 'verification query', resultCount: 1 }],
+        partialFailures: [],
+        providerRevision: 'anysearch-v1',
+      },
+      evidenceIds: [evidenceId],
+    };
+    const completion = {
+      status: 'succeeded',
+      summary: 'Research complete',
+      artifacts: [
+        {
+          type: researchArtifact.type,
+          title: researchArtifact.title,
+          summary: researchArtifact.summary,
+          content: researchArtifact.content,
+        },
+      ],
+      warnings: [],
+    };
+    const researcherSchema = taskCompleteSchemaForRole('researcher');
+
+    expect(() => {
+      assertStrictSchema(researcherSchema, completion, 'task_complete');
+    }).not.toThrow();
+    const wireContent: Record<string, unknown> = { ...researchArtifact.content };
+    delete wireContent.summary;
+    delete wireContent.confidence;
+    const wireArtifacts = [{ ...completion.artifacts[0], content: wireContent }];
+    expect(() => {
+      assertStrictSchema(
+        researcherSchema,
+        { ...completion, artifacts: wireArtifacts },
+        'task_complete',
+      );
+    }).not.toThrow();
+    expect(normalizeSpecialistArtifacts('researcher', wireArtifacts)).toMatchObject([
+      {
+        content: { summary: 'Source-backed findings', confidence: 0.9 },
+        evidenceIds: [evidenceId],
+      },
+    ]);
+    expect(() =>
+      assertStrictSchema(
+        researcherSchema,
+        { ...completion, artifacts: [researchArtifact] },
+        'task_complete',
+      ),
+    ).toThrow(/additional properties/u);
+    expect(() => {
+      assertStrictSchema(
+        researcherSchema,
+        {
+          ...completion,
+          artifacts: [
+            {
+              ...completion.artifacts[0],
+              content: { arbitrary: { nested: 'report' } },
+            },
+          ],
+        },
+        'task_complete',
+      );
+    }).toThrow(/schema-invalid/u);
+    expect(() => {
+      assertStrictSchema(
+        taskCompleteSchemaForRole('writer'),
+        {
+          ...completion,
+          artifacts: [
+            {
+              ...completion.artifacts[0],
+              type: 'ArticleDraft',
+              content: { document: { blocks: [] } },
+              evidenceIds: [],
+            },
+          ],
+        },
+        'task_complete',
+      );
+    }).not.toThrow();
   });
 
   it('strips Main action capabilities from the Specialist model-visible turn', () => {

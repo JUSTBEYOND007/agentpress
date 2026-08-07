@@ -22,7 +22,7 @@ import { AGENT_TASK_COMMAND_TOPIC, type RunEventPublisher } from './contracts.js
 import {
   artifactTypes,
   specialistApplicationTurn,
-  taskCompleteSchema,
+  taskCompleteSchemaForRole,
   type ArtifactType,
   type PlannedTaskSpec,
   type SettledTask,
@@ -135,6 +135,7 @@ export class PlannedRunStore {
   ): Promise<void> {
     const requests = tasks.map((task) => {
       const contextPackId = this.options.createId();
+      const taskCompleteSchema = taskCompleteSchemaForRole(task.owner);
       const schema = resolveSpecialistOutputSchema({
         callerOutputSchema: taskCompleteSchema,
         schemaMode: 'strict',
@@ -196,7 +197,7 @@ export class PlannedRunStore {
     if (dependencies.length > 0) {
       await transaction.insert(agentTaskDependencies).values(dependencies);
     }
-    for (const { task, request } of requests) {
+    for (const { task, request, schema } of requests) {
       const content = JSON.stringify({
         rootRequest: specialistApplicationTurn(prompt, ''),
         task,
@@ -208,7 +209,7 @@ export class PlannedRunStore {
         taskId: task.id,
         objective: task.objective,
         constraints: ['Use only the immutable Context Pack', 'Return no hidden chain of thought'],
-        expectedOutput: taskCompleteSchema,
+        expectedOutput: schema.schema,
         contentHash,
       });
       await transaction.insert(contextPacks).values({

@@ -32,7 +32,7 @@ const searchInput = Type.Object(
 const webSearchInput = Type.Object(
   {
     query: Type.String({ minLength: 1, maxLength: 2_000 }),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })),
   },
   { additionalProperties: false },
 );

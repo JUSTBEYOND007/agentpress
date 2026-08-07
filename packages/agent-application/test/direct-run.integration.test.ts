@@ -14,6 +14,7 @@ import {
   appendConversationCompaction,
   approvals,
   appUsers,
+  artifactEvidence,
   artifacts,
   artifactVersions,
   articleRevisions,
@@ -27,6 +28,7 @@ import {
   conversations,
   executionPlans,
   editProposals,
+  evidenceRecords,
   planRevisions,
   promptRevisions,
   rootRequests,
@@ -1939,6 +1941,108 @@ describeWithDatabase('Direct Run application flow', () => {
     const mainTranscript = transcriptRows.filter(({ kind }) => kind === 'main');
     expect(JSON.stringify(specialistTranscript)).toContain(privateThinking);
     expect(JSON.stringify(mainTranscript)).not.toContain(privateThinking);
+  });
+
+  it('derives persisted ResearchBrief Evidence edges from the canonical source directory', async () => {
+    const branchId = randomUUID();
+    const evidenceId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const task = plannedTask('research-brief-evidence-closure', 'researcher');
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', { goal: 'Persist a ResearchBrief', tasks: [task] }),
+        toolResponse('task_complete', {
+          status: 'succeeded',
+          summary: 'Source-backed research',
+          artifacts: [
+            {
+              type: 'ResearchBrief',
+              title: 'Research brief',
+              summary: 'One verified finding',
+              content: {
+                schemaVersion: 1,
+                purpose: 'fact-check',
+                depth: 'quick',
+                claims: [{ text: 'Verified claim', evidenceIds: [evidenceId], confidence: 0.9 }],
+                conflicts: [],
+                unknowns: [],
+                implications: [],
+                sources: [
+                  {
+                    evidenceId,
+                    title: 'Primary source',
+                    sourceUri: 'https://example.com/source',
+                  },
+                ],
+                queryLog: [{ query: 'verified query', resultCount: 1 }],
+                partialFailures: [],
+                providerRevision: 'web.search@1.0.0',
+              },
+            },
+          ],
+          warnings: [],
+        }),
+        runCompleteResponse('Research completed.'),
+      ],
+    });
+    const insertedTasks = new Set<string>();
+    const researchService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      runtimeToolFactory: {
+        listCapabilities: () => Promise.resolve(['web.research']),
+        async createForRun(runId, _capabilities, taskId) {
+          if (taskId && !insertedTasks.has(taskId)) {
+            insertedTasks.add(taskId);
+            await connection.db.insert(evidenceRecords).values({
+              id: evidenceId,
+              runId,
+              taskId,
+              sourceType: 'tool',
+              sourceUri: 'https://example.com/source',
+              title: 'Primary source',
+              excerpt: 'Verified evidence excerpt',
+              sourceRevision: 'source-v1',
+              contentHash: createHash('sha256').update('Verified evidence excerpt').digest('hex'),
+              metadata: { toolId: 'web.search', toolVersion: '1.0.0' },
+            });
+          }
+          return [];
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await researchService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '只研究并返回 ResearchBrief',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(researchService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    const persisted = await connection.db
+      .select({ content: artifactVersions.content, evidenceId: artifactEvidence.evidenceId })
+      .from(artifactVersions)
+      .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))
+      .innerJoin(artifactEvidence, eq(artifactEvidence.artifactVersionId, artifactVersions.id))
+      .where(eq(artifacts.runId, run.runId));
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        evidenceId,
+        content: expect.objectContaining({
+          summary: 'One verified finding',
+          confidence: 0.9,
+          sources: [expect.objectContaining({ evidenceId })],
+        }),
+      }),
+    ]);
   });
 
   it('repairs a failed Specialist protocol twice before accepting task_complete', async () => {

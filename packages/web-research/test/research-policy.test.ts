@@ -36,11 +36,11 @@ describe('research execution policy', () => {
   it('exposes immutable depth budgets to provider adapters and Agent runtimes', () => {
     expect(researchExecutionPolicy('deep')).toEqual({
       maxQueries: 8,
-      resultsPerQuery: 10,
+      resultsPerQuery: 2,
       maxSources: 24,
       fetchConcurrency: 6,
       maxSourceBytes: 1_000_000,
-      maxSynthesisTokens: 16_000,
+      maxSynthesisTokens: 6_000,
     });
   });
 });

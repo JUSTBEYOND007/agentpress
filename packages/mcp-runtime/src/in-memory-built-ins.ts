@@ -35,8 +35,8 @@ async function createLinkedClient(
   serverId: BuiltInMcpServerId,
   handler: BuiltInSearchHandlers[BuiltInMcpServerId],
 ): Promise<Client> {
-  const maximumResults = serverId === 'web_research' ? 3 : 20;
-  const defaultResults = serverId === 'web_research' ? 3 : 8;
+  const maximumResults = serverId === 'web_research' ? 2 : 20;
+  const defaultResults = serverId === 'web_research' ? 2 : 8;
   const server = new McpServer(
     { name: `agentpress-${serverId}`, version: '1.0.0' },
     {

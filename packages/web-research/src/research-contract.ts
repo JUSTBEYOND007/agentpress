@@ -1,3 +1,6 @@
+import { Type, type Static } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
+
 export const researchPurposes = [
   'worldbuilding',
   'era',
@@ -10,102 +13,166 @@ export type ResearchPurpose = (typeof researchPurposes)[number];
 export const researchDepths = ['quick', 'standard', 'deep'] as const;
 export type ResearchDepth = (typeof researchDepths)[number];
 
-export type ResearchClaim = {
-  readonly text: string;
-  readonly evidenceIds: readonly string[];
-  readonly confidence: number;
-};
-export type ResearchBriefSource = {
-  readonly evidenceId: string;
-  readonly title: string;
-  readonly sourceUri?: string;
-};
-export type ResearchBriefContent = {
-  readonly schemaVersion: 1;
-  readonly purpose: ResearchPurpose;
-  readonly depth: ResearchDepth;
-  readonly summary: string;
-  readonly claims: readonly ResearchClaim[];
-  readonly conflicts: readonly string[];
-  readonly unknowns: readonly string[];
-  readonly implications: readonly string[];
-  readonly sources: readonly ResearchBriefSource[];
-  readonly confidence: number;
-  readonly queryLog: readonly { readonly query: string; readonly resultCount: number }[];
-  readonly partialFailures: readonly string[];
-  readonly providerRevision: string;
-};
+const nonEmptyText = (maxLength: number) =>
+  Type.String({ minLength: 1, maxLength, pattern: '\\S' });
+const evidenceIdSchema = Type.String({
+  pattern:
+    '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+});
+const confidenceSchema = Type.Number({ minimum: 0, maximum: 1 });
+
+export const researchBriefLimits = {
+  maxClaims: 20,
+  maxSources: 24,
+  maxQueries: 8,
+  maxEvidencePerClaim: 24,
+  maxListItems: 20,
+} as const;
+
+const boundedTextList = Type.Array(nonEmptyText(2_000), {
+  maxItems: researchBriefLimits.maxListItems,
+});
+
+export const researchClaimSchema = Type.Object(
+  {
+    text: nonEmptyText(2_000),
+    evidenceIds: Type.Array(evidenceIdSchema, {
+      minItems: 1,
+      maxItems: researchBriefLimits.maxEvidencePerClaim,
+    }),
+    confidence: confidenceSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const researchBriefSourceSchema = Type.Object(
+  {
+    evidenceId: evidenceIdSchema,
+    title: nonEmptyText(500),
+    sourceUri: Type.Optional(nonEmptyText(4_000)),
+  },
+  { additionalProperties: false },
+);
+
+export const researchQueryLogEntrySchema = Type.Object(
+  {
+    query: nonEmptyText(1_000),
+    resultCount: Type.Integer({ minimum: 0, maximum: 100_000 }),
+  },
+  { additionalProperties: false },
+);
+
+/** Canonical persisted and model-output contract for ResearchBrief content. */
+export const researchBriefContentSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    purpose: Type.Union(researchPurposes.map((purpose) => Type.Literal(purpose))),
+    depth: Type.Union(researchDepths.map((depth) => Type.Literal(depth))),
+    summary: nonEmptyText(4_000),
+    claims: Type.Array(researchClaimSchema, { maxItems: researchBriefLimits.maxClaims }),
+    conflicts: boundedTextList,
+    unknowns: boundedTextList,
+    implications: boundedTextList,
+    sources: Type.Array(researchBriefSourceSchema, { maxItems: researchBriefLimits.maxSources }),
+    confidence: confidenceSchema,
+    queryLog: Type.Array(researchQueryLogEntrySchema, { maxItems: researchBriefLimits.maxQueries }),
+    partialFailures: boundedTextList,
+    providerRevision: nonEmptyText(160),
+  },
+  { additionalProperties: false },
+);
+
+export const researchBriefSubmissionSchema = Type.Object(
+  {
+    ...researchBriefContentSchema.properties,
+    summary: Type.Optional(researchBriefContentSchema.properties.summary),
+    confidence: Type.Optional(researchBriefContentSchema.properties.confidence),
+  },
+  { additionalProperties: false },
+);
+
+type DeepReadonly<T> = T extends readonly (infer Item)[]
+  ? readonly DeepReadonly<Item>[]
+  : T extends object
+    ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
+    : T;
+
+export type ResearchClaim = DeepReadonly<Static<typeof researchClaimSchema>>;
+export type ResearchBriefSource = DeepReadonly<Static<typeof researchBriefSourceSchema>>;
+export type ResearchBriefContent = DeepReadonly<Static<typeof researchBriefContentSchema>>;
+export type ResearchBriefSubmission = DeepReadonly<Static<typeof researchBriefSubmissionSchema>>;
+
+export function normalizeResearchBriefSubmission(
+  value: unknown,
+  fallbackSummary: string,
+): ResearchBriefContent {
+  if (!Value.Check(researchBriefSubmissionSchema, value)) {
+    throwStructuralError(researchBriefSubmissionSchema, value, 'submission');
+  }
+  const summary = value.summary ?? fallbackSummary.trim();
+  const confidence = value.confidence ?? deriveSubmissionConfidence(value);
+  const content = { ...value, summary, confidence };
+  assertResearchBriefContent(content);
+  return content;
+}
 
 export function assertResearchBriefContent(value: unknown): asserts value is ResearchBriefContent {
-  if (!isRecord(value) || value.schemaVersion !== 1) {
-    throw new TypeError('ResearchBrief requires schemaVersion=1');
+  if (!Value.Check(researchBriefContentSchema, value)) {
+    throwStructuralError(researchBriefContentSchema, value, 'content');
   }
-  if (!researchPurposes.includes(value.purpose as ResearchPurpose)) {
-    throw new TypeError('ResearchBrief purpose is invalid');
-  }
-  if (!researchDepths.includes(value.depth as ResearchDepth)) {
-    throw new TypeError('ResearchBrief depth is invalid');
-  }
-  for (const key of ['summary', 'providerRevision'] as const) {
-    if (typeof value[key] !== 'string' || value[key].trim() === '') {
-      throw new TypeError(`ResearchBrief ${key} is required`);
-    }
-  }
-  for (const key of [
-    'claims',
-    'conflicts',
-    'unknowns',
-    'implications',
-    'sources',
-    'queryLog',
-    'partialFailures',
-  ] as const) {
-    if (!Array.isArray(value[key])) throw new TypeError(`ResearchBrief ${key} must be an array`);
-  }
-  assertConfidence(value.confidence, 'ResearchBrief confidence');
-  const confidence = value.confidence as number;
+
   const sourceIds = new Set<string>();
-  const sources = value.sources as readonly unknown[];
-  const claims = value.claims as readonly unknown[];
-  const conflicts = value.conflicts as readonly unknown[];
-  const partialFailures = value.partialFailures as readonly unknown[];
-  for (const source of sources) {
-    if (
-      !isRecord(source) ||
-      typeof source.evidenceId !== 'string' ||
-      source.evidenceId.length === 0
-    ) {
-      throw new TypeError('ResearchBrief sources require Evidence IDs');
-    }
-    if (sourceIds.has(source.evidenceId))
+  for (const source of value.sources) {
+    if (sourceIds.has(source.evidenceId)) {
       throw new TypeError('ResearchBrief sources must be unique');
+    }
     sourceIds.add(source.evidenceId);
   }
-  for (const claim of claims) {
-    if (!isRecord(claim) || typeof claim.text !== 'string' || claim.text.trim() === '') {
-      throw new TypeError('ResearchBrief claims require text');
-    }
-    if (!Array.isArray(claim.evidenceIds) || claim.evidenceIds.length === 0) {
-      throw new TypeError('ResearchBrief claims require Evidence IDs');
-    }
-    if (claim.evidenceIds.some((id) => typeof id !== 'string' || !sourceIds.has(id))) {
+  for (const claim of value.claims) {
+    if (claim.evidenceIds.some((id) => !sourceIds.has(id))) {
       throw new TypeError('ResearchBrief claims may reference only listed Evidence IDs');
     }
-    assertConfidence(claim.confidence, 'ResearchBrief claim confidence');
   }
-  if ((conflicts.length > 0 || partialFailures.length > 0) && confidence >= 1) {
+  if ((value.conflicts.length > 0 || value.partialFailures.length > 0) && value.confidence >= 1) {
     throw new TypeError(
       'ResearchBrief with conflicts or partial failures cannot claim full confidence',
     );
   }
 }
 
-function assertConfidence(value: unknown, label: string): void {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new TypeError(`${label} must be between 0 and 1`);
+/** Keeps the canonical source directory and persisted Artifact Evidence edges identical. */
+export function assertResearchBriefEvidenceClosure(
+  content: ResearchBriefContent,
+  artifactEvidenceIds: readonly string[],
+): void {
+  const sourceIds = new Set(content.sources.map(({ evidenceId }) => evidenceId));
+  const outerIds = new Set(artifactEvidenceIds);
+  if (outerIds.size !== artifactEvidenceIds.length) {
+    throw new TypeError('ResearchBrief Artifact Evidence IDs must be unique');
+  }
+  if (
+    sourceIds.size !== outerIds.size ||
+    [...sourceIds].some((evidenceId) => !outerIds.has(evidenceId))
+  ) {
+    throw new TypeError('ResearchBrief sources must exactly match the Artifact Evidence IDs');
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function deriveSubmissionConfidence(value: ResearchBriefSubmission): number {
+  const claimConfidence =
+    value.claims.length === 0 ? 0 : Math.min(...value.claims.map(({ confidence }) => confidence));
+  return value.conflicts.length > 0 || value.partialFailures.length > 0
+    ? Math.min(claimConfidence, 0.99)
+    : claimConfidence;
+}
+
+function throwStructuralError(
+  schema: typeof researchBriefContentSchema | typeof researchBriefSubmissionSchema,
+  value: unknown,
+  label: string,
+): never {
+  const firstError = Value.Errors(schema, value).First();
+  const path = firstError?.path ?? '/';
+  const message = firstError?.message ?? 'unknown schema violation';
+  throw new TypeError(`ResearchBrief ${label} structure is invalid at ${path}: ${message}`);
 }

@@ -144,12 +144,26 @@ export class PiRuntimeAdapter implements AgentRuntime {
     sink: RuntimeEventSink,
     signal?: AbortSignal,
   ): Promise<RuntimeResult> {
+    const maxOutputTokens = request.maxOutputTokens ?? this.identity.maxOutputTokens;
+    if (
+      !Number.isSafeInteger(maxOutputTokens) ||
+      maxOutputTokens < 1 ||
+      maxOutputTokens > this.identity.maxOutputTokens
+    ) {
+      const error: RuntimeFailure = {
+        code: 'protocol_error',
+        message: `Invalid max output token budget: ${String(maxOutputTokens)}`,
+        retryable: false,
+      };
+      await sink({ type: 'run.failed', error });
+      return { status: 'failed', messages: [], error };
+    }
     const historyFailure = validateRuntimeHistory(request.history);
     if (historyFailure) {
       await sink({ type: 'run.failed', error: historyFailure });
       return { status: 'failed', messages: [], error: historyFailure };
     }
-    const budget = this.identity.contextWindow - this.identity.maxOutputTokens;
+    const budget = this.identity.contextWindow - maxOutputTokens;
     const compactContext = async (
       input: Parameters<NonNullable<RuntimeRequest['compactContext']>>[0],
     ): Promise<RuntimeContextCompactionResult> => {
@@ -171,7 +185,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
         runId: request.runId,
         reason: 'overflow',
         contextWindow: this.identity.contextWindow,
-        reserveTokens: this.identity.maxOutputTokens,
+        reserveTokens: maxOutputTokens,
         messages: initialHistory.map(toCompactionSnapshot),
         ...(signal ? { signal } : {}),
       });
@@ -217,6 +231,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
       toolChoiceServed = true;
       const streamOptions = {
         ...options,
+        maxTokens: maxOutputTokens,
         ...(toolChoice === undefined ? {} : { toolChoice }),
       };
       this.onStreamOptions?.(streamOptions);
@@ -312,7 +327,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
               if (
                 !shouldCompact(estimated, this.identity.contextWindow, {
                   enabled: true,
-                  reserveTokens: this.identity.maxOutputTokens,
+                  reserveTokens: maxOutputTokens,
                   keepRecentTokens: 1,
                 })
               ) {
@@ -322,7 +337,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
                 runId: request.runId,
                 reason: 'mid_turn',
                 contextWindow: this.identity.contextWindow,
-                reserveTokens: this.identity.maxOutputTokens,
+                reserveTokens: maxOutputTokens,
                 messages: context.messages.map(toCompactionSnapshot),
                 ...(signal ? { signal } : {}),
               });
@@ -406,7 +421,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
           runId: request.runId,
           reason: 'overflow',
           contextWindow: this.identity.contextWindow,
-          reserveTokens: this.identity.maxOutputTokens,
+          reserveTokens: maxOutputTokens,
           messages: activeMessages.map(toCompactionSnapshot),
           ...(signal ? { signal } : {}),
         });

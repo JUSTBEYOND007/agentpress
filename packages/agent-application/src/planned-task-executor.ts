@@ -23,9 +23,10 @@ import type { RunEventPublisher, RuntimeToolFactory } from './contracts.js';
 import {
   assertSpecialistArtifactPolicy,
   assertStrictSchema,
+  normalizeSpecialistArtifacts,
   specialistApplicationTurn,
   specialistPrompt,
-  taskCompleteSchema,
+  taskCompleteSchemaForRole,
   type PlannedTaskSpec,
   type SettledTask,
   type StructuredArtifact,
@@ -42,7 +43,7 @@ import { SpecialistResultStore } from './specialist-result-store.js';
 
 const INLINE_TASK_TIMEOUT_MS = 120_000;
 const TASK_LEASE_GRACE_MS = 30_000;
-const RESEARCH_TASK_MAX_TOOL_CALLS = researchExecutionPolicy('deep').maxQueries;
+const RESEARCH_TASK_POLICY = researchExecutionPolicy('deep');
 
 type PlannedTaskExecutorOptions = {
   readonly database: AgentPressDatabase;
@@ -238,22 +239,24 @@ export class PlannedTaskExecutor {
           readonly failure?: string;
         }
       | undefined;
+    const taskCompleteSchema = taskCompleteSchemaForRole(task.owner);
     const taskComplete: RuntimeTool = {
       name: 'task_complete',
       label: 'Complete specialist task',
       description:
         'Submit the validated specialist result. This is the only valid completion path.',
       parameters: taskCompleteSchema,
-      constrainedSampling: { type: 'json_schema', strict: 'require' },
+      constrainedSampling: { type: 'json_schema', strict: 'prefer' },
       executionMode: 'sequential',
       terminateOnSuccess: true,
       execute: async (arguments_) => {
         assertStrictSchema(taskCompleteSchema, arguments_, 'task_complete');
         const submitted = arguments_ as typeof completion & {};
-        assertSpecialistArtifactPolicy(task.owner, submitted.artifacts);
-        const evidenceIds = submitted.artifacts.flatMap((artifact) => artifact.evidenceIds);
+        const artifacts = normalizeSpecialistArtifacts(task.owner, submitted.artifacts);
+        assertSpecialistArtifactPolicy(task.owner, artifacts);
+        const evidenceIds = artifacts.flatMap((artifact) => artifact.evidenceIds);
         await this.options.results.assertTaskEvidence(runId, task.id, evidenceIds);
-        completion = submitted;
+        completion = { ...submitted, artifacts };
         return Promise.resolve({ accepted: true });
       },
     };
@@ -272,8 +275,11 @@ export class PlannedTaskExecutor {
         : [];
     });
     const recoveredHistory = await this.loadApprovedToolContinuation(runId, task.id);
-    const maxToolCalls = task.capabilities.includes('web.research')
-      ? RESEARCH_TASK_MAX_TOOL_CALLS
+    const runtimeLimits = task.capabilities.includes('web.research')
+      ? {
+          maxToolCalls: RESEARCH_TASK_POLICY.maxQueries,
+          maxOutputTokens: RESEARCH_TASK_POLICY.maxSynthesisTokens,
+        }
       : undefined;
     const immutableTaskContext = JSON.stringify({
       task: {
@@ -298,7 +304,7 @@ export class PlannedTaskExecutor {
           [...domainTools, taskComplete],
           signal,
           true,
-          maxToolCalls,
+          runtimeLimits,
         )
       : await this.options.sessions.execute(
           runId,
@@ -312,7 +318,7 @@ export class PlannedTaskExecutor {
           [...domainTools, taskComplete],
           signal,
           false,
-          maxToolCalls,
+          runtimeLimits,
         );
     for (let repair = 1; !completion && result.status !== 'cancelled' && repair <= 2; repair += 1) {
       result = await this.options.sessions.execute(
@@ -330,7 +336,7 @@ export class PlannedTaskExecutor {
         [...domainTools, taskComplete],
         signal,
         false,
-        maxToolCalls,
+        runtimeLimits,
       );
     }
     const assistant = findAssistant(result);

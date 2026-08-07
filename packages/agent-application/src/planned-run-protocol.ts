@@ -4,8 +4,13 @@ import {
   type RuntimeCurrentTurn,
   type RuntimeUsage,
 } from '@agentpress/agent-runtime';
-import { Type } from '@sinclair/typebox';
-import { assertResearchBriefContent } from '@agentpress/web-research';
+import { Type, type TSchema } from '@sinclair/typebox';
+import {
+  assertResearchBriefEvidenceClosure,
+  assertResearchBriefContent,
+  normalizeResearchBriefSubmission,
+  researchBriefSubmissionSchema,
+} from '@agentpress/web-research';
 
 import type { SpecialistRole } from './specialist-task-contract.js';
 
@@ -132,35 +137,73 @@ export const planSubmitSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const taskCompleteSchema = Type.Object(
-  {
-    status: Type.Unsafe<'succeeded' | 'failed'>({
-      type: 'string',
-      enum: ['succeeded', 'failed'],
-    }),
-    summary: Type.String({ minLength: 1, maxLength: 20_000 }),
-    artifacts: Type.Array(
-      Type.Object(
-        {
-          type: Type.Union(artifactTypes.map((value) => Type.Literal(value))),
-          title: Type.String({ minLength: 1, maxLength: 300 }),
-          summary: Type.String({ minLength: 1, maxLength: 4_000 }),
-          content: Type.Record(Type.String(), Type.Unknown()),
-          evidenceIds: Type.Array(Type.String({ format: 'uuid' }), {
-            maxItems: 100,
-            description:
-              'IDs of EvidenceRecord rows produced by this task. Use [] when the artifact has no EvidenceRecord; article, revision, block, edit-proposal, asset, and tool-call IDs are provenance, not EvidenceRecord IDs.',
-          }),
-        },
-        { additionalProperties: false },
-      ),
-      { maxItems: 12 },
-    ),
-    warnings: Type.Array(Type.String({ minLength: 1, maxLength: 2_000 }), { maxItems: 20 }),
-    failure: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),
-  },
-  { additionalProperties: false },
+const artifactSchema = (type: TSchema, content: TSchema) =>
+  Type.Object(
+    {
+      type,
+      title: Type.String({ minLength: 1, maxLength: 300 }),
+      summary: Type.String({ minLength: 1, maxLength: 4_000 }),
+      content,
+      evidenceIds: Type.Array(Type.String({ format: 'uuid' }), {
+        maxItems: 100,
+        description:
+          'IDs of EvidenceRecord rows produced by this task. Use [] when the artifact has no EvidenceRecord; article, revision, block, edit-proposal, asset, and tool-call IDs are provenance, not EvidenceRecord IDs.',
+      }),
+    },
+    { additionalProperties: false },
+  );
+
+const createTaskCompleteSchema = (artifact: TSchema) =>
+  Type.Object(
+    {
+      status: Type.Unsafe<'succeeded' | 'failed'>({
+        type: 'string',
+        enum: ['succeeded', 'failed'],
+      }),
+      summary: Type.String({ minLength: 1, maxLength: 20_000 }),
+      artifacts: Type.Array(artifact, { maxItems: 12 }),
+      warnings: Type.Array(Type.String({ minLength: 1, maxLength: 2_000 }), { maxItems: 20 }),
+      failure: Type.Optional(Type.String({ minLength: 1, maxLength: 4_000 })),
+    },
+    { additionalProperties: false },
+  );
+
+export const taskCompleteSchema = createTaskCompleteSchema(
+  artifactSchema(
+    Type.Union(artifactTypes.map((value) => Type.Literal(value))),
+    Type.Record(Type.String(), Type.Unknown()),
+  ),
 );
+
+const researcherTaskCompleteSchema = createTaskCompleteSchema(
+  Type.Object(
+    {
+      type: Type.Literal('ResearchBrief'),
+      title: Type.String({ minLength: 1, maxLength: 300 }),
+      summary: Type.String({ minLength: 1, maxLength: 4_000 }),
+      content: researchBriefSubmissionSchema,
+    },
+    { additionalProperties: false },
+  ),
+);
+
+export function taskCompleteSchemaForRole(role: SpecialistRole): TSchema {
+  return role === 'researcher' ? researcherTaskCompleteSchema : taskCompleteSchema;
+}
+
+export function normalizeSpecialistArtifacts(
+  owner: SpecialistRole,
+  artifacts: readonly unknown[],
+): readonly StructuredArtifact[] {
+  if (owner !== 'researcher') return artifacts as readonly StructuredArtifact[];
+  return artifacts.map((value) => {
+    const artifact = value as Omit<StructuredArtifact, 'evidenceIds'>;
+    const content = normalizeResearchBriefSubmission(artifact.content, artifact.summary);
+    const evidenceIds = content.sources.map(({ evidenceId }) => evidenceId);
+    assertResearchBriefEvidenceClosure(content, evidenceIds);
+    return { ...artifact, content, evidenceIds };
+  });
+}
 
 export const planRevisionSchema = Type.Object(
   {

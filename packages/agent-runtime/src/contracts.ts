@@ -150,6 +150,7 @@ export type RuntimeRequest = {
   /** One host-owned forced choice for the next provider request. */
   readonly toolChoice?: RuntimeToolChoice;
   readonly maxToolCalls?: number;
+  readonly maxOutputTokens?: number;
   readonly maxFailedCompletionCalls?: number;
   readonly toolLoopGuard?: {
     /** Defaults to three consecutive identical calls. */

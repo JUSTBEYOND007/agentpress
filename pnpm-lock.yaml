@@ -790,6 +790,9 @@ importers:
 
   packages/web-research:
     dependencies:
+      '@sinclair/typebox':
+        specifier: 'catalog:'
+        version: 0.34.41
       parse5:
         specifier: 7.3.0
         version: 7.3.0

@@ -127,6 +127,49 @@ describe('PiRuntimeAdapter', () => {
     await expect(execution).resolves.toMatchObject({ status: 'cancelled' });
   });
 
+  it('applies a host-owned per-request output token budget', async () => {
+    const streamOptions: Readonly<Record<string, unknown>>[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: ['Bounded output.'],
+      maxOutputTokens: 100,
+      onStreamOptions: (options) => streamOptions.push(options),
+    });
+    const result = await runtime.execute(
+      {
+        runId: 'bounded-output',
+        systemPrompt: 'Respond within the host budget.',
+        history: [],
+        currentTurn: currentTurn('respond'),
+        maxOutputTokens: 40,
+      },
+      () => undefined,
+    );
+
+    expect(result.status).toBe('completed');
+    expect(streamOptions).toEqual([expect.objectContaining({ maxTokens: 40 })]);
+  });
+
+  it('fails closed when a request output budget exceeds the selected model', async () => {
+    const events: RuntimeEvent[] = [];
+    const runtime = PiRuntimeAdapter.forTests({ responses: [], maxOutputTokens: 100 });
+    const result = await runtime.execute(
+      {
+        runId: 'invalid-output-budget',
+        systemPrompt: 'Do not run.',
+        history: [],
+        currentTurn: currentTurn('respond'),
+        maxOutputTokens: 101,
+      },
+      (event) => {
+        events.push(event);
+      },
+    );
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'protocol_error' } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'run.failed', error: { code: 'protocol_error' } });
+  });
+
   it('compacts oversized persisted history before the first provider request', async () => {
     const calls: unknown[] = [];
     const runtime = PiRuntimeAdapter.forTests({

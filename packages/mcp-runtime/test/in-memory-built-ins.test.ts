@@ -21,7 +21,7 @@ describe('in-memory built-in MCP servers', () => {
     const output = await gateway.call({
       serverId: 'workspace_knowledge',
       toolName: 'search',
-      arguments: { query: 'Kafka', limit: 3 },
+      arguments: { query: 'Kafka', limit: 2 },
       context: {
         runId: '0f911cbe-9cb5-465f-b9ae-267597d95f37',
         toolCallId: 'call-1',
@@ -33,7 +33,7 @@ describe('in-memory built-in MCP servers', () => {
         evidenceId: 'e-1',
         request: {
           query: 'Kafka',
-          limit: 3,
+          limit: 2,
           runId: '0f911cbe-9cb5-465f-b9ae-267597d95f37',
         },
       },
@@ -112,7 +112,7 @@ describe('in-memory built-in MCP servers', () => {
     });
 
     expect(search.mock.calls.map(([request]) => request)).toEqual([
-      expect.objectContaining({ limit: 3 }),
+      expect.objectContaining({ limit: 2 }),
       expect.objectContaining({ limit: 8 }),
     ]);
     await Promise.all([

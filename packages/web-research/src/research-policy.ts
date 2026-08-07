@@ -1,4 +1,9 @@
-import type { ResearchBriefContent, ResearchDepth, ResearchPurpose } from './research-contract.js';
+import {
+  researchBriefLimits,
+  type ResearchBriefContent,
+  type ResearchDepth,
+  type ResearchPurpose,
+} from './research-contract.js';
 
 export type ResearchSearchHit = {
   readonly title: string;
@@ -56,27 +61,27 @@ export type ResearchPlan = {
 const policies: Readonly<Record<ResearchDepth, ResearchExecutionPolicy>> = {
   quick: {
     maxQueries: 2,
-    resultsPerQuery: 5,
+    resultsPerQuery: 2,
     maxSources: 5,
     fetchConcurrency: 2,
     maxSourceBytes: 500_000,
-    maxSynthesisTokens: 4_000,
+    maxSynthesisTokens: 2_500,
   },
   standard: {
     maxQueries: 4,
-    resultsPerQuery: 8,
+    resultsPerQuery: 2,
     maxSources: 12,
     fetchConcurrency: 4,
     maxSourceBytes: 1_000_000,
-    maxSynthesisTokens: 8_000,
+    maxSynthesisTokens: 4_000,
   },
   deep: {
-    maxQueries: 8,
-    resultsPerQuery: 10,
-    maxSources: 24,
+    maxQueries: researchBriefLimits.maxQueries,
+    resultsPerQuery: 2,
+    maxSources: researchBriefLimits.maxSources,
     fetchConcurrency: 6,
     maxSourceBytes: 1_000_000,
-    maxSynthesisTokens: 16_000,
+    maxSynthesisTokens: 6_000,
   },
 };
 
