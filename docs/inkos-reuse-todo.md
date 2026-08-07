@@ -258,12 +258,14 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       Schema 仍保留 <=24 的兼容上限）；并行批次中的超额
       调用被拒绝后仍允许同批 `task_complete` 结算。该行为由 Web Research、MCP、Pi Runtime 和 Agent
       Application 分层测试覆盖，提交为 `f7281ab`。
-- [ ] **P0：闭合研究 Evidence 事实链。** Researcher submission 不重复填写 Artifact 外层
+- [x] **P0：闭合研究 Evidence 事实链。** Researcher submission 不重复填写 Artifact 外层
       `evidenceIds`，宿主从 canonical `content.sources[].evidenceId` 确定性生成关联边；Claim 只能引用
       Source 子集，Source 集合与 Artifact Evidence 集合必须精确相等，之后再验证每个 UUID 属于当前
       Run/Task。`91f47a7` 已增加强类型 `source_tool_call_id`、ToolCall attempt 关联、幂等唯一键和
-      inline/oversized ToolOutput 同构投影；剩余项是消除 ToolCall succeeded 后 Evidence 另事务写入的
-      崩溃窗口，因此总项仍不勾选。
+      inline/oversized ToolOutput 同构投影。`0afeed3` 将 Evidence projection 放入 ToolCall succeeded
+      settlement 的同一 PostgreSQL 事务；故障注入时 projector 失败会使 ToolCall 保持 `executing`，不产生
+      `tool.succeeded` 事件，也不写入 Evidence。ToolCall integration 17/17、Direct Run integration 41/41
+      和该回滚断言已通过，故本项完成。
 - [x] **P0：闭合研究来源 provenance。** Provider/adapter revision 必须由 Tool Definition 明确声明并
       快照到 ToolCall，不能由模型填写或把 `source_revision` 内容哈希冒充 Provider revision；oversized
       ToolOutput Artifact 路径已由 `91f47a7` 产生与 inline output 相同的 Evidence。`1318d00` 由内置
@@ -706,9 +708,9 @@ completed 误判为降级。Agent Evals 42 个测试通过。
   Source 精确相等，Claim 只引用该 Source 子集。该报告证明真实模型的协议行为，不是公网搜索成功；fixture
   未写入生产代码且验收后已删除。
 
-因此 Provider wire capability、双向适配、ResearchBrief canonical Schema、研究输出预算和来源
-provenance 已完成；ToolCall settlement -> Evidence projection 的事务闭包与真实公网 `workflow-02` 仍未
-完成，在搜索服务额度恢复并从 PostgreSQL 验收前不得标记在线闭环通过。
+因此 Provider wire capability、双向适配、ResearchBrief canonical Schema、研究输出预算、来源
+provenance 以及 ToolCall settlement -> Evidence projection 的事务闭包已完成；真实公网 `workflow-02`
+仍未完成，在搜索服务额度恢复并从 PostgreSQL 验收前不得标记在线闭环通过。
 
 - [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
       用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
