@@ -246,7 +246,8 @@ export function selectSkillsForInvocation(
 
 export type SkillResourceDocument = {
   readonly path: string;
-  readonly content: string;
+  /** Raw bytes are preferred at filesystem boundaries so invalid UTF-8 can fail closed. */
+  readonly content: string | Uint8Array;
   readonly fileType: 'file' | 'directory' | 'symlink' | 'hardlink' | 'other';
 };
 
@@ -274,16 +275,34 @@ export function loadStaticSkillResources(
     if (document.fileType !== 'file') {
       throw new Error(`Skill resource ${path} must be a regular file`);
     }
-    const bytes = Buffer.byteLength(document.content, 'utf8');
+    const decoded = decodeSkillResource(document.content, path);
+    const bytes = decoded.byteLength;
     if (bytes > maxFileBytes) throw new Error(`Skill resource ${path} exceeds the file limit`);
     totalBytes += bytes;
     if (totalBytes > maxTotalBytes) throw new Error('Skill resources exceed the total limit');
     return {
       path,
-      content: document.content,
-      contentHash: createHash('sha256').update(document.content).digest('hex'),
+      content: decoded.content,
+      contentHash: createHash('sha256').update(decoded.content).digest('hex'),
     };
   });
+}
+
+function decodeSkillResource(
+  value: string | Uint8Array,
+  path: string,
+): { readonly content: string; readonly byteLength: number } {
+  if (typeof value === 'string') {
+    return { content: value, byteLength: Buffer.byteLength(value, 'utf8') };
+  }
+  try {
+    return {
+      content: new TextDecoder('utf-8', { fatal: true }).decode(value),
+      byteLength: value.byteLength,
+    };
+  } catch {
+    throw new Error(`Skill resource ${path} must be valid UTF-8`);
+  }
 }
 
 export function hashSkillRevisionContent(
