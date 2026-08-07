@@ -22,12 +22,13 @@ describe('run projection', () => {
 
     expect(parts).toHaveLength(2);
     expect(parts.map(({ status }) => status)).toEqual(['task.succeeded', 'tool.succeeded']);
+    expect(parts.map(({ outcome }) => outcome)).toEqual(['succeeded', 'succeeded']);
     expect(parts.every(({ status }) => !status.includes('executing'))).toBe(true);
     expect(parts[0]?.payload).toMatchObject({ durationMs: 3 });
     expect(parts[1]?.payload).toMatchObject({ durationMs: 1 });
     expect(parts[1]?.payload.lifecycleStages).toEqual([
       { status: 'tool.executing', eventAt: new Date(2).toISOString() },
-      { status: 'tool.succeeded', eventAt: new Date(3).toISOString() },
+      { status: 'tool.succeeded', outcome: 'succeeded', eventAt: new Date(3).toISOString() },
     ]);
   });
 
@@ -109,6 +110,25 @@ describe('run projection', () => {
       { id: 'run-1:tool:tool-a-retry', status: 'tool.succeeded' },
     ]);
     expect(projectRunParts(events)).toEqual(projectRunParts(events));
+  });
+
+  it('projects host-owned typed outcomes without relying on consumer labels', () => {
+    const parts = projectRunParts([
+      event(1, 'task.timed_out', { taskId: 'task-timeout' }),
+      event(2, 'task.cancelled', { taskId: 'task-cancelled' }),
+      event(3, 'task.interrupted', { taskId: 'task-interrupted' }),
+      event(4, 'task.stale', { taskId: 'task-stale' }),
+      event(5, 'task.degraded', { taskId: 'task-degraded' }),
+      event(6, 'task.failed', { taskId: 'task-failed' }),
+    ]);
+    expect(parts.map(({ outcome }) => outcome)).toEqual([
+      'timed_out',
+      'cancelled',
+      'interrupted',
+      'stale',
+      'degraded',
+      'failed',
+    ]);
   });
 
   it('projects approval while waiting and folds it into execution after continuation', () => {

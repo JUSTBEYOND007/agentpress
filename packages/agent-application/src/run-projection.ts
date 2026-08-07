@@ -1,4 +1,4 @@
-import type { DurableRunEvent, RunPart } from './contracts.js';
+import type { ActivityOutcome, DurableRunEvent, RunPart } from './contracts.js';
 
 export type ProposalProjectionStatus =
   | 'pending'
@@ -78,6 +78,7 @@ export function projectRunParts(
 function lifecycleStage(part: RunPart): Readonly<Record<string, unknown>> {
   return {
     status: part.status,
+    ...(part.outcome ? { outcome: part.outcome } : {}),
     eventAt: part.payload.eventAt,
   };
 }
@@ -167,6 +168,7 @@ function toRunParts(
   const proposalId = proposalIdFromPayload(event.payload);
   const proposalStatus = proposalId ? proposalStatuses.get(proposalId) : undefined;
   const lifecycle = lifecycleKey(event);
+  const outcome = partType === 'activity' ? activityOutcome(type) : undefined;
   return [
     {
       id: lifecycle ? `${event.runId}:${lifecycle}` : event.id,
@@ -174,6 +176,7 @@ function toRunParts(
       sequence: event.sequence,
       type: partType,
       status: type,
+      ...(outcome ? { outcome } : {}),
       payload: {
         ...event.payload,
         eventAt: event.createdAt.toISOString(),
@@ -183,6 +186,19 @@ function toRunParts(
       },
     },
   ];
+}
+
+function activityOutcome(status: string): ActivityOutcome | undefined {
+  if (status.endsWith('.succeeded') || status.endsWith('.completed')) return 'succeeded';
+  if (status.endsWith('.degraded') || status === 'completed_with_degradation') return 'degraded';
+  if (status.endsWith('.timed_out') || status.endsWith('.timeout') || status === 'task_timeout')
+    return 'timed_out';
+  if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return 'cancelled';
+  if (status.endsWith('.interrupted')) return 'interrupted';
+  if (status.endsWith('.stale')) return 'stale';
+  if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
+    return 'failed';
+  return undefined;
 }
 
 function dateProperty(value: Readonly<Record<string, unknown>>, key: string): Date | undefined {

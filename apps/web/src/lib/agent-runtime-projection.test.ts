@@ -254,20 +254,23 @@ describe('run presentation projection', () => {
   });
 
   it('preserves typed timeout, cancellation, interruption, stale and degraded stage outcomes', () => {
-    const activity = part('activity', 'task.succeeded', 1, {
-      taskId: 'task-typed-outcomes',
-      lifecycleStages: [
-        { status: 'task.timed_out' },
-        { status: 'task.cancelled' },
-        { status: 'task.interrupted' },
-        { status: 'task.stale' },
-        { status: 'task.degraded' },
-      ],
-    });
+    const activity = {
+      ...part('activity', 'task.succeeded', 1, {
+        taskId: 'task-typed-outcomes',
+        lifecycleStages: [
+          { status: 'task.timed_out' },
+          { status: 'task.cancelled' },
+          { status: 'task.interrupted' },
+          { status: 'task.stale' },
+          { status: 'task.degraded' },
+        ],
+      }),
+      outcome: 'degraded' as const,
+    };
     const [item] = executionItems([activity], [activity]);
     expect(item).toMatchObject({
       kind: 'pipeline',
-      status: 'completed',
+      status: 'degraded',
       stages: [
         { status: 'timed_out', label: '已超时' },
         { status: 'cancelled', label: '已取消' },

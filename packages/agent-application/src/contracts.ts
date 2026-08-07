@@ -210,8 +210,19 @@ export type RunPart = {
     | 'progress'
     | 'usage';
   readonly status: string;
+  readonly outcome?: ActivityOutcome;
   readonly payload: Readonly<Record<string, unknown>>;
 };
+
+/** Host-owned semantic outcome for an execution activity; never inferred by the UI. */
+export type ActivityOutcome =
+  | 'succeeded'
+  | 'degraded'
+  | 'failed'
+  | 'cancelled'
+  | 'timed_out'
+  | 'interrupted'
+  | 'stale';
 
 export type RunProjection = {
   readonly runId: string;

@@ -1,4 +1,5 @@
 import type {
+  ActivityOutcome,
   ConsumerExecutionItem,
   ConsumerExecutionStage,
   ConsumerExecutionStatus,
@@ -161,7 +162,7 @@ export function executionItems(
         ? `task:${taskId}`
         : undefined;
     if (!key) continue;
-    const status = executionStatus(part.status);
+    const status = executionStatus(part.status, part.outcome);
     const label = activityDisplayLabel(part, taskLabels);
     const result = recordProperty(part.payload, 'output');
     const error = stringProperty(recordProperty(part.payload, 'failure'), 'message');
@@ -223,17 +224,17 @@ export function executionItems(
   return items.sort((a, b) => a.sequence - b.sequence);
 }
 
-function executionStatus(status: string): ConsumerExecutionStatus {
+function executionStatus(status: string, outcome?: ActivityOutcome): ConsumerExecutionStatus {
+  if (outcome) {
+    if (outcome === 'succeeded') return 'completed';
+    return outcome;
+  }
   if (status.endsWith('.timed_out') || status.endsWith('.timeout') || status === 'task_timeout')
     return 'timed_out';
   if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return 'cancelled';
   if (status.endsWith('.interrupted')) return 'interrupted';
   if (status.endsWith('.stale')) return 'stale';
-  if (
-    status.endsWith('.failed') ||
-    status.endsWith('.denied') ||
-    status.endsWith('.expired')
-  )
+  if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
     return 'failed';
   if (status.endsWith('.degraded') || status === 'completed_with_degradation') return 'degraded';
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return 'completed';
@@ -274,12 +275,13 @@ function lifecycleStagesForPart(part: RunPart, label: string): readonly Consumer
     const record = value as Record<string, unknown>;
     const status = stringProperty(record, 'status');
     if (!status) return [];
+    const outcome = activityOutcome(record.outcome);
     const explicitLabel = stringProperty(record, 'label');
     return [
       {
         id: `${part.id}:${String(index)}`,
         label: explicitLabel ?? stageLabel(label, status),
-        status: executionStatus(status),
+        status: executionStatus(status, outcome),
       },
     ];
   });
@@ -289,6 +291,18 @@ function lifecycleStagesForPart(part: RunPart, label: string): readonly Consumer
   return meaningful.filter(
     (stage, index) => index === 0 || stage.label !== meaningful[index - 1]?.label,
   );
+}
+
+function activityOutcome(value: unknown): ActivityOutcome | undefined {
+  return value === 'succeeded' ||
+    value === 'degraded' ||
+    value === 'failed' ||
+    value === 'cancelled' ||
+    value === 'timed_out' ||
+    value === 'interrupted' ||
+    value === 'stale'
+    ? value
+    : undefined;
 }
 
 const genericStageLabels = new Set(['已开始', '结果已生成', '未完成']);
