@@ -20,6 +20,7 @@ import {
   articleRevisions,
   articles,
   claimAgentTask,
+  checkpoints,
   connectDatabase,
   contextPacks,
   conversationBranches,
@@ -2360,6 +2361,29 @@ describeWithDatabase('Direct Run application flow', () => {
     });
 
     await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
+    const [eventsAfterFirstRecovery, checkpointsAfterFirstRecovery] = await Promise.all([
+      connection.db
+        .select({ eventType: runEvents.eventType })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+      connection.db
+        .select({ id: checkpoints.id })
+        .from(checkpoints)
+        .where(eq(checkpoints.runId, run.runId)),
+    ]);
+    await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
+    const [eventsAfterDuplicateRecovery, checkpointsAfterDuplicateRecovery] = await Promise.all([
+      connection.db
+        .select({ eventType: runEvents.eventType })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+      connection.db
+        .select({ id: checkpoints.id })
+        .from(checkpoints)
+        .where(eq(checkpoints.runId, run.runId)),
+    ]);
+    expect(eventsAfterDuplicateRecovery).toEqual(eventsAfterFirstRecovery);
+    expect(checkpointsAfterDuplicateRecovery).toEqual(checkpointsAfterFirstRecovery);
     const recoveredRuns = await connection.db
       .select({ status: agentRuns.status })
       .from(agentRuns)

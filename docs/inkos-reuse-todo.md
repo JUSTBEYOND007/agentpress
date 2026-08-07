@@ -492,6 +492,8 @@ MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连�
 `completed_with_degradation`，并且非法 timeout 配置 fail closed。该用例只证明 Specialist deadline 的
 确定性状态转换，不替代真实 provider timeout；provider timeout、worker crash、提交前后断线、重复恢复、
 部分 Artifact、失效 Evidence、stale worker 和恢复期间取消尚未形成完整矩阵，因此总项不勾选。
+已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
+增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
