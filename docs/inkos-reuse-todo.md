@@ -47,6 +47,34 @@ tool 名称、timer 或 provider 名称猜状态。
       typed 消费者状态；同一事实在 live SSE 与 PostgreSQL replay 中必须同构。
 - [ ] 用 Playwright 验证桌面/移动端长角色名、长阶段名、并行 Task、折叠、失败、恢复和无重叠。
 
+#### Multi-Agent 证据级 TODO
+
+InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
+`architect|writer|auditor|reviser|exporter` 的单工具路由器，不是可复制的动态 Agent 网络；
+写作、审阅和恢复的行为证据分别位于 `packages/core/src/pipeline/runner.ts`、
+`chapter-review-cycle.ts` 和 `chapter-state-recovery.ts`。按这些源码和测试执行：
+
+- [ ] 为 Plan/Task/Attempt/ToolCall/Artifact/Evidence/Proposal/Settlement 建立一个 PostgreSQL
+      event-chain fixture；同一 fixture 的 live SSE 和 replay 必须输出深相等的 `RunPart[]`。
+- [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale`；
+      projector 不得把 degraded 映射为 completed 或普通 error。
+- [ ] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
+      本地化只发生在 projector/consumer；React 不得匹配日志或阶段文案来推断状态。
+- [ ] 为 execution/task/attempt 统一 correlation id；所有 progress/log/result 必须带归属，缺 id 时
+      fail closed，不回退到“最近运行项”；补齐乱序、重复、旧 attempt 晚到、断线、刷新和 worker 重启回归。
+- [ ] 将 planner、DAG scheduler、task executor、lease store、Specialist runtime、result/evidence
+      store、synthesis、projection 固定为窄 Port/Command/Event owner；禁止共享 mutable plan context、
+      隐式 callback 链或新增 `AgentManager/RunCoordinator`。
+- [ ] 固定角色 label、allowlist、budget、timeout、maxAttempts、output schema 和可见 Artifact policy；
+      Specialist 私有 thinking 只能留在受保护事实中，Main 只消费闭合 TaskResult/Evidence/Artifact/Usage/error。
+- [ ] 故障矩阵覆盖模型拒答/断流、输出 Schema 失败、非法 TaskResult/Evidence、越 run/task/attempt 引用、
+      Artifact 越权、synthesis 失败、partial success、依赖 skipped、budget exhausted、cancel/recover race、
+      Kafka duplicate/out-of-order 和 late settlement；“审阅无需修订”必须不创建 Reviser Task。
+- [ ] UI 只展示目标、业务角色、阶段、耗时、typed outcome 和摘要；结果/Artifact/Evidence/审批先于诊断，
+      utility 按 typed category 聚合，settled 全部折叠且不被 timer 抢回；删除第二套 Sidebar progress reducer。
+- [ ] 用真实 Pi/目标模型验收 research -> writer -> fact_checker/editor -> proposal、no-change review、
+      partial success、timeout、conflicting Evidence、cancel/recover 和 budget exhaustion，并保存完整版本 manifest。
+
 #### MCP
 
 - [x] 普通消息流使用“联网研究、工作区检索、授权媒体”等业务标签，不显示 Server transport 或 JSON-RPC。
@@ -55,6 +83,26 @@ tool 名称、timer 或 provider 名称猜状态。
       stack、私有 thinking 与超大输出正文不得进入消费者 transcript。
 - [ ] Server/tool revision 变化、断线重连、调用中断线、重复结果、`outcome_unknown` 和旧连接晚到结果必须
       有独立 projection fixture 与 Playwright 场景。
+
+InkOS `v1.7.2` 及 2026-08-03 的 `master` HEAD
+`a6e05d4d4567df0efd5825e9b0037146a16e4f3e` 都没有 MCP 业务源码、配置页、生命周期或测试；
+lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依赖，不能当作 InkOS MCP 实现证据。
+因此 MCP 技术实现没有可直接复用项，只有通用工具执行的渐进披露与时序呈现可作行为参考：
+
+- [ ] ToolCall/RunEvent 事实补齐 `serverId/toolName/server/tool/provider/adapter revision/attempt`、
+      authoritative timestamps、retry/reconnect、output reference 和 redacted failure；Web 不生成权威状态或时间。
+- [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影独立 `outcome_unknown`；
+      不压成普通 error/completed，也不自动重放可能有副作用的调用。
+- [ ] approval/denied/cancel/degraded/duplicate-result/recovered 各有 typed event；权限只来自宿主 capability、
+      Approval 和 Settlement 事实，远端 Server、Skill、网页内容和工具名称不能授予权限。
+- [ ] 复用现有 RunPart projector 增加 MCP 审计投影：消费者只显示业务 label；server/tool/revision、attempt、
+      retry、duration、schema-aware 参数摘要、output refs 和脱敏错误只进入按需详情。
+- [ ] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
+      超大输出只以 Evidence/Artifact/reference 展示。
+- [ ] projector fixture 覆盖正常、审批拒绝、Schema 非法、超大输出、timeout/rate limit、断线前后、重连、
+      duplicate end、stale late result、cancel/retry/revision drift，并验证 live/replay 等价。
+- [ ] PostgreSQL 集成验证 ToolCall ledger、RunEvent、Evidence/Artifact ref 同构恢复且重复/晚到不改已结算事实；
+      Playwright 验证业务标签、详情披露、手动折叠、长名称/错误脱敏和桌面/移动端无溢出。
 
 #### Skill
 
@@ -135,6 +183,9 @@ tool 名称、timer 或 provider 名称猜状态。
 - [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
 - [ ] Web renderer 按 `plan/activity/approval/evidence/artifact/article-change/recovery/usage` 分 owner，
       不把所有 RunPart 分支重新集中到单个消息组件。
+- [ ] 将 InkOS 的大文件组织只当反例：固定 commit 下 `agent-tools.ts` 约 2933 行、
+      `pipeline/runner.ts` 约 3703 行、`studio/api/server.ts` 约 6539 行、`ToolExecutionSteps.tsx`
+      约 942 行，chat action/stream-events 也同时拥有多种状态转换；不得复制这种 owner 划分。
 - [x] 为文件长度、循环依赖、domain import boundary 和公共导出面增加 CI 检查；触碰已超限文件时必须
       先减少职责和净行数，不允许以“后续再拆分”放行。
       GitHub Actions 使用不可变 commit 固定官方 checkout/setup-node/pnpm actions，并只执行根
@@ -181,23 +232,27 @@ tool 名称、timer 或 provider 名称猜状态。
 以下顺序按事实源中的已知阻塞关系排列，不允许通过增加 Prompt、放宽 Schema、延长 timeout 或在 Web
 层伪造终态跳过前置项：
 
-- [ ] **P0：固化 ResearchBrief 完成协议。** `packages/web-research` 导出唯一的 strict TypeBox
+- [x] **P0：固化 ResearchBrief 完成协议。** `packages/web-research` 导出唯一的 strict TypeBox
       `researchBriefContentSchema`；既有语义 validator 在结构校验后继续检查 Claim -> Source Evidence ID
       引用、冲突/部分失败时置信度降级等跨字段规则。`task_complete`、Task Brief、持久化
       `callerOutputSchema` 和执行时校验必须从同一 role-specific schema factory 取得 Researcher Schema，
       不在 Agent Application 复制第二份 ResearchBrief 定义。其他 Specialist 暂时保持既有 Artifact policy。
-- [ ] ResearchBrief 契约测试覆盖缺失 `schemaVersion`、任意嵌套对象、额外字段、空 Evidence ID、Claim
+      role-specific `task_complete`、canonical normalization、宿主派生 Artifact Evidence 边和 PostgreSQL
+      持久化均已通过，提交为 `b0a83d6`。
+- [x] ResearchBrief 契约测试覆盖缺失 `schemaVersion`、任意嵌套对象、额外字段、空 Evidence ID、Claim
       引用未列 Source、重复 Source、冲突但满置信度，以及有效 canonical payload；真实评测中首次
-      `task_complete` 应可通过宿主 Schema，不依赖 protocol-repair Prompt。
+      `task_complete` 应可通过宿主 Schema，不依赖 protocol-repair Prompt。目标模型在确定性 HTTP fixture
+      下首次完成协议已通过；这不等于真实公网搜索通过。
 - [x] **P0：固定 Provider Schema capability。** 不再仅从可自定义的 provider ID 名称猜测 OpenAI/
       Anthropic/Google 兼容族；backend 显式声明 wire schema capability。任何 strict normalization 必须有
       optional <-> required-nullable 的双向转换，并覆盖 unsupported keyword、嵌套对象、数组上限和
       `failure:null` round-trip；`strict=require` 在 provider 不能保证执行时请求前失败，`prefer` 保留
       wire codec 和宿主复验。52 个 Runtime 测试、真实 custom endpoint 调用与构建门禁通过，提交为
       `2114866`。
-- [ ] Researcher 输出体积预算必须从 `ResearchExecutionPolicy.maxSynthesisTokens` 进入真实 Pi
+- [x] Researcher 输出体积预算必须从 `ResearchExecutionPolicy.maxSynthesisTokens` 进入真实 Pi
       `streamSimple(maxTokens)`；同时保证 Provider wire schema 与 canonical 本地 Schema 的差异可审计，
-      不能因 wire 降级跳过 Evidence 引用、置信度或数组边界校验。
+      不能因 wire 降级跳过 Evidence 引用、置信度或数组边界校验。真实目标模型报告已确认该预算进入
+      Specialist runtime，canonical 宿主复验保持启用，提交为 `b0a83d6`。
 - [x] **P0：接通研究执行预算。** `researchExecutionPolicy('deep')` 的 8 次 query 上限进入真实 Specialist
       Pi Runtime；连续 24 条 Evidence 载荷超时后，每次搜索上限收紧为 2 条（总量 <=16，canonical
       Schema 仍保留 <=24 的兼容上限）；并行批次中的超额
@@ -209,11 +264,12 @@ tool 名称、timer 或 provider 名称猜状态。
       Run/Task。`91f47a7` 已增加强类型 `source_tool_call_id`、ToolCall attempt 关联、幂等唯一键和
       inline/oversized ToolOutput 同构投影；剩余项是消除 ToolCall succeeded 后 Evidence 另事务写入的
       崩溃窗口，因此总项仍不勾选。
-- [ ] **P0：闭合研究来源 provenance。** Provider/adapter revision 必须由 Tool Definition 明确声明并
+- [x] **P0：闭合研究来源 provenance。** Provider/adapter revision 必须由 Tool Definition 明确声明并
       快照到 ToolCall，不能由模型填写或把 `source_revision` 内容哈希冒充 Provider revision；oversized
-      ToolOutput Artifact 路径已由 `91f47a7` 产生与 inline output 相同的 Evidence；剩余项是把明确的
-      Provider/adapter revision 快照到 ToolCall。完成前不得让宿主从不完整 facts 自动组装
-      `sources/queryLog/providerRevision`。
+      ToolOutput Artifact 路径已由 `91f47a7` 产生与 inline output 相同的 Evidence。`1318d00` 由内置
+      `web.search` Tool Definition 不可变声明 revision，快照到 PostgreSQL ToolCall；Researcher wire
+      submission 不再接收该字段，宿主只从当前 Task 的 Evidence -> succeeded ToolCall 事实链派生，并在
+      revision 缺失、混用或运行时漂移时 fail closed。PostgreSQL 已核对 6 条 ToolCall/6 条闭合 Evidence。
 - [ ] **P0：复跑最小在线闭环。** 只运行 `workflow-02`，要求 Researcher 在 120 秒内结算、ToolCall <= 8、
       Evidence <= 24、ResearchBrief 结构与引用合法、无证据 Claim 为 0，并从 PostgreSQL 核对 Root
       Request、Run、transcript、ToolCall、Task、Evidence、Artifact 和 terminal projection。
@@ -416,6 +472,11 @@ TODO：
 `outcome_unknown`，不降格为普通失败或 degraded。5 个纯策略测试已通过；接入 PostgreSQL store、
 Article/Evidence/Artifact validator 和故障注入矩阵前，本节其余集成项仍保持未完成。
 
+MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连接丢失不会在新连接自动重放，退役 client
+的晚到结果由 identity fence 拒绝，只有调用前连接 probe 可安全重连；真实 Streamable HTTP 重启测试
+证明中断逻辑调用执行 0 次，下一次新逻辑调用执行 1 次。其余凭据、握手、Schema、timeout/cancel、
+重复结果、恶意输出、审批拒绝和审计投影矩阵仍未完成。
+
 运行时故障注入进度：inline 与 detached Specialist 的 timeout 已接入实际 Pi Runtime
 `AbortSignal.timeout`，并与父级取消通过 `AbortSignal.any` 组合；超时结果是 failed `task_timeout`，不会把
 用户取消误报为超时。真实 PostgreSQL 用例证明悬挂 Specialist 会在 deadline 后终止，Run 进入
@@ -486,8 +547,10 @@ TODO：
 - [x] Composer 只展示 Skill chip、名称和用途；版本、来源、hash、资源和诊断进入详情或管理页。
 - [x] 测试覆盖 disabled、unknown、duplicate、同名优先级、malformed frontmatter、symlink、超大资源、
       prompt injection、历史过期和 Skill 越权。
-- [ ] 补齐 path traversal、非 UTF-8、单文件/总资源分别超限、发现后文件或 hash 改变、恢复时 revision
-      缺失、资源读取中断、模型选择 Schema 非法/timeout、显式选择与模型选择冲突的失败矩阵。
+- [x] 补齐 path traversal、非 UTF-8、单文件/总资源分别超限和发现后文件/hash 改变的资源边界测试；
+      `013d7b8` 使用 fatal UTF-8 decode、独立预算和内容寻址 revision fail closed，`skill.ts` 保持 400 行。
+- [ ] 补齐恢复时 revision 缺失、资源读取中断、模型选择 Schema 非法/timeout、显式选择与模型选择冲突
+      的失败矩阵。
 - [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，
@@ -636,9 +699,16 @@ completed 误判为降级。Agent Evals 42 个测试通过。
   MCP error，最终 0 Evidence、0 Artifact、0 越权写入并在 134 秒后 `task_timeout`。PostgreSQL
   `9eeaf81d-6e2f-41cc-b1c2-2d93b8844dfe` 的 ToolCall/RunEvent 只保存脱敏错误
   `MCP tool search returned an error`，证明 Provider wire 根因已移除，但外部搜索额度仍阻塞在线闭环。
+- `.agentpress/evals/2026-08-06T23-59-24-715Z-gpt-5.6-terra-workflow-02.json`：真实
+  `gpt-5.6-terra` 目标模型配合进程内确定性 AnySearch HTTP fixture 完成协议验收；Run
+  `6bb37e8b-2d75-4473-ab59-23d40468d04e` 含 4 个 succeeded ToolCall、8 条 Evidence、1 个
+  ResearchBrief、0 个 Proposal/越权写入，Researcher 约 113 秒，Artifact Evidence 集合与两个 canonical
+  Source 精确相等，Claim 只引用该 Source 子集。该报告证明真实模型的协议行为，不是公网搜索成功；fixture
+  未写入生产代码且验收后已删除。
 
-因此 Provider wire capability 与双向适配已完成；ResearchBrief canonical Schema、研究输出预算和
-Evidence 事务闭包仍必须在搜索服务恢复后通过真实 `workflow-02`，在此之前不得标记完成。
+因此 Provider wire capability、双向适配、ResearchBrief canonical Schema、研究输出预算和来源
+provenance 已完成；ToolCall settlement -> Evidence projection 的事务闭包与真实公网 `workflow-02` 仍未
+完成，在搜索服务额度恢复并从 PostgreSQL 验收前不得标记在线闭环通过。
 
 - [ ] 固定“资料研究 -> 结构/提纲 -> 草稿 -> 事实/编辑审阅 -> 有界修订 -> Article Proposal ->
       用户接受/拒绝”的版本化业务场景，不能只测试每个工具孤立成功。
