@@ -62,6 +62,10 @@ export class McpServerManager {
     return [...this.definitions.keys()].sort();
   }
 
+  public isCurrentClient(serverId: BuiltInMcpServerId, expectedClient: Client): boolean {
+    return this.clients.get(serverId) === expectedClient;
+  }
+
   public async getClient(serverId: BuiltInMcpServerId): Promise<Client> {
     const existing = this.clients.get(serverId);
     if (existing) {

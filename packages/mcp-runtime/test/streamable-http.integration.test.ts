@@ -8,7 +8,12 @@ import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 import * as z from 'zod/v4';
 import { describe, expect, it } from 'vitest';
 
-import { createStreamableHttpClient, McpClientGateway, McpServerManager } from '../src/index.js';
+import {
+  createStreamableHttpClient,
+  McpCallOutcomeUnknownError,
+  McpClientGateway,
+  McpServerManager,
+} from '../src/index.js';
 
 describe('MCP Streamable HTTP real fixture', () => {
   it.each([
@@ -132,7 +137,7 @@ describe('MCP Streamable HTTP real fixture', () => {
     }
   });
 
-  it('reconnects once and completes a tool call after a server restart', async () => {
+  it('does not replay an interrupted call and reconnects for the next logical call', async () => {
     const first = await startFixture(false);
     const port = Number(new URL(first.url).port);
     const manager = new McpServerManager();
@@ -149,7 +154,13 @@ describe('MCP Streamable HTTP real fixture', () => {
     await first.close();
     const restarted = await startFixture(false, port);
     try {
-      await expect(gateway.call(toolCallInput('after-restart', 'after'))).resolves.toBe('after');
+      await expect(
+        gateway.call(toolCallInput('interrupted-after-restart', 'not-replayed')),
+      ).rejects.toBeInstanceOf(McpCallOutcomeUnknownError);
+      expect(restarted.echoCallCount()).toBe(0);
+      await expect(gateway.call(toolCallInput('fresh-after-restart', 'after'))).resolves.toBe(
+        'after',
+      );
       expect(restarted.echoCallCount()).toBe(1);
       expect(manager.state('web_research')).toBe('ready');
       await manager.stop('web_research');

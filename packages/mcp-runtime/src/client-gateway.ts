@@ -7,6 +7,7 @@ import {
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { ToolExecutionError } from '@agentpress/tool-runtime';
 
 import type { BuiltInMcpGateway } from './built-in-tools.js';
 import type { BuiltInMcpServerId, McpNotificationHandlers } from './contracts.js';
@@ -14,26 +15,48 @@ import type { McpServerManager } from './server-manager.js';
 
 type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
 
+export type McpCallOutcomeUnknownReason = 'connection_lost' | 'stale_client_result';
+
+export class McpCallOutcomeUnknownError extends ToolExecutionError {
+  public override readonly name = 'McpCallOutcomeUnknownError';
+  public override readonly cause?: unknown;
+
+  public constructor(
+    public readonly serverId: BuiltInMcpServerId,
+    public readonly toolName: string,
+    public readonly reason: McpCallOutcomeUnknownReason,
+    cause?: unknown,
+  ) {
+    super(
+      `MCP tool ${toolName} outcome is unknown after ${reason.replaceAll('_', ' ')}`,
+      'unknown',
+    );
+    this.cause = cause;
+  }
+}
+
 export class McpClientGateway implements BuiltInMcpGateway {
   public constructor(private readonly manager: McpServerManager) {}
 
   public async call(input: Parameters<BuiltInMcpGateway['call']>[0]): Promise<unknown> {
-    let client = await this.manager.getClient(input.serverId);
+    const client = await this.getClientBeforeCall(input.serverId, input.context.signal);
     try {
-      return await callTool(client, input);
+      const result = await callTool(client, input);
+      if (!this.manager.isCurrentClient(input.serverId, client)) {
+        throw new McpCallOutcomeUnknownError(input.serverId, input.toolName, 'stale_client_result');
+      }
+      return result;
     } catch (error) {
+      if (error instanceof McpCallOutcomeUnknownError) throw error;
       if (!isConnectionFailure(error)) throw error;
       await this.manager.markDegraded(input.serverId, client);
       throwIfAborted(input.context.signal);
-      client = await this.reconnectClient(input.serverId, input.context.signal);
-      try {
-        return await callTool(client, input);
-      } catch (retryError) {
-        if (isConnectionFailure(retryError)) {
-          await this.manager.markDegraded(input.serverId, client);
-        }
-        throw retryError;
-      }
+      throw new McpCallOutcomeUnknownError(
+        input.serverId,
+        input.toolName,
+        'connection_lost',
+        error,
+      );
     }
   }
 
@@ -134,7 +157,7 @@ export class McpClientGateway implements BuiltInMcpGateway {
     }
   }
 
-  private async reconnectClient(
+  private async getClientBeforeCall(
     serverId: BuiltInMcpServerId,
     signal: AbortSignal,
   ): Promise<Client> {

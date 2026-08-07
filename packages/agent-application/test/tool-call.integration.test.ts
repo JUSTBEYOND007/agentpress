@@ -73,6 +73,23 @@ describeWithDatabase('Tool Call application flow', () => {
     },
   });
   registry.register({
+    toolId: 'workspace.uncertain_search',
+    version: '1.0.0',
+    owner: 'workspace',
+    description: 'Search through a connection that may be interrupted',
+    capabilities: ['workspace.read'],
+    inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ result: Type.String() }, { additionalProperties: false }),
+    risk: 'read_only',
+    sideEffect: 'No side effect',
+    idempotency: 'none',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () => {
+      throw new ToolExecutionError('Connection was lost after dispatch', 'unknown');
+    },
+  });
+  registry.register({
     toolId: 'web.search',
     version: '1.0.0',
     owner: 'research',
@@ -207,6 +224,27 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(checkpoints)
       .where(eq(checkpoints.runId, runId));
     expect(saved).toEqual([{ reason: 'tool_settled' }]);
+  });
+
+  it('settles an interrupted read-only provider call as outcome unknown', async () => {
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'workspace.uncertain_search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'interrupted' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['workspace.read']),
+    });
+
+    await expect(service.execute(proposal.toolCallId)).resolves.toMatchObject({
+      status: 'outcome_unknown',
+    });
+    const rows = await connection.db
+      .select({ status: toolCalls.status })
+      .from(toolCalls)
+      .where(eq(toolCalls.id, proposal.toolCallId));
+    expect(rows).toEqual([{ status: 'outcome_unknown' }]);
   });
 
   it('bridges a Pi Runtime tool through the persistent ledger', async () => {

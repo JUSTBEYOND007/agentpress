@@ -236,8 +236,10 @@ export class ToolCallExecutionService {
     } catch (error) {
       failure = { message: error instanceof Error ? error.message : 'Unknown tool error' };
       status =
-        error instanceof ToolExecutionError && error.outcome === 'known_failed'
-          ? 'failed'
+        error instanceof ToolExecutionError
+          ? error.outcome === 'unknown'
+            ? 'outcome_unknown'
+            : 'failed'
           : APPROVAL_RISKS.has(claimed.call.risk)
             ? 'outcome_unknown'
             : 'failed';

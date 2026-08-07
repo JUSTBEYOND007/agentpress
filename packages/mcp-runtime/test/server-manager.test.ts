@@ -79,9 +79,12 @@ describe('MCP Server lifecycle', () => {
       displayName: 'Web',
       createClient: () => Promise.resolve(attempt++ === 0 ? oldClient : newClient),
     });
-    await manager.getClient('web_research');
+    await expect(manager.getClient('web_research')).resolves.toBe(oldClient);
+    expect(manager.isCurrentClient('web_research', oldClient)).toBe(true);
     await expect(manager.markDegraded('web_research', oldClient)).resolves.toBe(true);
+    expect(manager.isCurrentClient('web_research', oldClient)).toBe(false);
     await expect(manager.getClient('web_research')).resolves.toBe(newClient);
+    expect(manager.isCurrentClient('web_research', newClient)).toBe(true);
     await expect(manager.markDegraded('web_research', oldClient)).resolves.toBe(false);
     await expect(manager.getClient('web_research')).resolves.toBe(newClient);
     expect(manager.state('web_research')).toBe('ready');
