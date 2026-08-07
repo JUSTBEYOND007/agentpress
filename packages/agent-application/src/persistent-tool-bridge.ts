@@ -136,14 +136,7 @@ export class PersistentToolBridge implements RuntimeToolFactory {
               `Tool Call ${proposal.toolCallId} settled as ${result.status}`,
             );
           }
-          const evidence = await this.evidence.persist({
-            runId,
-            ...(taskId ? { taskId } : {}),
-            toolCallId: proposal.toolCallId,
-            toolId: definition.toolId,
-            toolVersion: definition.version,
-            output: result.output,
-          });
+          const evidence = await this.evidence.listForToolCall(proposal.toolCallId);
           if (evidence.length === 0) return result.output;
           return {
             output: result.output,

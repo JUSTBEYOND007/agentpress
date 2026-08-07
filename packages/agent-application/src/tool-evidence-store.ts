@@ -5,6 +5,7 @@ import {
   artifactVersions,
   evidenceRecords,
   type AgentPressDatabase,
+  type DatabaseTransaction,
 } from '@agentpress/database';
 import { and, eq, isNull } from 'drizzle-orm';
 
@@ -33,7 +34,16 @@ export class ToolEvidenceStore {
   public constructor(private readonly options: ToolEvidenceStoreOptions) {}
 
   public async persist(input: PersistToolEvidenceInput): Promise<readonly PersistedToolEvidence[]> {
-    const sourceOutput = await this.resolveSourceOutput(input);
+    return this.options.database.transaction((transaction) =>
+      this.persistInTransaction(transaction, input),
+    );
+  }
+
+  public async persistInTransaction(
+    transaction: DatabaseTransaction,
+    input: PersistToolEvidenceInput,
+  ): Promise<readonly PersistedToolEvidence[]> {
+    const sourceOutput = await this.resolveSourceOutput(transaction, input);
     const extracted = extractToolEvidence(sourceOutput);
     if (extracted.length === 0) return [];
     const records = extracted.map((item) => ({
@@ -53,28 +63,26 @@ export class ToolEvidenceStore {
         toolVersion: input.toolVersion,
       },
     }));
-    const durable = await this.options.database.transaction(async (transaction) => {
-      await transaction
-        .insert(evidenceRecords)
-        .values(records)
-        .onConflictDoNothing({
-          target: [
-            evidenceRecords.sourceToolCallId,
-            evidenceRecords.sourceUri,
-            evidenceRecords.contentHash,
-          ],
-        });
-      return transaction
-        .select({
-          id: evidenceRecords.id,
-          title: evidenceRecords.title,
-          sourceUri: evidenceRecords.sourceUri,
-          sourceRevision: evidenceRecords.sourceRevision,
-        })
-        .from(evidenceRecords)
-        .where(eq(evidenceRecords.sourceToolCallId, input.toolCallId))
-        .orderBy(evidenceRecords.createdAt, evidenceRecords.id);
-    });
+    await transaction
+      .insert(evidenceRecords)
+      .values(records)
+      .onConflictDoNothing({
+        target: [
+          evidenceRecords.sourceToolCallId,
+          evidenceRecords.sourceUri,
+          evidenceRecords.contentHash,
+        ],
+      });
+    const durable = await transaction
+      .select({
+        id: evidenceRecords.id,
+        title: evidenceRecords.title,
+        sourceUri: evidenceRecords.sourceUri,
+        sourceRevision: evidenceRecords.sourceRevision,
+      })
+      .from(evidenceRecords)
+      .where(eq(evidenceRecords.sourceToolCallId, input.toolCallId))
+      .orderBy(evidenceRecords.createdAt, evidenceRecords.id);
     return durable.map(({ id, title, sourceUri, sourceRevision }) => ({
       evidenceId: id,
       title,
@@ -83,11 +91,33 @@ export class ToolEvidenceStore {
     }));
   }
 
-  private async resolveSourceOutput(input: PersistToolEvidenceInput): Promise<unknown> {
+  public async listForToolCall(toolCallId: string): Promise<readonly PersistedToolEvidence[]> {
+    const rows = await this.options.database
+      .select({
+        id: evidenceRecords.id,
+        title: evidenceRecords.title,
+        sourceUri: evidenceRecords.sourceUri,
+        sourceRevision: evidenceRecords.sourceRevision,
+      })
+      .from(evidenceRecords)
+      .where(eq(evidenceRecords.sourceToolCallId, toolCallId))
+      .orderBy(evidenceRecords.createdAt, evidenceRecords.id);
+    return rows.map(({ id, title, sourceUri, sourceRevision }) => ({
+      evidenceId: id,
+      title,
+      source: sourceUri ?? '',
+      sourceRevision,
+    }));
+  }
+
+  private async resolveSourceOutput(
+    transaction: DatabaseTransaction,
+    input: PersistToolEvidenceInput,
+  ): Promise<unknown> {
     if (extractToolEvidence(input.output).length > 0) return input.output;
     const artifactId = outputArtifactId(input.output);
     if (!artifactId) return input.output;
-    const rows = await this.options.database
+    const rows = await transaction
       .select({ content: artifactVersions.content })
       .from(artifactVersions)
       .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))

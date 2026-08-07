@@ -18,16 +18,25 @@ import {
   type DecideToolCallApprovalInput,
   type ToolCallServiceOptions,
 } from './tool-call-contracts.js';
+import { ToolEvidenceStore } from './tool-evidence-store.js';
 
 export class ToolCallExecutionService {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly approvalTtlMs: number;
+  private readonly evidence: ToolEvidenceStore;
+  private readonly projectEvidence: NonNullable<ToolCallServiceOptions['evidenceProjector']>;
 
   public constructor(private readonly options: ToolCallServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.approvalTtlMs = options.approvalTtlMs ?? 15 * 60_000;
+    this.evidence = new ToolEvidenceStore({ database: options.database });
+    this.projectEvidence =
+      options.evidenceProjector ??
+      (async (transaction, input) => {
+        await this.evidence.persistInTransaction(transaction, input);
+      });
   }
 
   public async decideApproval(input: DecideToolCallApprovalInput): Promise<{
@@ -296,6 +305,16 @@ export class ToolCallExecutionService {
             ...(current.status === 'succeeded' ? { output: current.output } : {}),
           },
         };
+      }
+      if (status === 'succeeded') {
+        await this.projectEvidence(transaction, {
+          runId: claimed.call.runId,
+          ...(claimed.call.taskId ? { taskId: claimed.call.taskId } : {}),
+          toolCallId,
+          toolId: claimed.call.toolId,
+          toolVersion: claimed.call.toolVersion,
+          output,
+        });
       }
       await appendCheckpoint(transaction, {
         id: this.createId(),

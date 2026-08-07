@@ -1,7 +1,8 @@
-import type { AgentPressDatabase } from '@agentpress/database';
+import type { AgentPressDatabase, DatabaseTransaction } from '@agentpress/database';
 import type { ToolRegistry } from '@agentpress/tool-runtime';
 
 import type { RunEventPublisher } from './contracts.js';
+import type { PersistToolEvidenceInput } from './tool-evidence-store.js';
 
 export const APPROVAL_RISKS = new Set(['external_write', 'destructive']);
 
@@ -53,4 +54,8 @@ export type ToolCallServiceOptions = {
   readonly now?: () => Date;
   readonly createId?: () => string;
   readonly approvalTtlMs?: number;
+  readonly evidenceProjector?: (
+    transaction: DatabaseTransaction,
+    input: PersistToolEvidenceInput,
+  ) => Promise<void>;
 };

@@ -26,7 +26,7 @@ import {
 } from '@agentpress/database';
 import { hashToolArguments, ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -251,6 +251,50 @@ describeWithDatabase('Tool Call application flow', () => {
         .from(toolCalls)
         .where(eq(toolCalls.id, proposal.toolCallId)),
     ).resolves.toEqual([{ status: 'proposed' }]);
+  });
+
+  it('rolls back succeeded settlement when Evidence projection fails', async () => {
+    const runId = await createRunningRun();
+    const failingService = new ToolCallService({
+      database: connection.db,
+      registry,
+      publisher: {
+        publish(event) {
+          published.push(event);
+          return Promise.resolve();
+        },
+      },
+      evidenceProjector: () => Promise.reject(new Error('injected Evidence persistence failure')),
+    });
+    const proposal = await failingService.propose({
+      runId,
+      toolId: 'web.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'atomic settlement' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['web.research']),
+    });
+
+    await expect(failingService.execute(proposal.toolCallId)).rejects.toThrow(
+      'injected Evidence persistence failure',
+    );
+    await expect(
+      connection.db
+        .select({ status: toolCalls.status })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([{ status: 'executing' }]);
+    await expect(
+      connection.db
+        .select({ id: evidenceRecords.id })
+        .from(evidenceRecords)
+        .where(eq(evidenceRecords.sourceToolCallId, proposal.toolCallId)),
+    ).resolves.toEqual([]);
+    const terminalFacts = await connection.db
+      .select({ eventType: runEvents.eventType })
+      .from(runEvents)
+      .where(and(eq(runEvents.runId, runId), eq(runEvents.eventType, 'tool.succeeded')));
+    expect(terminalFacts).toEqual([]);
   });
 
   it('settles an interrupted read-only provider call as outcome unknown', async () => {
