@@ -280,8 +280,9 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 - [ ] **P1：完成恢复与 MCP 失败矩阵。** 先接现有 recovery policy、validator、ToolCall ledger 和
       settlement，不建立第二套恢复或 MCP manager；所有新增 Agent-facing 源文件继续保持 <= 500 行。
 - [ ] Skill replay/recovery 的实现已补充 PostgreSQL 集成回归：旧 Run 固定 `run_skill_bindings` 与
-      Context Pack，新 Skill revision 发布后重启加载仍保持旧 hash/allowedTools。该测试在无
-      `DATABASE_URL` 时会跳过，需在 PostgreSQL 环境中验收后才能勾选本项。
+      Context Pack，新 Skill revision 发布后重启加载仍保持旧 hash/allowedTools。该回归已使用仓库
+      PostgreSQL（`DATABASE_URL=postgresql://agentpress:agentpress@localhost:5432/agentpress`）通过；
+      完整的 worker recovery、branch switch、旧 instructions 不进入新 turn 仍待补齐，因此总项不勾选。
 - [ ] **P2：浏览器结果投影验收。** 真实 PostgreSQL replay 与 live SSE 使用同一 projector；Playwright
       验证桌面/移动端的结果优先展示、折叠、错误脱敏、恢复和无重叠，不在 React 中推断运行状态。
 
@@ -559,7 +560,9 @@ TODO：
 - [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，
-      旧 Skill 指令不进入新 turn；Playwright 验证显式禁用、缺失/失效 Skill 与诊断详情。
+      旧 Skill 指令不进入新 turn；Playwright 验证显式禁用、缺失/失效 Skill 与诊断详情。当前已补充
+      binding hash drift 的 fail-closed 回归（`PersistentToolBridge`），并用 PostgreSQL 通过；完整
+      worker recovery、branch switch 和 Playwright 状态矩阵仍待完成。
 - [x] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
       2026-08-07 使用真实 Pi Runtime 与目标模型 `gpt-5.6-terra` 运行 5 个固定用例：5/5 exact match、
       0 forbidden selection、0 error。版本化报告为

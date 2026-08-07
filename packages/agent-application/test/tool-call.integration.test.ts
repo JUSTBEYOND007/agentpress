@@ -494,6 +494,40 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(tools.map(({ label }) => label)).toEqual(['publication.publish']);
   });
 
+  it('fails closed when a pinned Skill binding hash drifts from its revision', async () => {
+    const runId = await createRunningRun();
+    const markdown =
+      '---\nid: drifted-skill\nversion: 1.0.0\ndescription: Detect drift\nallowedTools:\n  - workspace.search\n---\nUse the pinned revision.';
+    const contentHash = createHash('sha256').update(markdown).digest('hex');
+    const skillRevisionId = randomUUID();
+    await connection.db.insert(skillRevisions).values({
+      id: skillRevisionId,
+      workspaceId,
+      skillId: 'drifted-skill',
+      version: '1.0.0',
+      content: markdown,
+      contentHash,
+      allowedTools: ['workspace.search'],
+    });
+    await connection.db.insert(runSkillBindings).values({
+      runId,
+      skillRevisionId,
+      contentHash: 'tampered-binding-hash',
+      allowedTools: ['workspace.search'],
+    });
+
+    await expect(
+      new PersistentToolBridge({
+        database: connection.db,
+        registry,
+        toolCalls: service,
+      }).createForRun(runId, ['workspace.read']),
+    ).rejects.toMatchObject({
+      name: 'ToolCallApplicationError',
+      code: 'unauthorized_tool',
+    });
+  });
+
   it('uses the capability catalog to expose only the semantically relevant tool set', async () => {
     const runId = await createRunningRun();
     const tools = await new PersistentToolBridge({
