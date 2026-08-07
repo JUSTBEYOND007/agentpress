@@ -63,6 +63,7 @@ import {
   ContextGovernanceService,
   DirectRunService,
   PersistentToolBridge,
+  RunContextService,
   runtimeToolName,
   ToolCallService,
   type LiveRunEvent,
@@ -1578,6 +1579,50 @@ describeWithDatabase('Direct Run application flow', () => {
         skills: [{ skillId, version: '1.0.0' }],
       }),
     ).rejects.toThrow(/integrity validation/u);
+  });
+
+  it('replays a Run with its pinned Skill revision after a newer revision is published', async () => {
+    const skillId = `replay-skill-${randomUUID()}`;
+    await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${skillId}\nversion: 1.0.0\ndescription: Pinned replay skill\nallowedTools:\n  - article.read_current\n---\nUse revision one.`,
+    );
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Replay this pinned Skill',
+      idempotencyKey: randomUUID(),
+      skills: [{ skillId, version: '1.0.0' }],
+    });
+    const before = await connection.db
+      .select({ content: runContextPacks.content, contentHash: runContextPacks.contentHash })
+      .from(runContextPacks)
+      .where(eq(runContextPacks.runId, run.runId));
+    const bindingsBefore = await connection.db
+      .select()
+      .from(runSkillBindings)
+      .where(eq(runSkillBindings.runId, run.runId));
+
+    await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${skillId}\nversion: 2.0.0\ndescription: New replay skill\nallowedTools:\n  - web_research.search\n---\nUse revision two.`,
+    );
+
+    const restartedContexts = new RunContextService(connection.db, 'You are AgentPress.');
+    await expect(restartedContexts.load(run.runId)).resolves.toMatchObject({
+      content: before[0]?.content,
+      contentHash: before[0]?.contentHash,
+    });
+    const bindingsAfter = await connection.db
+      .select()
+      .from(runSkillBindings)
+      .where(eq(runSkillBindings.runId, run.runId));
+    expect(bindingsAfter).toEqual(bindingsBefore);
+    expect(bindingsAfter[0]?.allowedTools).toEqual(['article.read_current']);
+
+    await service.requestCancellation(run.runId);
+    await service.execute(run.runId);
   });
 
   it('persists cancellation before aborting Pi and reaches a terminal state', async () => {

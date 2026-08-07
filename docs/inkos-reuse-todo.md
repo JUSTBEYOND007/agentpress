@@ -279,6 +279,9 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       PostgreSQL 事实链定位所属层，再决定是否实现，不把单场景模型行为写成通用 coordinator 分支。
 - [ ] **P1：完成恢复与 MCP 失败矩阵。** 先接现有 recovery policy、validator、ToolCall ledger 和
       settlement，不建立第二套恢复或 MCP manager；所有新增 Agent-facing 源文件继续保持 <= 500 行。
+- [ ] Skill replay/recovery 的实现已补充 PostgreSQL 集成回归：旧 Run 固定 `run_skill_bindings` 与
+      Context Pack，新 Skill revision 发布后重启加载仍保持旧 hash/allowedTools。该测试在无
+      `DATABASE_URL` 时会跳过，需在 PostgreSQL 环境中验收后才能勾选本项。
 - [ ] **P2：浏览器结果投影验收。** 真实 PostgreSQL replay 与 live SSE 使用同一 projector；Playwright
       验证桌面/移动端的结果优先展示、折叠、错误脱敏、恢复和无重叠，不在 React 中推断运行状态。
 
