@@ -21,6 +21,11 @@ TypeBox-built domain schemas, and rejects unknown formats with structured paths.
 limited to the official MCP SDK adapter in `packages/mcp-runtime`; it is not exposed through
 AgentPress contracts.
 
+The Domain dependency boundary is mechanically enforced rather than documented convention only.
+`@agentpress/domain` declares no package dependencies and imports only its own model/shared modules;
+the root dependency-cruiser rule `domain-only-internal-imports` rejects any Pi, HTTP, Kafka, React,
+database, InkOS, or other package edge from `packages/domain/src` in local and CI architecture checks.
+
 Prompt audit decision: AgentPress keeps prompt composition history in the existing PostgreSQL
 `prompt_revisions` fact rather than adopting Oh My Pi's file/session prompt state. Each revision
 records a versioned snapshot of template and variable-schema versions plus ordered block hashes;

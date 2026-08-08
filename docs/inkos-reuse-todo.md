@@ -259,7 +259,10 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       `proposal-service.ts` 已拆为 260/488/43 行。仓库级文件长度门禁已覆盖 Agent-facing 源码。
 - [ ] 一个模块只能拥有一种状态转换；跨模块协调通过显式 Port、Command、Event 或 typed result，
       禁止共享可变上下文对象和隐式回调链。
-- [ ] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
+- [x] Domain 不依赖 Pi、InkOS、HTTP、Kafka、React 或数据库类型；这些类型只存在于对应 Adapter。
+      `@agentpress/domain` 的 `package.json` 无 dependencies，全部源码 import 只指向自身 `models/shared`；
+      `dependency-cruiser@18.1.1` 的 `domain-only-internal-imports` 规则在根 `check:architecture` 和 CI 中
+      fail closed，当前 5839 个模块、835 条依赖巡检无违规。
 - [ ] Web renderer 按 `plan/activity/approval/evidence/artifact/article-change/recovery/usage` 分 owner，
       不把所有 RunPart 分支重新集中到单个消息组件。
 - [ ] 将 InkOS 的大文件组织只当反例：固定 commit 下 `agent-tools.ts` 约 2933 行、
