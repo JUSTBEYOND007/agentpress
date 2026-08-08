@@ -21,6 +21,7 @@ import {
   AgentApplicationError,
   type CreateDirectRunInput,
   type CreateDirectRunResult,
+  type SkillCatalogFailure,
   type RunEventPublisher,
   type SelectedSkillInput,
   type SkillPreselectionCandidate,
@@ -39,6 +40,11 @@ type DirectRunCreationServiceOptions = {
   readonly now: () => Date;
   readonly dispatchCommands: boolean;
   readonly skillPreselector?: SkillPreselector;
+};
+
+type SkillPreselectionCatalog = {
+  readonly candidates: readonly SkillPreselectionCandidate[];
+  readonly failures: readonly SkillCatalogFailure[];
 };
 
 export class DirectRunCreationService {
@@ -192,9 +198,10 @@ export class DirectRunCreationService {
       }
 
       const explicitSkills = collectSkillSelections(input);
-      const candidates = this.options.skillPreselector
+      const catalog = this.options.skillPreselector
         ? await loadSkillPreselectionCandidates(transaction, branch.workspaceId)
-        : [];
+        : { candidates: [], failures: [] };
+      const candidates = catalog.candidates;
       let modelSkills: readonly SelectedSkillInput[] = [];
       let modelSelectionFailure: SkillSelectionError | undefined;
       if (this.options.skillPreselector) {
@@ -337,6 +344,7 @@ export class DirectRunCreationService {
             explicit: explicitSkills,
             model: modelSkills,
             selected: selectedSkills,
+            ...(catalog.failures.length > 0 ? { catalogFailures: catalog.failures } : {}),
             ...(modelSelectionFailure
               ? {
                   modelSelection: {
@@ -451,7 +459,7 @@ function validateModelSkillSelections(
 async function loadSkillPreselectionCandidates(
   transaction: DatabaseTransaction,
   workspaceId: string,
-): Promise<readonly SkillPreselectionCandidate[]> {
+): Promise<SkillPreselectionCatalog> {
   const rows = await transaction
     .select()
     .from(skillRevisions)
@@ -461,21 +469,28 @@ async function loadSkillPreselectionCandidates(
   for (const row of rows) {
     if (!latest.has(row.skillId)) latest.set(row.skillId, row);
   }
-  return [...latest.values()].map((row) => {
-    const skill = loadSkill(row.content);
-    if (skill.id !== row.skillId || skill.version !== row.version) {
-      throw new AgentApplicationError(
-        'invalid_context',
-        `Stored Skill ${row.skillId}@${row.version} has an invalid identity`,
-      );
+  const candidates: SkillPreselectionCandidate[] = [],
+    failures: SkillCatalogFailure[] = [];
+  for (const row of latest.values()) {
+    let skill: ReturnType<typeof loadSkill>;
+    try {
+      skill = loadSkill(row.content);
+    } catch {
+      failures.push({ skillId: row.skillId, version: row.version, code: 'load_failed' });
+      continue;
     }
-    return {
+    if (skill.id !== row.skillId || skill.version !== row.version) {
+      failures.push({ skillId: row.skillId, version: row.version, code: 'identity_mismatch' });
+      continue;
+    }
+    candidates.push({
       skillId: row.skillId,
       version: row.version,
       description: skill.description,
       allowedTools: row.allowedTools,
       hidden: skill.hidden === true,
       disableModelInvocation: skill.disableModelInvocation === true,
-    };
-  });
+    });
+  }
+  return { candidates, failures };
 }

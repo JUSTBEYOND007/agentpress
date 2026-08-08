@@ -1422,6 +1422,57 @@ describeWithDatabase('Direct Run application flow', () => {
     });
   });
 
+  it('keeps malformed catalog entries out of model selection without blocking Run creation', async () => {
+    const malformedId = `preselection-broken-${randomUUID()}`;
+    await connection.db.insert(skillRevisions).values({
+      id: randomUUID(),
+      workspaceId: ids.workspace,
+      skillId: malformedId,
+      version: '1.0.0',
+      content: 'not a Skill document',
+      contentHash: 'malformed-preselection-fixture',
+      allowedTools: [],
+    });
+    let modelPrompt = '';
+    const selectionService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+      skillPreselector: {
+        select: ({ candidates }) => {
+          modelPrompt = JSON.stringify(candidates);
+          return Promise.resolve([]);
+        },
+      },
+    });
+    const run = await selectionService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: '继续处理，但不要选择损坏 Skill。',
+      idempotencyKey: randomUUID(),
+    });
+    expect(modelPrompt).not.toContain(malformedId);
+    await expect(
+      connection.db
+        .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'skill.selection.completed',
+          payload: expect.objectContaining({
+            catalogFailures: [{ skillId: malformedId, version: '1.0.0', code: 'load_failed' }],
+          }),
+        }),
+      ]),
+    );
+    await selectionService.requestCancellation(run.runId);
+    await selectionService.execute(run.runId);
+  });
+
   it('preserves explicit Skills when model preselection times out', async () => {
     const selectingService = new DirectRunService({
       database: connection.db,

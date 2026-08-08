@@ -107,6 +107,12 @@ export type SelectedSkillInput = {
   readonly version: string;
 };
 
+export type SkillCatalogFailure = {
+  readonly skillId: string;
+  readonly version: string;
+  readonly code: 'load_failed' | 'identity_mismatch';
+};
+
 export type RunContextBinding =
   | { readonly type: 'mention'; readonly targetId: string }
   | { readonly type: 'attachment'; readonly attachmentId: string }
