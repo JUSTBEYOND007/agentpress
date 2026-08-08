@@ -12,6 +12,7 @@ const brokers = requiredEnvironment('KAFKA_BROKERS')
   .filter(Boolean);
 const topic = requiredEnvironment('TEST_AGENT_TASK_TOPIC');
 const groupId = requiredEnvironment('TEST_AGENT_TASK_GROUP');
+const taskId = requiredEnvironment('TEST_AGENT_TASK_ID');
 const lostAt = new Date(requiredEnvironment('TEST_AGENT_TASK_LOST_AT'));
 if (Number.isNaN(lostAt.getTime())) throw new Error('TEST_AGENT_TASK_LOST_AT is invalid');
 
@@ -34,6 +35,7 @@ await consumer.run({
   eachMessage: async ({ message }) => {
     const command = parseAgentTaskCommandPayload(message.value?.toString());
     if (!command) throw new Error('Lost worker received an invalid Task command');
+    if (command.taskId !== taskId) return;
     const claim = await connection.db.transaction((transaction) =>
       claimAgentTask(transaction, {
         taskId: command.taskId,

@@ -125,7 +125,7 @@ describeWithInfrastructure('Kafka detached Task recovery', () => {
     const originalCommand = await waitForTaskCommand(taskId, 'agent.task.commands');
     const lostAt = new Date(Date.now() - 1_000);
 
-    const lostWorker = startLostWorker(lostAt);
+    const lostWorker = startLostWorker(lostAt, taskId);
     await expect(lostWorker.nextEvent()).resolves.toMatchObject({ event: 'ready' });
     await publish(originalCommand, `${run.runId}:${taskId}`);
     await expect(lostWorker.nextEvent()).resolves.toMatchObject({
@@ -204,6 +204,125 @@ describeWithInfrastructure('Kafka detached Task recovery', () => {
         .where(
           and(
             eq(inboxMessages.consumerGroup, `recovery-${suffix}`),
+            eq(inboxMessages.messageId, recoveryMessageId ?? ''),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+  }, 30_000);
+
+  it('fences an original command that arrives after its recovery command', async () => {
+    const branchId = await createBranch();
+    const service = createService([
+      toolResponse('plan_submit', {
+        goal: 'Fence an out-of-order writer',
+        tasks: [{ ...plannedTask('out-of-order-writer'), detached: true }],
+      }),
+      taskCompleteResponse('Recovered before the late original'),
+      runCompleteResponse('Out-of-order recovery delivery'),
+    ]);
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: 'Deliver recovery before the original detached command',
+      idempotencyKey: randomUUID(),
+    });
+    const execution = service.execute(run.runId);
+    const taskId = await waitForTask(run.runId);
+    const originalCommand = await waitForTaskCommand(taskId, 'agent.task.commands');
+    const lostAt = new Date(Date.now() - 1_000);
+
+    const lostWorker = startLostWorker(lostAt, taskId);
+    await expect(lostWorker.nextEvent()).resolves.toMatchObject({ event: 'ready' });
+    await publish(originalCommand, `${run.runId}:${taskId}`);
+    await expect(lostWorker.nextEvent()).resolves.toMatchObject({
+      event: 'claimed',
+      taskId,
+      attempt: 1,
+    });
+    lostWorker.process.kill('SIGKILL');
+    await expect(once(lostWorker.process, 'exit')).resolves.toEqual([null, 'SIGKILL']);
+
+    await expect(
+      connection.db.transaction((transaction) =>
+        requeueExpiredAgentTasks(transaction, {
+          topic,
+          createId: randomUUID,
+          now: new Date(lostAt.getTime() + 2),
+        }),
+      ),
+    ).resolves.toContainEqual(expect.objectContaining({ taskId, runId: run.runId, attempt: 1 }));
+    const recoveryCommand = await waitForTaskCommand(taskId, topic);
+    const originalMessageId = parseAgentTaskCommandPayload(originalCommand)?.messageId;
+    const recoveryMessageId = parseAgentTaskCommandPayload(recoveryCommand)?.messageId;
+    expect(recoveryMessageId).toBeDefined();
+    expect(recoveryMessageId).not.toBe(originalMessageId);
+
+    const handled: AgentTaskCommandResult[] = [];
+    const settled = deferred<boolean>();
+    const consumerGroup = `out-of-order-${suffix}`;
+    const consumer = await startConsumer(consumerGroup, async (payload, partition, offset) => {
+      const messageId = parseAgentTaskCommandPayload(payload)?.messageId;
+      if (messageId !== recoveryMessageId && messageId !== originalMessageId) return;
+      handled.push(
+        await handleAgentTaskCommand({
+          database: connection.db,
+          consumerGroup,
+          topic,
+          partition,
+          offset,
+          rawPayload: payload,
+          executeDetachedTask: (runId, detachedTaskId, signal) =>
+            service.executeDetachedTask(runId, detachedTaskId, signal),
+        }),
+      );
+      if (handled.length === 2) settled.resolve(true);
+    });
+    await producer.send({
+      topic,
+      messages: [
+        { key: `${run.runId}:${taskId}`, value: recoveryCommand },
+        { key: `${run.runId}:${taskId}`, value: originalCommand },
+      ],
+    });
+    await settled.promise;
+    await consumer.stop();
+    await expect(execution).resolves.toMatchObject({ status: 'completed' });
+
+    expect(handled).toMatchObject([
+      { kind: 'handled', taskId, status: 'succeeded', inbox: 'processed' },
+      { kind: 'handled', taskId, status: 'skipped', inbox: 'processed' },
+    ]);
+    await expect(
+      connection.db
+        .select({ attempt: taskResults.attempt, summary: taskResults.summary })
+        .from(taskResults)
+        .where(eq(taskResults.taskId, taskId)),
+    ).resolves.toEqual([{ attempt: 2, summary: 'Recovered before the late original' }]);
+    await expect(
+      connection.db
+        .select({ status: agentTasks.status, attempt: agentTasks.attempt })
+        .from(agentTasks)
+        .where(eq(agentTasks.id, taskId)),
+    ).resolves.toEqual([{ status: 'succeeded', attempt: 2 }]);
+    await expect(
+      connection.db
+        .select({ messageId: inboxMessages.messageId })
+        .from(inboxMessages)
+        .where(
+          and(
+            eq(inboxMessages.consumerGroup, consumerGroup),
+            eq(inboxMessages.messageId, originalMessageId ?? ''),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+    await expect(
+      connection.db
+        .select({ messageId: inboxMessages.messageId })
+        .from(inboxMessages)
+        .where(
+          and(
+            eq(inboxMessages.consumerGroup, consumerGroup),
             eq(inboxMessages.messageId, recoveryMessageId ?? ''),
           ),
         ),
@@ -349,7 +468,7 @@ describeWithInfrastructure('Kafka detached Task recovery', () => {
     return producer.send({ topic, messages: [{ key, value }] });
   }
 
-  function startLostWorker(lostAt: Date) {
+  function startLostWorker(lostAt: Date, taskId: string) {
     const child = spawn(
       process.execPath,
       [
@@ -363,7 +482,8 @@ describeWithInfrastructure('Kafka detached Task recovery', () => {
           DATABASE_URL: connectionString ?? '',
           KAFKA_BROKERS: (brokers ?? []).join(','),
           TEST_AGENT_TASK_TOPIC: topic,
-          TEST_AGENT_TASK_GROUP: `lost-process-${suffix}`,
+          TEST_AGENT_TASK_GROUP: `lost-process-${suffix}-${taskId}`,
+          TEST_AGENT_TASK_ID: taskId,
           TEST_AGENT_TASK_LOST_AT: lostAt.toISOString(),
         },
         stdio: ['ignore', 'pipe', 'pipe'],

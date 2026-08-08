@@ -482,7 +482,10 @@ TODO：
       `synthesis.failed` typed fact，并由唯一的 `run.failed` WarningPart 展示；成功 synthesis 的相反语义
       测试确保不会误报。Specialist submission validator 现在区分 `task_result_schema_invalid`、
       `task_artifact_invalid`、`task_evidence_invalid` 和 `task_evidence_provenance_invalid`，并在有界 repair
-      失败后持久化 typed `task.failed`；Kafka 和并发预算矩阵仍待补齐。
+      失败后持久化 typed `task.failed`。真实 Kafka fixture 现覆盖同 `messageId` 重复 recovery command、
+      不同 `messageId` 的 recovery command 先到而旧 original command 晚到，以及取消后 late command；
+      Task terminal/attempt fence 保证只产生 attempt 2 的唯一 TaskResult，两个乱序消息各自写入 inbox，
+      不新增 Kafka manager 或第二套幂等状态。并发分支共享预算矩阵仍待补齐。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
 - [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与
