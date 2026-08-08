@@ -33,6 +33,25 @@ describe('public ToolCall failure projection', () => {
     ).toBeUndefined();
   });
 
+  it('localizes rate limiting and rejects contract drift', () => {
+    const failure = {
+      code: 'tool_rate_limited',
+      messageKey: 'tool.failure.rate_limited',
+      retryable: true,
+      message: 'provider credential=secret',
+    };
+    expect(projectPublicToolFailure(failure)).toEqual({
+      code: 'tool_rate_limited',
+      messageKey: 'tool.failure.rate_limited',
+      retryable: true,
+    });
+    expect(toolFailureSummary(activity(failure))).toBe('请求过于频繁，请稍后重试。');
+    expect(projectPublicToolFailure({ ...failure, retryable: false })).toBeUndefined();
+    expect(
+      projectPublicToolFailure({ ...failure, messageKey: 'tool.failure.provider' }),
+    ).toBeUndefined();
+  });
+
   it.each([
     [
       'connection_unavailable_before_dispatch',

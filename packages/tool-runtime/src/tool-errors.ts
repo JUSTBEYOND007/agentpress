@@ -12,7 +12,8 @@ export class ToolRuntimeError extends Error {
       | 'tool_not_found'
       | 'invalid_input'
       | 'invalid_output'
-      | 'tool_timeout',
+      | 'tool_timeout'
+      | 'tool_rate_limited',
     message: string,
     public readonly details: Readonly<Record<string, unknown>> = {},
   ) {

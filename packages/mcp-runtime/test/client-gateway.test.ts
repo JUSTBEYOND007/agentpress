@@ -1,6 +1,7 @@
 // Reconnect tests adapted from Oh My Pi v17.1.8, commit f446b8a (MIT).
 // Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { McpClientGateway, McpServerManager } from '../src/index.js';
@@ -214,6 +215,40 @@ describe('MCP client gateway', () => {
     await expect(new McpClientGateway(internalManager).call(input)).rejects.toBe(internal);
     expect(internalCall).toHaveBeenCalledTimes(1);
     expect(internalManager.state('web_research')).toBe('ready');
+  });
+
+  it('maps a typed HTTP 429 without exposing the remote response body', async () => {
+    const throttled = new StreamableHTTPError(
+      429,
+      'provider api_key=generated credential=generated',
+    );
+    const callTool = vi.fn(() => Promise.reject(throttled));
+    const manager = managerWithClients([
+      { callTool, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+
+    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.toMatchObject({
+      name: 'McpRateLimitError',
+      code: 'tool_rate_limited',
+    });
+    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.not.toThrow(
+      /api_key|credential|generated/u,
+    );
+    expect(callTool).toHaveBeenCalledTimes(2);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
+  it('does not infer rate limiting or connection loss from a non-429 HTTP response', async () => {
+    const unavailable = new StreamableHTTPError(503, 'rate limit credential=generated');
+    const manager = managerWithClients([
+      {
+        callTool: vi.fn(() => Promise.reject(unavailable)),
+        close: () => Promise.resolve(),
+      } as unknown as Client,
+    ]);
+
+    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.toBe(unavailable);
+    expect(manager.state('web_research')).toBe('ready');
   });
 
   it('fails closed on an MCP error result without retaining remote content', async () => {

@@ -62,6 +62,40 @@ describe('MCP Streamable HTTP real fixture', () => {
     }
   });
 
+  it('maps a real HTTP 429 without retaining its response body or degrading the session', async () => {
+    const fixture = await startFixture(false);
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: fixture.url }),
+    });
+    const gateway = new McpClientGateway(manager);
+    try {
+      await expect(
+        gateway.call({
+          ...toolCallInput('rate-limited', 'ignored'),
+          toolName: 'rate_limited',
+        }),
+      ).rejects.toMatchObject({ name: 'McpRateLimitError', code: 'tool_rate_limited' });
+      await expect(
+        gateway.call({
+          ...toolCallInput('rate-limited-redaction', 'ignored'),
+          toolName: 'rate_limited',
+        }),
+      ).rejects.not.toThrow(/api_key|credential|generated/u);
+      expect(fixture.rateLimitedCallCount()).toBe(2);
+      expect(manager.state('web_research')).toBe('ready');
+      await expect(gateway.call(toolCallInput('after-rate-limit', 'healthy'))).resolves.toBe(
+        'healthy',
+      );
+      await manager.stop('web_research');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('fences a non-cooperative server timeout and ignores its late completion', async () => {
     const fixture = await startFixture(false);
     const manager = new McpServerManager();
@@ -251,6 +285,7 @@ async function startFixture(
   readonly slowAbortCount: () => number;
   readonly stubbornAbortCount: () => number;
   readonly stubbornCallCount: () => number;
+  readonly rateLimitedCallCount: () => number;
   readonly echoCallCount: () => number;
   readonly waitForSlowStart: () => Promise<void>;
   readonly waitForStubbornStart: () => Promise<void>;
@@ -261,6 +296,7 @@ async function startFixture(
   let slowAbortCount = 0;
   let stubbornAbortCount = 0;
   let stubbornCallCount = 0;
+  let rateLimitedCallCount = 0;
   let echoCallCount = 0;
   let markSlowStarted: (() => void) | undefined;
   const slowStarted = new Promise<void>((resolve) => {
@@ -333,7 +369,9 @@ async function startFixture(
   // SDK 1.30 optional callback types are not exactOptionalPropertyTypes-safe.
   await mcp.connect(transport as unknown as Transport);
   const server = createServer((request, response) => {
-    void handleRequest(request, response, transport, requests);
+    void handleRequest(request, response, transport, requests, () => {
+      rateLimitedCallCount += 1;
+    });
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -350,6 +388,7 @@ async function startFixture(
     slowAbortCount: () => slowAbortCount,
     stubbornAbortCount: () => stubbornAbortCount,
     stubbornCallCount: () => stubbornCallCount,
+    rateLimitedCallCount: () => rateLimitedCallCount,
     echoCallCount: () => echoCallCount,
     waitForSlowStart: () => slowStarted,
     waitForStubbornStart: () => stubbornStarted,
@@ -390,6 +429,7 @@ async function handleRequest(
   response: ServerResponse,
   transport: StreamableHTTPServerTransport,
   requests: { method: string; session?: string }[],
+  onRateLimitedCall: () => void,
 ): Promise<void> {
   requests.push({
     method: request.method ?? 'UNKNOWN',
@@ -399,11 +439,31 @@ async function handleRequest(
   });
   try {
     const body = request.method === 'POST' ? await readJsonBody(request) : undefined;
+    if (isRateLimitedToolCall(body)) {
+      onRateLimitedCall();
+      response.writeHead(429, { 'content-type': 'text/plain' });
+      response.end('provider api_key=generated credential=generated');
+      return;
+    }
     await transport.handleRequest(request, response, body);
   } catch (error) {
     if (!response.headersSent) response.writeHead(500);
     response.end(error instanceof Error ? error.message : 'fixture error');
   }
+}
+
+function isRateLimitedToolCall(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const request = value as Record<string, unknown>;
+  if (request.method !== 'tools/call') return false;
+  if (
+    typeof request.params !== 'object' ||
+    request.params === null ||
+    Array.isArray(request.params)
+  ) {
+    return false;
+  }
+  return (request.params as Record<string, unknown>).name === 'rate_limited';
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {

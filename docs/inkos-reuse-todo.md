@@ -600,7 +600,13 @@ timeout 以 `timeout_after_dispatch` 进入 `outcome_unknown`，避免误导性�
 证明两类非协作 handler 各执行一次、ledger 与 durable event 风险分流正确、live/replay 等价；Web 仅消费
 有界公共 failure 并显示不同核对文案。官方 SDK Streamable HTTP 真实 Server fixture 还证明 cancel wire
 到达非协作工具、迟到完成不改变宿主 timeout、旧调用执行次数保持 1 且下一调用复用健康会话。该 fixture
-不替代 PostgreSQL + 真实 Server 的端到端组合、rate limit、断线 stale result 或浏览器矩阵。
+不替代 PostgreSQL + 真实 Server 的端到端组合、断线 stale result 或浏览器矩阵。
+
+MCP HTTP 429 现在只按官方 SDK `StreamableHTTPError.code` 在 adapter 边界识别，不从 provider 文案、
+tool name 或关键词推断。远端响应正文不会保留到公开错误或 cause；宿主将其投影为可重试的
+`tool_rate_limited`，且不会把健康 client 标记为 degraded。真实 Streamable HTTP fixture 证明拒绝后同一
+session 仍可成功调用，PostgreSQL fixture 证明受保护 ledger 与脱敏 live/replay 的状态均为确定 `failed`，
+Web 对 code/messageKey/retryable 组合 fail closed。非 429 HTTP 状态的相反语义测试防止误分类。
 
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
@@ -785,10 +791,11 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 35 个 MCP Runtime 测试
-      覆盖调用前连接失败、调用后断线不重放和旧 client result identity fence；
-      ToolRegistry 19 个测试、PostgreSQL ToolCall fixture 和官方 SDK 真实 HTTP Server 已覆盖非协作 handler
-      的硬 timeout、wire cancel、迟到完成与风险分流；
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 38 个 MCP Runtime 测试
+      覆盖调用前连接失败、调用后断线不重放、旧 client result identity fence，以及结构化 HTTP 429
+      脱敏、拒绝后 session 健康和非 429 相反语义；ToolRegistry 19 个测试、27 个 PostgreSQL ToolCall
+      场景和官方 SDK 真实 HTTP Server 已覆盖非协作 handler 的硬 timeout、wire cancel、迟到完成、
+      风险分流及限流 live/replay；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置

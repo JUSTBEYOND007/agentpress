@@ -45,6 +45,23 @@ describe('Tool Call failure projection', () => {
     });
   });
 
+  it('maps a typed rate limit without exposing provider diagnostics', () => {
+    const projected = projectToolFailure(
+      new ToolRuntimeError('tool_rate_limited', 'provider credential=secret'),
+      false,
+    );
+    expect(projected).toMatchObject({
+      status: 'failed',
+      publicFailure: {
+        code: 'tool_rate_limited',
+        messageKey: 'tool.failure.rate_limited',
+        retryable: true,
+      },
+      diagnosticFailure: { visibility: 'protected' },
+    });
+    expect(JSON.stringify(projected.publicFailure)).not.toContain('secret');
+  });
+
   it('keeps a proven pre-dispatch failure retryable even for a side-effect risk', () => {
     expect(
       projectToolFailure(

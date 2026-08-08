@@ -5,6 +5,7 @@ export type PublicToolFailure = {
     | 'invalid_input'
     | 'invalid_output'
     | 'tool_timeout'
+    | 'tool_rate_limited'
     | 'tool_unavailable'
     | 'provider_failed'
     | 'outcome_unknown';
@@ -12,6 +13,7 @@ export type PublicToolFailure = {
     | 'tool.failure.invalid_input'
     | 'tool.failure.invalid_output'
     | 'tool.failure.timeout'
+    | 'tool.failure.rate_limited'
     | 'tool.failure.unavailable'
     | 'tool.failure.provider'
     | 'tool.failure.outcome_unknown';
@@ -48,6 +50,11 @@ const contracts: Readonly<
     messageKey: 'tool.failure.timeout',
     retryable: true,
     message: '工具响应超时，请稍后重试。',
+  },
+  tool_rate_limited: {
+    messageKey: 'tool.failure.rate_limited',
+    retryable: true,
+    message: '请求过于频繁，请稍后重试。',
   },
   tool_unavailable: {
     messageKey: 'tool.failure.unavailable',

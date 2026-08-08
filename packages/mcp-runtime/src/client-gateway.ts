@@ -1,13 +1,14 @@
 // Reconnect behavior adapted from Oh My Pi v17.1.8, commit f446b8a (MIT).
 // Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ToolExecutionError } from '@agentpress/tool-runtime';
+import { ToolExecutionError, ToolRuntimeError } from '@agentpress/tool-runtime';
 
 import type { BuiltInMcpGateway } from './built-in-tools.js';
 import type {
@@ -60,6 +61,20 @@ export class McpCallOutcomeUnknownError extends ToolExecutionError {
   }
 }
 
+export class McpRateLimitError extends ToolRuntimeError {
+  public override readonly name = 'McpRateLimitError';
+
+  public constructor(
+    public readonly serverId: BuiltInMcpServerId,
+    public readonly toolName: string,
+  ) {
+    super('tool_rate_limited', `MCP tool ${toolName} was rate limited`, {
+      serverId,
+      toolName,
+    });
+  }
+}
+
 export class McpClientGateway implements BuiltInMcpGateway {
   public constructor(
     private readonly manager: McpServerManager,
@@ -76,6 +91,9 @@ export class McpClientGateway implements BuiltInMcpGateway {
       return result;
     } catch (error) {
       if (error instanceof McpCallOutcomeUnknownError) throw error;
+      if (error instanceof StreamableHTTPError && error.code === 429) {
+        throw new McpRateLimitError(input.serverId, input.toolName);
+      }
       if (!isConnectionFailure(error)) throw error;
       await this.manager.markDegraded(input.serverId, client);
       throwIfAborted(input.context.signal);

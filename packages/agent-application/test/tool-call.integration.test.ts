@@ -24,7 +24,12 @@ import {
   workspaceMembers,
   workspaces,
 } from '@agentpress/database';
-import { hashToolArguments, ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
+import {
+  hashToolArguments,
+  ToolExecutionError,
+  ToolRegistry,
+  ToolRuntimeError,
+} from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
 import { and, asc, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -132,6 +137,26 @@ describeWithDatabase('Tool Call application flow', () => {
     estimateCost: () => ({}),
     execute: () => {
       throw new Error('provider credential=super-secret stack=/private/runtime.ts:42');
+    },
+  });
+  registry.register({
+    toolId: 'workspace.rate_limited_search',
+    version: '1.0.0',
+    owner: 'workspace',
+    description: 'Search through a rate-limited provider',
+    capabilities: ['workspace.read'],
+    inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ result: Type.String() }, { additionalProperties: false }),
+    risk: 'read_only',
+    sideEffect: 'No side effect',
+    idempotency: 'none',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () => {
+      throw new ToolRuntimeError(
+        'tool_rate_limited',
+        'provider api_key=super-secret credential=super-secret',
+      );
     },
   });
   registry.register({
@@ -801,6 +826,57 @@ describeWithDatabase('Tool Call application flow', () => {
     });
     expect(JSON.stringify(liveEvents)).not.toContain('super-secret');
     expect(JSON.stringify(replayParts)).not.toContain('/private/runtime.ts');
+  });
+
+  it('persists a typed rate limit while live and replay remain redacted', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'workspace.rate_limited_search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'rate-limit boundary' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['workspace.read']),
+    });
+
+    await expect(service.execute(proposal.toolCallId)).resolves.toMatchObject({ status: 'failed' });
+    const [saved] = await connection.db
+      .select({ status: toolCalls.status, failure: toolCalls.failure })
+      .from(toolCalls)
+      .where(eq(toolCalls.id, proposal.toolCallId));
+    expect(saved).toMatchObject({
+      status: 'failed',
+      failure: {
+        code: 'tool_rate_limited',
+        messageKey: 'tool.failure.rate_limited',
+        retryable: true,
+        visibility: 'protected',
+      },
+    });
+    expect(saved?.failure?.message).toContain('super-secret');
+
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const liveParts = projectRunParts(liveEvents).filter(({ type }) => type === 'activity');
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const replayParts = replay?.parts.filter(({ type }) => type === 'activity');
+    expect(replayParts).toEqual(liveParts);
+    expect(replayParts).toHaveLength(1);
+    expect(replayParts?.[0]).toMatchObject({
+      status: 'tool.failed',
+      outcome: 'failed',
+      payload: {
+        failure: {
+          code: 'tool_rate_limited',
+          messageKey: 'tool.failure.rate_limited',
+          retryable: true,
+        },
+      },
+    });
+    expect(JSON.stringify(liveEvents)).not.toContain('super-secret');
+    expect(JSON.stringify(replayParts)).not.toContain('super-secret');
   });
 
   it('bridges a Pi Runtime tool through the persistent ledger', async () => {

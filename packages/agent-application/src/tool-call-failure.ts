@@ -9,6 +9,7 @@ export type PublicToolFailure = {
     | 'invalid_input'
     | 'invalid_output'
     | 'tool_timeout'
+    | 'tool_rate_limited'
     | 'tool_unavailable'
     | 'provider_failed'
     | 'outcome_unknown';
@@ -16,6 +17,7 @@ export type PublicToolFailure = {
     | 'tool.failure.invalid_input'
     | 'tool.failure.invalid_output'
     | 'tool.failure.timeout'
+    | 'tool.failure.rate_limited'
     | 'tool.failure.unavailable'
     | 'tool.failure.provider'
     | 'tool.failure.outcome_unknown';
@@ -60,6 +62,9 @@ function classifyPublicFailure(error: unknown, sideEffectRisk: boolean): PublicT
     }
     if (error.code === 'tool_timeout') {
       return failure('tool_timeout', 'tool.failure.timeout', true);
+    }
+    if (error.code === 'tool_rate_limited') {
+      return failure('tool_rate_limited', 'tool.failure.rate_limited', true);
     }
     return failure('tool_unavailable', 'tool.failure.unavailable', true);
   }
