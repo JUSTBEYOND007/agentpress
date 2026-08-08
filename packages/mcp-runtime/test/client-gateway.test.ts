@@ -3,6 +3,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { Type, type TSchema } from '@sinclair/typebox';
 import { describe, expect, it, vi } from 'vitest';
 
 import { McpClientGateway, McpServerManager } from '../src/index.js';
@@ -537,6 +538,62 @@ describe('MCP client gateway', () => {
     );
   });
 
+  it('fails before dispatch when a pinned MCP tool disappears or its input contract drifts', async () => {
+    const callTool = vi.fn(() =>
+      Promise.resolve({ structuredContent: { value: { results: [] } } }),
+    );
+    const listTools = vi
+      .fn()
+      .mockResolvedValueOnce({
+        tools: [{ name: 'other', inputSchema: searchSchema() }],
+      })
+      .mockResolvedValueOnce({
+        tools: [
+          {
+            name: 'search',
+            inputSchema: searchSchema({ query: Type.Number() }),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        tools: [
+          {
+            name: 'search',
+            inputSchema: searchSchema({
+              _agentpressRunId: Type.String({ format: 'uuid' }),
+            }),
+          },
+        ],
+      });
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () =>
+        Promise.resolve({
+          listTools,
+          callTool,
+          close: () => Promise.resolve(),
+        } as unknown as Client),
+    });
+    const gateway = new McpClientGateway(manager);
+
+    await expect(gateway.call(capabilityCallInput('missing'))).rejects.toMatchObject({
+      name: 'McpToolCapabilityError',
+      code: 'tool_not_found',
+      reason: 'tool_missing',
+    });
+    await expect(gateway.call(capabilityCallInput('drifted'))).rejects.toMatchObject({
+      name: 'McpToolCapabilityError',
+      code: 'tool_not_found',
+      reason: 'tool_revision_changed',
+    });
+    await expect(gateway.call(capabilityCallInput('valid'))).resolves.toEqual({ results: [] });
+    expect(listTools).toHaveBeenCalledTimes(3);
+    expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
   it('reuses SDK prompt/resource APIs with deterministic listing order', async () => {
     const client = {
       listPrompts: vi.fn(() => Promise.resolve({ prompts: [{ name: 'z' }, { name: 'a' }] })),
@@ -607,6 +664,27 @@ function toolCallInput(toolCallId = 'call', signal = new AbortController().signa
     arguments: { query: 'Kafka' },
     context: { runId: 'run', toolCallId, signal },
   };
+}
+
+function capabilityCallInput(toolCallId: string) {
+  return {
+    ...toolCallInput(toolCallId),
+    expectedCapability: {
+      toolRevision: '1.0.0',
+      inputSchema: searchSchema(),
+    },
+  };
+}
+
+function searchSchema(extraProperties: Readonly<Record<string, TSchema>> = {}) {
+  return Type.Object(
+    {
+      query: Type.String({ minLength: 1, maxLength: 2_000 }),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })),
+      ...extraProperties,
+    },
+    { additionalProperties: false },
+  );
 }
 
 function managerWithClients(clients: readonly Client[]): McpServerManager {

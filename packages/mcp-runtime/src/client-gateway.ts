@@ -23,6 +23,11 @@ import type {
   McpTransportAuditObserver,
 } from './contracts.js';
 import type { McpServerManager } from './server-manager.js';
+import {
+  assertMcpToolCapability,
+  McpToolCapabilityError,
+  validateListedMcpTools,
+} from './tool-capability.js';
 import { isMcpAuthenticationFailure, isMcpConnectionFailure } from './transport-errors.js';
 
 type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
@@ -114,6 +119,34 @@ export class McpClientGateway implements BuiltInMcpGateway {
 
   public async call(input: Parameters<BuiltInMcpGateway['call']>[0]): Promise<unknown> {
     const client = await this.getClientBeforeCall(input);
+    if (input.expectedCapability) {
+      try {
+        await assertMcpToolCapability(client, {
+          serverId: input.serverId,
+          toolName: input.toolName,
+          expected: input.expectedCapability,
+        });
+      } catch (error) {
+        if (error instanceof McpToolCapabilityError) throw error;
+        if (error instanceof StreamableHTTPError && error.code === 429) {
+          throw new McpRateLimitError(input.serverId, input.toolName);
+        }
+        if (isMcpAuthenticationFailure(error)) {
+          throw new McpAuthenticationError(input.serverId, input.toolName);
+        }
+        if (isMcpConnectionFailure(error)) {
+          await this.manager.markDegraded(input.serverId, client);
+          throwIfAborted(input.context.signal);
+          throw new McpCallBeforeDispatchError(input.serverId, input.toolName, error);
+        }
+        throw new McpToolCapabilityError(
+          input.serverId,
+          input.toolName,
+          input.expectedCapability.toolRevision,
+          'capability_check_failed',
+        );
+      }
+    }
     try {
       const result = await callTool(client, input);
       if (!this.manager.isCurrentClient(input.serverId, client)) {
@@ -144,9 +177,7 @@ export class McpClientGateway implements BuiltInMcpGateway {
     const client = await this.manager.getClient(serverId);
     try {
       const result = await client.listTools();
-      const tools = [...result.tools];
-      validateListedTools(tools);
-      return tools.sort((left, right) => left.name.localeCompare(right.name));
+      return validateListedMcpTools(result.tools);
     } catch (error) {
       if (isMcpConnectionFailure(error)) await this.manager.markDegraded(serverId, client);
       throw error;
@@ -308,28 +339,6 @@ export class McpClientGateway implements BuiltInMcpGateway {
       toolCallId: input.context.toolCallId,
     });
   }
-}
-
-function validateListedTools(tools: readonly ListedMcpTool[]): void {
-  const names = new Set<string>();
-  for (const tool of tools) {
-    if (!tool.name.trim() || names.has(tool.name)) {
-      throw new Error('MCP tool list contains an empty or duplicate tool name');
-    }
-    names.add(tool.name);
-    if (!isObjectSchema(tool.inputSchema)) {
-      throw new Error(`MCP tool ${tool.name} has an invalid input schema`);
-    }
-  }
-}
-
-function isObjectSchema(value: unknown): value is { readonly type: 'object' } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    (value as { readonly type?: unknown }).type === 'object'
-  );
 }
 
 async function callTool(

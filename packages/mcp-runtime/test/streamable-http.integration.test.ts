@@ -216,6 +216,57 @@ describe('MCP Streamable HTTP real fixture', () => {
     }
   });
 
+  it('checks a pinned tool contract through the official SDK before dispatch', async () => {
+    const fixture = await startFixture(false);
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: fixture.url }),
+    });
+    const gateway = new McpClientGateway(manager);
+    const expectedCapability = {
+      toolRevision: '1.0.0',
+      inputSchema: Type.Object({ value: Type.String() }, { additionalProperties: false }),
+    };
+    try {
+      await expect(
+        gateway.call({
+          ...toolCallInput('missing-before-dispatch', 'ignored'),
+          toolName: 'removed',
+          expectedCapability,
+        }),
+      ).rejects.toMatchObject({
+        name: 'McpToolCapabilityError',
+        reason: 'tool_missing',
+      });
+      await expect(
+        gateway.call({
+          ...toolCallInput('revision-before-dispatch', 'ignored'),
+          expectedCapability: {
+            toolRevision: '2.0.0',
+            inputSchema: Type.Object({ value: Type.Number() }, { additionalProperties: false }),
+          },
+        }),
+      ).rejects.toMatchObject({
+        name: 'McpToolCapabilityError',
+        reason: 'tool_revision_changed',
+      });
+      expect(fixture.echoCallCount()).toBe(0);
+      await expect(
+        gateway.call({
+          ...toolCallInput('valid-pinned-contract', 'healthy'),
+          expectedCapability,
+        }),
+      ).resolves.toBe('healthy');
+      expect(fixture.echoCallCount()).toBe(1);
+      await manager.stop('web_research');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('fences a non-cooperative server timeout and ignores its late completion', async () => {
     const fixture = await startFixture(false);
     const manager = new McpServerManager();

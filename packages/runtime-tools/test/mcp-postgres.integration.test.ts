@@ -21,6 +21,7 @@ import {
   workspaces,
 } from '@agentpress/database';
 import {
+  BUILT_IN_MCP_ADAPTER_REVISION,
   createStreamableHttpDefinition,
   McpClientGateway,
   McpServerManager,
@@ -152,7 +153,7 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
           serverRevision: '1.0.0',
           toolName: 'search',
           toolRevision: '1.0.0',
-          adapterRevision: 'agentpress-mcp-adapter-v1',
+          adapterRevision: BUILT_IN_MCP_ADAPTER_REVISION,
         },
         output: first,
       },
@@ -181,6 +182,66 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
     expect(
       durableLive.filter(({ eventType }) => eventType === 'tool.duplicate_result_ignored'),
     ).toHaveLength(1);
+  });
+
+  it('settles a disappeared remote tool as unavailable before provider dispatch', async () => {
+    const missingFixture = await startStreamableHttpSearchFixture({
+      toolName: 'retired_search',
+    });
+    const missingManager = new McpServerManager();
+    missingManager.register(
+      createStreamableHttpDefinition({
+        serverId: 'web_research',
+        version: '1.0.0',
+        displayName: 'Web Research Missing Tool',
+        transport: { url: missingFixture.url },
+      }),
+    );
+    const missingRegistry = new ToolRegistry();
+    registerBuiltInMcpTools(missingRegistry, new McpClientGateway(missingManager));
+    const missingService = new ToolCallService({
+      database: connection.db,
+      registry: missingRegistry,
+      publisher: { publish: () => Promise.resolve() },
+    });
+    const runId = await createRunningRun();
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry: missingRegistry,
+      toolCalls: missingService,
+    });
+    const webSearch = (await bridge.createForRun(runId, ['web.research'])).find(
+      (tool) => tool.label === 'web.search',
+    );
+
+    try {
+      await expect(
+        webSearch?.execute(
+          { query: 'missing remote capability', limit: 1 },
+          { runId, providerToolCallId: randomUUID() },
+        ),
+      ).rejects.toMatchObject({ code: 'invalid_tool_state' });
+      expect(missingFixture.callCount()).toBe(0);
+      await expect(
+        connection.db
+          .select({ status: toolCalls.status, failure: toolCalls.failure })
+          .from(toolCalls)
+          .where(eq(toolCalls.runId, runId)),
+      ).resolves.toEqual([
+        {
+          status: 'failed',
+          failure: expect.objectContaining({
+            code: 'tool_unavailable',
+            messageKey: 'tool.failure.unavailable',
+            retryable: true,
+            visibility: 'protected',
+          }) as unknown,
+        },
+      ]);
+    } finally {
+      await missingManager.stop('web_research');
+      await missingFixture.close();
+    }
   });
 
   async function createRunningRun(): Promise<string> {

@@ -12,7 +12,9 @@ export type StreamableHttpSearchFixture = {
   readonly close: () => Promise<void>;
 };
 
-export async function startStreamableHttpSearchFixture(): Promise<StreamableHttpSearchFixture> {
+export async function startStreamableHttpSearchFixture(
+  options: { readonly toolName?: 'search' | 'retired_search' } = {},
+): Promise<StreamableHttpSearchFixture> {
   let callCount = 0;
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: randomUUID,
@@ -20,11 +22,11 @@ export async function startStreamableHttpSearchFixture(): Promise<StreamableHttp
   });
   const mcp = new McpServer({ name: 'agentpress-postgres-fixture', version: '1.0.0' });
   mcp.registerTool(
-    'search',
+    options.toolName ?? 'search',
     {
       inputSchema: {
-        query: z.string(),
-        limit: z.number().int().optional(),
+        query: z.string().min(1).max(2_000),
+        limit: z.number().int().min(1).max(2).optional(),
         _agentpressRunId: z.uuid(),
       },
     },

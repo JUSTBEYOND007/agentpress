@@ -5,4 +5,5 @@ export * from './output-guard.js';
 export * from './server-manager.js';
 export * from './in-memory-built-ins.js';
 export * from './streamable-http.js';
+export * from './tool-capability.js';
 export * from './transport-errors.js';

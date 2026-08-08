@@ -925,10 +925,15 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 50 个 MCP Runtime 测试
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 54 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放、旧 client result identity fence，以及结构化 HTTP 429
       脱敏、拒绝后 session 健康、非 429 相反语义、真实 TCP 不可达、401/403 初始化认证失败、非法
-      protocol handshake 及只针对连接故障的 reconnect circuit；
+      protocol handshake 及只针对连接故障的 reconnect circuit；内置 Adapter 现在还会在 dispatch 前通过
+      官方 SDK `tools/list` 校验 pinned tool name 和规范化 input Schema，工具消失或 contract revision 漂移
+      都以 `tool_unavailable` fail closed。真实 Streamable HTTP fixture 证明两种失败的 provider 调用数为 0，
+      PostgreSQL composition fixture 证明同一失败只以 bounded public failure 进入 ToolCall ledger；合法
+      contract 的相反场景仍正常执行。Adapter revision 已升为 `agentpress-mcp-adapter-v2`，旧 Run 继续由
+      既有 provenance fence 拒绝静默漂移；
       ToolRegistry 19 个测试、29 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
       handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流、初始化失败和 JSON-RPC error；
       Runtime Tools 11 个测试另覆盖官方 MCP Streamable HTTP Server -> PersistentToolBridge -> PostgreSQL

@@ -3,6 +3,7 @@ import { Type } from '@sinclair/typebox';
 
 import type { BuiltInMcpServerId, McpOutputArtifactReference } from './contracts.js';
 import { guardMcpOutputWithArtifact } from './output-guard.js';
+import type { McpExpectedToolCapability } from './tool-capability.js';
 
 export type BuiltInMcpGateway = {
   readonly call: (input: {
@@ -10,6 +11,7 @@ export type BuiltInMcpGateway = {
     readonly toolName: string;
     readonly arguments: Readonly<Record<string, unknown>>;
     readonly context: ToolExecutionContext;
+    readonly expectedCapability?: McpExpectedToolCapability;
   }) => Promise<unknown>;
 };
 
@@ -45,7 +47,7 @@ const guardedOutput = Type.Object({
 });
 
 export const WEB_SEARCH_EVIDENCE_PROVIDER_REVISION = 'anysearch-api-v1+pi-web-access-v0.15.0';
-export const BUILT_IN_MCP_ADAPTER_REVISION = 'agentpress-mcp-adapter-v1';
+export const BUILT_IN_MCP_ADAPTER_REVISION = 'agentpress-mcp-adapter-v2';
 
 export function registerBuiltInMcpTools(
   registry: ToolRegistry,
@@ -112,6 +114,10 @@ export function registerBuiltInMcpTools(
             toolName: 'search',
             arguments: input,
             context,
+            expectedCapability: {
+              toolRevision: '1.0.0',
+              inputSchema: tool.toolId === 'web.search' ? webSearchInput : searchInput,
+            },
           }),
           undefined,
           {
