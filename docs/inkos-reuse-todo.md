@@ -667,6 +667,8 @@ TODO：
 - [ ] 补齐 search timeout/rate limit/部分 query 失败/provider Schema 非法、fetch timeout/cancel、DNS
       失败、redirect loop、非法 URL、空正文、PDF 签名或页数失败、synthesis timeout/Schema 失败、
       Token/费用耗尽以及 Evidence/Artifact 持久化失败的执行链矩阵。
+      `packages/web-research` 已先固定 provider-neutral typed failure vocabulary，覆盖上述阶段；实际
+      Port/ToolCall/Task/Artifact 持久化与投影故障注入仍待补齐。
 - [ ] partial query/fetch failure 必须保留已成功来源；全部 search/fetch/synthesis 失败只允许产出无 Claim、
       `confidence=0` 的 typed degraded Artifact；持久化失败不能投影为成功 Artifact。
 - [ ] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。

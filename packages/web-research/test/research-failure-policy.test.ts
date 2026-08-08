@@ -85,4 +85,36 @@ describe('provider-neutral research failure policy', () => {
     expect(assessment.confidence).toBe(0.55);
     expect(assessment.conflicts).toEqual(['[conflicting_sources] Sources disagree']);
   });
+
+  it('keeps execution-stage failures typed and claim-free', () => {
+    const kinds: readonly ResearchFailure['kind'][] = [
+      'search_failed',
+      'search_timeout',
+      'rate_limited',
+      'provider_schema_invalid',
+      'fetch_timeout',
+      'fetch_cancelled',
+      'dns_failure',
+      'redirect_loop',
+      'invalid_url',
+      'empty_body',
+      'pdf_signature_invalid',
+      'pdf_page_limit',
+      'synthesis_timeout',
+      'synthesis_schema_invalid',
+      'budget_exhausted',
+      'persistence_failed',
+    ];
+    const report = buildDegradedResearchBrief({
+      purpose: 'general',
+      depth: 'quick',
+      summary: 'Incomplete research',
+      providerRevision: 'test-v1',
+      failures: kinds.map((kind) => failure(kind)),
+    });
+    expect(report.claims).toEqual([]);
+    expect(report.confidence).toBe(0);
+    expect(report.partialFailures).toHaveLength(kinds.length);
+    expect(report.unknowns).toHaveLength(kinds.length);
+  });
 });
