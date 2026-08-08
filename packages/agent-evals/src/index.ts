@@ -17,3 +17,4 @@ export * from './experiment-store.js';
 export * from './experiment-report.js';
 export * from './compaction-scenarios.js';
 export * from './skill-selection-eval.js';
+export * from './research-quality-eval.js';

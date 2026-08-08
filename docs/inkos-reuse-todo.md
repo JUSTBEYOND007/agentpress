@@ -921,8 +921,14 @@ TODO：
       已补充 PostgreSQL/真实 Pi 研究失败集成：恶意 Evidence excerpt 只保留原始 `web.search` ToolCall，
       不创建额外 ToolCall、Run Skill Binding 或 `edit_proposals`；ResearchBrief 保持 claim-free。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
-- [ ] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝
+- [x] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝
       硬结论通过率，并在报告记录 provider/model/Prompt/Tool/Skill/Context/Runtime revision。
+      `research-quality-eval.ts` 复用现有 `OnlineEvalVersionManifest` 和 experiment metric registry，固定
+      `workflow-02/04` cohort、完整数据集 coverage 与六个独立门槛：Schema validity=1、citation
+      precision>=0.95、无 Evidence Claim=0、unknown retention=1、conflict recall=1、拒绝无依据硬结论
+      通过率=1。缺 citation、部分数据集、重复/越界 observation 或缺校准 refusal verdict 均 fail closed；
+      refusal 不通过关键词猜测，必须来自结构化或已校准 observation。此项只固定在线验收契约，不冒充
+      尚未完成的真实目标模型运行；真实运行仍由上一项单独验收。
 
 ## P1：MCP 边界
 

@@ -422,6 +422,14 @@ single timeout as a failed report; the complete rerun at
 `.agentpress/evals/2026-08-08T18-48-17-177Z-gpt-5.6-terra-skill-selection.json` passed with 5/5 exact
 match, none precision/recall 1, and zero forbidden, bypass, Schema, or runtime errors.
 
+Web Research quality uses the same `OnlineEvalVersionManifest` rather than a parallel report
+identity. `research-quality-eval.ts` fixes complete `workflow-02/04` coverage and independent gates
+for Schema validity, citation precision, claims without Evidence, unknown retention, conflict recall,
+and calibrated refusal of unsupported hard conclusions. Provider, model, Prompt, Tool, Skill,
+Context, and Runtime revisions are therefore carried by the existing manifest. Refusal semantics
+must be supplied as a structured or calibrated verdict; the evaluator does not infer them from a
+keyword list. Partial datasets, missing citations, or missing verdicts cannot pass.
+
 ### MetaHarness behavior reference and independent adaptation
 
 At `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`, MetaHarness declares benchmark-owned metric
