@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { RuntimeEvent, RuntimeMessage, RuntimeResult } from '@agentpress/agent-runtime';
+import type { RuntimeEvent, RuntimeMessage } from '@agentpress/agent-runtime';
 import { RUNTIME_CURRENT_TURN_VERSION } from '@agentpress/agent-runtime';
 import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {

@@ -478,7 +478,9 @@ TODO：
       RunEvent 和 checkpoint；worker 尚未 claim 时由宿主原子创建 attempt 1 后结算，已 claim 时继续由
       attempt fence 拒绝旧结果。Main synthesis 失败现在会在 Run 结算事务中写入脱敏的
       `synthesis.failed` typed fact，并由唯一的 `run.failed` WarningPart 展示；成功 synthesis 的相反语义
-      测试确保不会误报。模型/Schema、Kafka 和并发预算矩阵仍待补齐。
+      测试确保不会误报。Specialist submission validator 现在区分 `task_result_schema_invalid`、
+      `task_artifact_invalid`、`task_evidence_invalid` 和 `task_evidence_provenance_invalid`，并在有界 repair
+      失败后持久化 typed `task.failed`；Kafka 和并发预算矩阵仍待补齐。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
 - [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与

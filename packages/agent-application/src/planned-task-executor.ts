@@ -20,22 +20,22 @@ import { AgentTaskWaitService } from './agent-task-wait-service.js';
 import { AgentTranscriptProjector } from './agent-transcript-projector.js';
 import type { RunEventPublisher, RuntimeToolFactory } from './contracts.js';
 import {
-  assertSpecialistArtifactPolicy,
-  assertStrictSchema,
-  normalizeSpecialistArtifacts,
-  researcherSubmissionEvidenceIds,
   specialistApplicationTurn,
   specialistPrompt,
   taskCompleteSchemaForRole,
   type PlannedTaskSpec,
   type SettledTask,
-  type StructuredArtifact,
 } from './planned-run-protocol.js';
 import { findAssistant, staleTaskSettlement } from './planned-run-results.js';
 import { settledTaskFromFact } from './planned-task-result-projection.js';
 import { toDurableEvent } from './run-projection-service.js';
 import { parseSpecialistTaskRequest, type SpecialistRole } from './specialist-task-contract.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
+import {
+  SpecialistSubmissionError,
+  validateSpecialistSubmission,
+  type ValidatedSpecialistSubmission,
+} from './specialist-submission-validator.js';
 
 const INLINE_TASK_TIMEOUT_MS = 120_000;
 const DETACHED_TASK_WAIT_TIMEOUT_MS = 10 * 60_000;
@@ -244,15 +244,8 @@ export class PlannedTaskExecutor {
     signal?: AbortSignal,
     didTimeout: () => boolean = () => false,
   ): Promise<SettledTask> {
-    let completion:
-      | {
-          readonly status: 'succeeded' | 'failed';
-          readonly summary: string;
-          readonly artifacts: readonly StructuredArtifact[];
-          readonly warnings: readonly string[];
-          readonly failure?: string;
-        }
-      | undefined;
+    let completion: ValidatedSpecialistSubmission | undefined;
+    let submissionFailure: SpecialistSubmissionError['code'] | undefined;
     const taskCompleteSchema = taskCompleteSchemaForRole(task.owner);
     const taskComplete: RuntimeTool = {
       name: 'task_complete',
@@ -264,26 +257,20 @@ export class PlannedTaskExecutor {
       executionMode: 'sequential',
       terminateOnSuccess: true,
       execute: async (arguments_) => {
-        assertStrictSchema(taskCompleteSchema, arguments_, 'task_complete');
-        const submitted = arguments_ as typeof completion & {};
-        const providerRevision =
-          task.owner === 'researcher' && submitted.artifacts.length > 0
-            ? await this.options.results.resolveTaskEvidenceProviderRevision(
-                runId,
-                task.id,
-                researcherSubmissionEvidenceIds(submitted.artifacts),
-              )
-            : undefined;
-        const artifacts = normalizeSpecialistArtifacts(
-          task.owner,
-          submitted.artifacts,
-          providerRevision,
-        );
-        assertSpecialistArtifactPolicy(task.owner, artifacts);
-        const evidenceIds = artifacts.flatMap((artifact) => artifact.evidenceIds);
-        await this.options.results.assertTaskEvidence(runId, task.id, evidenceIds);
-        completion = { ...submitted, artifacts };
-        return Promise.resolve({ accepted: true });
+        try {
+          completion = await validateSpecialistSubmission({
+            schema: taskCompleteSchema,
+            value: arguments_,
+            role: task.owner,
+            resolveEvidenceProviderRevision: (ids) =>
+              this.options.results.resolveTaskEvidenceProviderRevision(runId, task.id, ids),
+            assertEvidence: (ids) => this.options.results.assertTaskEvidence(runId, task.id, ids),
+          });
+          return { accepted: true };
+        } catch (error) {
+          if (error instanceof SpecialistSubmissionError) submissionFailure = error.code;
+          throw error;
+        }
       },
     };
     const domainTools = this.options.runtimeToolFactory
@@ -375,9 +362,8 @@ export class PlannedTaskExecutor {
         warnings: [],
         failure: timedOut
           ? 'task_timeout'
-          : result.status === 'failed'
-            ? result.error.code
-            : 'protocol_error',
+          : (submissionFailure ??
+            (result.status === 'failed' ? result.error.code : 'protocol_error')),
         ...(assistant ? { usage: assistant.usage } : {}),
       };
       return (await this.options.results.persistTaskResult(runId, failed, attempt))

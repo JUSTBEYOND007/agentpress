@@ -1454,21 +1454,15 @@ describeWithDatabase('Direct Run application flow', () => {
       idempotencyKey: randomUUID(),
     });
     expect(modelPrompt).not.toContain(malformedId);
-    await expect(
-      connection.db
-        .select({ eventType: runEvents.eventType, payload: runEvents.payload })
-        .from(runEvents)
-        .where(eq(runEvents.runId, run.runId)),
-    ).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          eventType: 'skill.selection.completed',
-          payload: expect.objectContaining({
-            catalogFailures: [{ skillId: malformedId, version: '1.0.0', code: 'load_failed' }],
-          }),
-        }),
-      ]),
-    );
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(
+      events.find(({ eventType }) => eventType === 'skill.selection.completed')?.payload,
+    ).toMatchObject({
+      catalogFailures: [{ skillId: malformedId, version: '1.0.0', code: 'load_failed' }],
+    });
     await selectionService.requestCancellation(run.runId);
     await selectionService.execute(run.runId);
   });
@@ -2444,6 +2438,70 @@ describeWithDatabase('Direct Run application flow', () => {
             JSON.stringify({ version: 1, source: 'free_text', grantedCapabilities: [] }),
       ),
     ).toBe(true);
+  });
+
+  it('persists invalid Specialist Evidence as a typed Task failure after bounded repair', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const task = plannedTask('invalid-evidence', 'writer');
+    const invalidCompletion = toolResponse('task_complete', {
+      status: 'succeeded',
+      summary: 'Draft with invalid Evidence',
+      artifacts: [
+        {
+          type: 'ArticleDraft',
+          title: 'Draft',
+          summary: 'Draft summary',
+          content: {},
+          evidenceIds: [randomUUID()],
+        },
+      ],
+      warnings: [],
+    });
+    const invalidService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () =>
+          PiRuntimeAdapter.forTests({
+            responses: [
+              toolResponse('plan_submit', { goal: 'Reject invalid Evidence', tasks: [task] }),
+              invalidCompletion,
+              invalidCompletion,
+              invalidCompletion,
+            ],
+          }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await invalidService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '生成草稿，但拒绝越界 Evidence。',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(invalidService.execute(run.runId)).resolves.toMatchObject({ status: 'failed' });
+    await expect(
+      connection.db
+        .select({ failure: taskResults.failure })
+        .from(taskResults)
+        .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+        .where(eq(agentTasks.runId, run.runId)),
+    ).resolves.toEqual([
+      { failure: { code: 'task_evidence_invalid', message: 'task_evidence_invalid' } },
+    ]);
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId));
+    expect(events.find(({ eventType }) => eventType === 'task.failed')?.payload).toMatchObject({
+      failure: 'task_evidence_invalid',
+    });
   });
 
   it('persists and can cancel Steering while a Direct Run is still active', async () => {
