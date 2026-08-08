@@ -167,10 +167,12 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       retry、duration、schema-aware 参数摘要、output refs 和脱敏错误只进入按需详情。
       现有 projector 已消费有界 `ToolActivityAudit`；本轮补齐 durable settlement 的 `taskAttempt` 与
       Evidence output references，Web 仍只在 audit 详情读取，普通 activity label 不变。
-- [ ] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
+- [x] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
       超大输出只以 Evidence/Artifact/reference 展示。
-      当前 consumer boundary 已覆盖 MCP `arguments`、`transportProvenance` 和 Artifact output reference，
-      并有成功、失败、审批三种投影回归；JSON-RPC/header/stack/private thinking 的全事件矩阵仍待验证。
+      consumer boundary 已从字段黑名单改为 typed allowlist：activity、approval、lifecycle stage 和业务结果
+      分别只保留受控字段；MCP `arguments`、`transportProvenance`、JSON-RPC、header、credential、stack、
+      private thinking、provider raw response 和超大输出正文均被移除。成功、失败、审批及嵌套 lifecycle
+      矩阵由 `agent-transcript-sanitization.test.ts` 覆盖，Evidence/Artifact 只通过有界 audit reference 展示。
 - [ ] projector fixture 覆盖正常、审批拒绝、Schema 非法、超大输出、timeout/rate limit、断线前后、重连、
       duplicate end、stale late result、cancel/retry/revision drift，并验证 live/replay 等价。
       timeout 已有 ToolRuntime 相反风险契约、PostgreSQL ToolCall settlement 和 Web fail-closed 文案测试；
