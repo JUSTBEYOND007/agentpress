@@ -14,6 +14,7 @@ import {
   type AgentPressDatabase,
   executionPlans,
   planRevisions,
+  initializeRunSpecialistBudget,
 } from '@agentpress/database';
 import { Type } from '@sinclair/typebox';
 import { and, eq, sql } from 'drizzle-orm';
@@ -35,6 +36,7 @@ import {
   type PlannedTaskSpec,
   type SettledTask,
   type SubmittedPlan,
+  PLANNED_DAG_MAX_ESTIMATED_TOKENS,
 } from './planned-run-protocol.js';
 import { PlannedRunStore } from './planned-run-store.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
@@ -75,6 +77,7 @@ type PlannedRunExecutorOptions = {
   readonly maxSpecialistConcurrency?: number;
   readonly taskTimeoutMs?: number;
   readonly detachedTaskWaitTimeoutMs?: number;
+  readonly maxSpecialistTokens?: number;
   /** Global provider ceiling applied in addition to the Specialist wave limit. */
   readonly maxProviderConcurrency?: number;
 };
@@ -247,6 +250,12 @@ export class PlannedRunExecutor {
     }
     const tasks = await this.store.loadPlanTasks(runId, run.revisionId);
     const settled = await this.store.loadPersistedTaskResults(tasks);
+    await this.options.database.transaction((transaction) =>
+      initializeRunSpecialistBudget(transaction, {
+        runId,
+        maxTokens: this.options.maxSpecialistTokens ?? PLANNED_DAG_MAX_ESTIMATED_TOKENS,
+      }),
+    );
     await this.store.enterRunning(runId, 'planned');
     return this.executePlannedWork(runId, turn, tasks, signal, settled);
   }
@@ -275,6 +284,10 @@ export class PlannedRunExecutor {
     const revisionId = this.createId();
     const events = await this.options.database.transaction(async (transaction) => {
       await transaction.insert(executionPlans).values({ id: planId, runId });
+      await initializeRunSpecialistBudget(transaction, {
+        runId,
+        maxTokens: this.options.maxSpecialistTokens ?? PLANNED_DAG_MAX_ESTIMATED_TOKENS,
+      });
       await transaction.insert(planRevisions).values({
         id: revisionId,
         planId,

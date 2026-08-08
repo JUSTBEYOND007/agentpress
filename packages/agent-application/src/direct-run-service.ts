@@ -64,6 +64,7 @@ type DirectRunServiceOptions = {
   readonly maxSpecialistConcurrency?: number;
   readonly taskTimeoutMs?: number;
   readonly detachedTaskWaitTimeoutMs?: number;
+  readonly maxSpecialistTokens?: number;
   /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
   readonly dispatchCommands?: boolean;
   /** Optional Pi-backed chooser. The host validates its result before pinning context. */

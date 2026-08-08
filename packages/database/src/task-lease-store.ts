@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { enqueueOutboxMessage } from './outbox.js';
+import { forfeitActiveTaskBudgets } from './run-specialist-budget-store.js';
 import { appendRunEvent } from './run-event-store.js';
 import { agentTaskLeases, agentTasks, runEvents, taskResults } from './schema.js';
 
@@ -20,6 +21,7 @@ export type TaskLease = {
 export type TaskClaim = {
   readonly taskId: string;
   readonly runId: string;
+  readonly planRevisionId: string;
   readonly attempt: number;
   readonly lease: TaskLease;
 };
@@ -65,6 +67,10 @@ export async function cancelAgentRunTasks(
           isNull(agentTaskLeases.releasedAt),
         ),
       );
+    await forfeitActiveTaskBudgets(transaction, {
+      taskIds: cancelled.map(({ taskId }) => taskId),
+      now,
+    });
   }
   return cancelled;
 }
@@ -152,7 +158,12 @@ export async function claimAgentTask(
         )`,
       ),
     )
-    .returning({ taskId: agentTasks.id, runId: agentTasks.runId, attempt: agentTasks.attempt });
+    .returning({
+      taskId: agentTasks.id,
+      runId: agentTasks.runId,
+      planRevisionId: agentTasks.planRevisionId,
+      attempt: agentTasks.attempt,
+    });
   const row = rows[0];
   if (!row) return undefined;
 
@@ -285,7 +296,7 @@ export async function requeueExpiredAgentTasks(
   return rows;
 }
 
-function reclaimExpiredAgentTaskRows(
+async function reclaimExpiredAgentTaskRows(
   db: AgentPressDatabase | DatabaseTransaction,
   now: Date,
 ): Promise<
@@ -296,7 +307,7 @@ function reclaimExpiredAgentTaskRows(
     readonly owner: string;
   }[]
 > {
-  return db
+  const rows = await db
     .update(agentTasks)
     .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
     .where(
@@ -321,4 +332,8 @@ function reclaimExpiredAgentTaskRows(
       attempt: agentTasks.attempt,
       owner: agentTasks.owner,
     });
+  if (rows.length > 0) {
+    await forfeitActiveTaskBudgets(db, { taskIds: rows.map(({ taskId }) => taskId), now });
+  }
+  return rows;
 }

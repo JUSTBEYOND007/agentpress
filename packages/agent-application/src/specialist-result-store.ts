@@ -10,6 +10,8 @@ import {
   enqueueOutboxMessage,
   evidenceRecords,
   settleAgentTaskAttempt,
+  settleTaskBudget,
+  forfeitActiveTaskBudgets,
   taskResults,
   toolCalls,
   type AgentPressDatabase,
@@ -70,6 +72,16 @@ export class SpecialistResultStore {
         settled = claimedByHost.length === 1;
       }
       if (!settled) return undefined;
+      if (result.status === 'cancelled') {
+        await forfeitActiveTaskBudgets(transaction, { taskIds: [result.id], now });
+      } else {
+        await settleTaskBudget(transaction, {
+          taskId: result.id,
+          attempt: effectiveAttempt,
+          actualTokens: actualUsageTokens(result.usage),
+          now,
+        });
+      }
       const persistedArtifacts = [];
       for (const artifact of result.artifacts) {
         const artifactId = this.options.createId();
@@ -299,4 +311,9 @@ export class SpecialistResultStore {
     if (!revision) throw new Error('ResearchBrief provider revision is unavailable');
     return revision;
   }
+}
+
+function actualUsageTokens(usage: SettledTask['usage']): number {
+  const total = usage?.totalTokens;
+  return typeof total === 'number' && Number.isSafeInteger(total) && total >= 0 ? total : 0;
 }

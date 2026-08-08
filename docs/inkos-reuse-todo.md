@@ -485,7 +485,11 @@ TODO：
       失败后持久化 typed `task.failed`。真实 Kafka fixture 现覆盖同 `messageId` 重复 recovery command、
       不同 `messageId` 的 recovery command 先到而旧 original command 晚到，以及取消后 late command；
       Task terminal/attempt fence 保证只产生 attempt 2 的唯一 TaskResult，两个乱序消息各自写入 inbox，
-      不新增 Kafka manager 或第二套幂等状态。并发分支共享预算矩阵仍待补齐。
+      不新增 Kafka manager 或第二套幂等状态。并发预算现有独立 `run_specialist_budgets` ledger 与
+      `task_budget_reservations`：真实 PostgreSQL 测试覆盖并行 reservation 只成功一个、重复 reservation、
+      单次 settlement、重复 settlement 和 active reservation forfeiture；Direct Run 集成覆盖两条并行
+      Specialist 在 5,000 token 额度下一个成功、一个 `budget_exhausted` 并投影为
+      `completed_with_degradation`。更大范围的 provider timeout/断流与完整 recovery 预算矩阵仍待补齐。
 - [ ] 并发分支共享预算：当前 `validateSubmittedPlan` 只有静态 `96,000` estimated-token 上限，
       `agent_tasks.budget` 只保存 Task 局部策略，`task_results.usage` 和 Run `usage` 只在结算后汇总；
       尚无 Run-level 原子 reservation/ledger。新增前必须先固定 `reserve -> claim -> settle/release` 的窄

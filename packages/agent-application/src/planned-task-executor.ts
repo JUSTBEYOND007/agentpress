@@ -7,6 +7,7 @@ import {
   agentTasks,
   appendRunEvent,
   claimAgentTask,
+  reserveTaskBudget,
   contextPacks,
   releaseAgentTaskLease,
   toolCalls,
@@ -25,8 +26,9 @@ import {
   taskCompleteSchemaForRole,
   type PlannedTaskSpec,
   type SettledTask,
+  estimatedSpecialistTaskTokens,
 } from './planned-run-protocol.js';
-import { findAssistant, staleTaskSettlement } from './planned-run-results.js';
+import { budgetExhaustedTask, findAssistant, staleTaskSettlement } from './planned-run-results.js';
 import { settledTaskFromFact } from './planned-task-result-projection.js';
 import { toDurableEvent } from './run-projection-service.js';
 import { parseSpecialistTaskRequest, type SpecialistRole } from './specialist-task-contract.js';
@@ -114,8 +116,16 @@ export class PlannedTaskExecutor {
       `task:${String(process.pid)}`,
     );
     if (!claim) return 'skipped';
-    const execution = taskExecutionSignal(signal, request.timeoutMs);
     try {
+      if (claim.reservation.kind === 'exhausted') {
+        await this.options.results.persistTaskResult(
+          runId,
+          budgetExhaustedTask(task),
+          claim.claim.attempt,
+        );
+        return 'failed';
+      }
+      const execution = taskExecutionSignal(signal, request.timeoutMs);
       const result = await this.execute(
         runId,
         task,
@@ -158,8 +168,14 @@ export class PlannedTaskExecutor {
         failure: 'attempt_budget_exhausted',
       };
     }
-    const execution = taskExecutionSignal(signal, timeoutMs);
     try {
+      if (claim.reservation.kind === 'exhausted') {
+        const failed = budgetExhaustedTask(task);
+        return (await this.options.results.persistTaskResult(runId, failed, claim.claim.attempt))
+          ? failed
+          : staleTaskSettlement(task);
+      }
+      const execution = taskExecutionSignal(signal, timeoutMs);
       return await this.execute(
         runId,
         task,
@@ -400,6 +416,15 @@ export class PlannedTaskExecutor {
         now: this.options.now(),
       });
       if (!claim) return undefined;
+      const reservation = await reserveTaskBudget(transaction, {
+        reservationId: this.options.createId(),
+        runId,
+        planRevisionId: claim.planRevisionId,
+        taskId: task.id,
+        attempt: claim.attempt,
+        tokens: estimatedSpecialistTaskTokens(task),
+      });
+      if (reservation.kind === 'exhausted') return { claim, reservation };
       const event = await appendRunEvent(transaction, {
         id: this.options.createId(),
         runId,
@@ -411,9 +436,9 @@ export class PlannedTaskExecutor {
           attempt: claim.attempt,
         },
       });
-      return { claim, event };
+      return { claim, reservation, event };
     });
-    if (result) {
+    if (result?.event) {
       await this.options.publisher.publish({ durable: true, event: toDurableEvent(result.event) });
     }
     return result;

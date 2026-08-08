@@ -63,6 +63,12 @@ export const PLANNED_DAG_MAX_DEPTH = 6;
 export const PLANNED_DAG_MAX_WIDTH = 4;
 export const PLANNED_DAG_MAX_ESTIMATED_TOKENS = 96_000;
 
+export function estimatedSpecialistTaskTokens(
+  task: Pick<PlannedTaskSpec, 'objective' | 'acceptanceCriteria'>,
+): number {
+  return 4_000 + task.objective.length + task.acceptanceCriteria.join(' ').length;
+}
+
 export const specialistRoles = [
   'researcher',
   'writer',
@@ -315,8 +321,7 @@ export function assertBoundedPlan(tasks: readonly PlannedTaskSpec[]): void {
     throw new RangeError(`Plan exceeds the ${String(PLANNED_DAG_MAX_WIDTH)} parallel task limit`);
   }
   const estimatedTokens = tasks.reduce(
-    (total, task) =>
-      total + 4_000 + task.objective.length + task.acceptanceCriteria.join(' ').length,
+    (total, task) => total + estimatedSpecialistTaskTokens(task),
     0,
   );
   if (estimatedTokens > PLANNED_DAG_MAX_ESTIMATED_TOKENS) {

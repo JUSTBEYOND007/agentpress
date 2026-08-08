@@ -40,6 +40,8 @@ import {
   runEvents,
   runToolChoices,
   runSkillBindings,
+  runSpecialistBudgets,
+  taskBudgetReservations,
   skillRevisionResources,
   skillRevisions,
   memoryCandidates,
@@ -2123,6 +2125,74 @@ describeWithDatabase('Direct Run application flow', () => {
     );
     expect(projection?.agents.slice(1).every(({ status }) => status === 'succeeded')).toBe(true);
     expect(events.some(({ eventType }) => eventType === 'synthesis.failed')).toBe(false);
+    await expect(
+      connection.db
+        .select({
+          maxTokens: runSpecialistBudgets.maxTokens,
+          reserved: runSpecialistBudgets.reservedTokens,
+        })
+        .from(runSpecialistBudgets)
+        .where(eq(runSpecialistBudgets.runId, run.runId)),
+    ).resolves.toEqual([{ maxTokens: 96_000, reserved: 0 }]);
+    await expect(
+      connection.db
+        .select({
+          status: taskBudgetReservations.status,
+          actualTokens: taskBudgetReservations.actualTokens,
+        })
+        .from(taskBudgetReservations)
+        .innerJoin(agentTasks, eq(agentTasks.id, taskBudgetReservations.taskId))
+        .where(eq(agentTasks.runId, run.runId)),
+    ).resolves.toHaveLength(5);
+  });
+
+  it('fences concurrent Specialist branches with the shared token budget', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const tasks = [
+      plannedTask('budget-writer', 'writer', [], 'optional'),
+      plannedTask('budget-editor', 'editor', [], 'optional'),
+    ];
+    const budgetRuntime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', { goal: 'Bound parallel branches', tasks }),
+        taskCompleteResponse('One branch completed'),
+        runCompleteResponse('Partial budget result'),
+      ],
+    });
+    const budgetService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => budgetRuntime },
+      systemPrompt: 'You are AgentPress.',
+      maxSpecialistTokens: 5_000,
+    });
+    const run = await budgetService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: 'Execute two independent branches under a shared budget',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(budgetService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed_with_degradation',
+    });
+    const persisted = await connection.db
+      .select({ status: agentTasks.status, failure: taskResults.failure })
+      .from(agentTasks)
+      .leftJoin(taskResults, eq(taskResults.taskId, agentTasks.id))
+      .where(eq(agentTasks.runId, run.runId));
+    expect(persisted.filter(({ status }) => status === 'succeeded')).toHaveLength(1);
+    expect(persisted).toContainEqual(
+      expect.objectContaining({
+        status: 'failed',
+        failure: { code: 'budget_exhausted', message: 'budget_exhausted' },
+      }),
+    );
   });
 
   it('persists a typed synthesis failure without exposing provider details in its public fact', async () => {

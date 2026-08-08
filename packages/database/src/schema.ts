@@ -700,6 +700,70 @@ export const agentTaskLeases = pgTable(
   ],
 );
 
+export const runSpecialistBudgets = pgTable(
+  'run_specialist_budgets',
+  {
+    runId: uuid('run_id')
+      .primaryKey()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    maxTokens: integer('max_tokens').notNull(),
+    reservedTokens: integer('reserved_tokens').notNull().default(0),
+    consumedTokens: integer('consumed_tokens').notNull().default(0),
+    version: integer('version').notNull().default(1),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    check('run_specialist_budgets_max_check', sql`${table.maxTokens} > 0`),
+    check(
+      'run_specialist_budgets_totals_check',
+      sql`${table.reservedTokens} >= 0 and ${table.consumedTokens} >= 0`,
+    ),
+    check('run_specialist_budgets_version_check', sql`${table.version} > 0`),
+  ],
+);
+
+export const taskBudgetReservations = pgTable(
+  'task_budget_reservations',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    planRevisionId: uuid('plan_revision_id')
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    attempt: integer('attempt').notNull(),
+    reservedTokens: integer('reserved_tokens').notNull(),
+    actualTokens: integer('actual_tokens'),
+    status: varchar('status', { length: 24 }).notNull(),
+    settledAt: timestamp('settled_at', { withTimezone: true, precision: 3 }),
+    createdAt,
+  },
+  (table) => [
+    unique('task_budget_reservations_task_attempt_unique').on(table.taskId, table.attempt),
+    index('task_budget_reservations_run_status_idx').on(table.runId, table.status),
+    check('task_budget_reservations_attempt_check', sql`${table.attempt} > 0`),
+    check('task_budget_reservations_reserved_check', sql`${table.reservedTokens} > 0`),
+    check(
+      'task_budget_reservations_actual_check',
+      sql`${table.actualTokens} is null or ${table.actualTokens} >= 0`,
+    ),
+    check(
+      'task_budget_reservations_status_check',
+      sql`${table.status} in ('active', 'settled', 'forfeited')`,
+    ),
+    check(
+      'task_budget_reservations_settlement_check',
+      sql`(${table.status} = 'active' and ${table.actualTokens} is null and ${table.settledAt} is null)
+        or (${table.status} in ('settled', 'forfeited') and ${table.actualTokens} is not null and ${table.settledAt} is not null)`,
+    ),
+  ],
+);
+
 export const agentTaskDependencies = pgTable(
   'agent_task_dependencies',
   {

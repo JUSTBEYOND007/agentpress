@@ -43,6 +43,10 @@ import {
   requeueExpiredAgentTasks,
   releaseAgentTaskLease,
   renewAgentTaskLease,
+  initializeRunSpecialistBudget,
+  reserveTaskBudget,
+  settleTaskBudget,
+  forfeitActiveTaskBudgets,
   settleAgentTaskAttempt,
 } from '../src/index.js';
 
@@ -62,6 +66,7 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
     plan: randomUUID(),
     revision: randomUUID(),
     task: randomUUID(),
+    task2: randomUUID(),
   };
 
   beforeAll(async () => {
@@ -127,6 +132,20 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
       status: 'pending',
       maxAttempts: 3,
     });
+    await connection.db.insert(agentTasks).values({
+      id: ids.task2,
+      runId: ids.run,
+      planRevisionId: ids.revision,
+      objective: 'budget task',
+      criticality: 'optional',
+      owner: 'writer',
+      acceptanceCriteria: ['returns'],
+      outputSchema: { type: 'object' },
+      toolPolicy: { capabilities: [] },
+      budget: {},
+      status: 'pending',
+      maxAttempts: 3,
+    });
   });
 
   afterAll(async () => {
@@ -157,6 +176,93 @@ describeWithDatabase('PostgreSQL runtime persistence', () => {
         .from(inboxMessages)
         .where(eq(inboxMessages.messageId, envelope.messageId)),
     ).toHaveLength(1);
+  });
+
+  it('atomically reserves and settles the shared Specialist token budget', async () => {
+    await connection.db.transaction((transaction) =>
+      initializeRunSpecialistBudget(transaction, { runId: ids.run, maxTokens: 100 }),
+    );
+    const [first, second] = await Promise.all([
+      connection.db.transaction((transaction) =>
+        reserveTaskBudget(transaction, {
+          reservationId: randomUUID(),
+          runId: ids.run,
+          planRevisionId: ids.revision,
+          taskId: ids.task,
+          attempt: 1,
+          tokens: 60,
+        }),
+      ),
+      connection.db.transaction((transaction) =>
+        reserveTaskBudget(transaction, {
+          reservationId: randomUUID(),
+          runId: ids.run,
+          planRevisionId: ids.revision,
+          taskId: ids.task2,
+          attempt: 1,
+          tokens: 60,
+        }),
+      ),
+    ]);
+    expect([first.kind, second.kind].filter((kind) => kind === 'reserved')).toHaveLength(1);
+    expect([first.kind, second.kind].filter((kind) => kind === 'exhausted')).toHaveLength(1);
+
+    const grantedTaskId = first.kind === 'reserved' ? ids.task : ids.task2;
+    const deniedTaskId = grantedTaskId === ids.task ? ids.task2 : ids.task;
+    expect(
+      await connection.db.transaction((transaction) =>
+        reserveTaskBudget(transaction, {
+          reservationId: randomUUID(),
+          runId: ids.run,
+          planRevisionId: ids.revision,
+          taskId: grantedTaskId,
+          attempt: 1,
+          tokens: 60,
+        }),
+      ),
+    ).toMatchObject({ kind: 'duplicate', status: 'active' });
+    await connection.db.transaction((transaction) =>
+      settleTaskBudget(transaction, {
+        taskId: grantedTaskId,
+        attempt: 1,
+        actualTokens: 10,
+      }),
+    );
+    expect(
+      await connection.db.transaction((transaction) =>
+        reserveTaskBudget(transaction, {
+          reservationId: randomUUID(),
+          runId: ids.run,
+          planRevisionId: ids.revision,
+          taskId: deniedTaskId,
+          attempt: 1,
+          tokens: 60,
+        }),
+      ),
+    ).toMatchObject({ kind: 'reserved' });
+    expect(
+      await connection.db.transaction((transaction) =>
+        settleTaskBudget(transaction, { taskId: grantedTaskId, attempt: 1, actualTokens: 99 }),
+      ),
+    ).toBe(false);
+    await connection.db.transaction((transaction) =>
+      settleTaskBudget(transaction, { taskId: deniedTaskId, attempt: 1, actualTokens: 20 }),
+    );
+    await connection.db.transaction((transaction) =>
+      reserveTaskBudget(transaction, {
+        reservationId: randomUUID(),
+        runId: ids.run,
+        planRevisionId: ids.revision,
+        taskId: grantedTaskId,
+        attempt: 2,
+        tokens: 50,
+      }),
+    );
+    expect(
+      await connection.db.transaction((transaction) =>
+        forfeitActiveTaskBudgets(transaction, { taskIds: [grantedTaskId] }),
+      ),
+    ).toBe(1);
   });
 
   it('enforces at most one active Run on a Conversation branch', async () => {

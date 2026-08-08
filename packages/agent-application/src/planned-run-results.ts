@@ -196,6 +196,16 @@ export function staleTaskSettlement(task: PlannedTaskSpec): SettledTask {
   };
 }
 
+export function budgetExhaustedTask(task: PlannedTaskSpec): SettledTask {
+  return {
+    ...task,
+    status: 'failed',
+    artifacts: [],
+    warnings: [],
+    failure: 'budget_exhausted',
+  };
+}
+
 export function publicTask(task: PlannedTaskSpec) {
   return {
     id: task.id,

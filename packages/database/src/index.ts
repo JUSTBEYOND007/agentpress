@@ -9,4 +9,5 @@ export * from './postgres.js';
 export * from './run-event-store.js';
 export * from './schema.js';
 export * from './task-lease-store.js';
+export * from './run-specialist-budget-store.js';
 export * from './tool-choice-queue-store.js';
