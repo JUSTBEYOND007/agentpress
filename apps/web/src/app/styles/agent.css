@@ -527,15 +527,18 @@
 }
 
 .activity-part {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
   margin-left: 4px;
   border-left: 1px solid #e3e3df;
   padding: 3px 0 3px 10px;
   color: #858680;
   font-size: 11px;
+}
+
+.activity-part > div:first-child {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
 }
 
 .activity-part small {

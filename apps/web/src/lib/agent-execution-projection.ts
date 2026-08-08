@@ -4,8 +4,10 @@ import type {
   ConsumerExecutionStage,
   ConsumerExecutionStatus,
   RunPart,
+  ToolActivityAudit,
 } from './agent-runtime-contracts';
 import { consumerTaskLabel } from './agent-consumer-labels';
+import { toolActivityAudit } from './agent-tool-audit-projection';
 
 export function processDurationMs(parts: readonly RunPart[]): number {
   const usage = parts.findLast(({ type }) => type === 'usage');
@@ -82,12 +84,28 @@ export function sanitizeProcessPart(part: RunPart): RunPart {
     };
   }
   if (part.type === 'activity') {
+    const audit = toolActivityAudit(part);
     const payload = Object.fromEntries(
-      Object.entries(part.payload).filter(([key]) => key !== 'objective'),
+      Object.entries(part.payload).filter(
+        ([key]) => key !== 'objective' && key !== 'arguments' && key !== 'transportProvenance',
+      ),
     );
-    return { ...part, payload };
+    return { ...part, payload: { ...payload, ...(audit ? { toolAudit: audit } : {}) } };
   }
   return part;
+}
+
+export function sanitizeVisiblePart(part: RunPart): RunPart {
+  if (part.type === 'activity') return sanitizeProcessPart(part);
+  if (part.type !== 'tool-approval') return part;
+  return {
+    ...part,
+    payload: Object.fromEntries(
+      Object.entries(part.payload).filter(
+        ([key]) => key !== 'arguments' && key !== 'transportProvenance',
+      ),
+    ),
+  };
 }
 
 const utilityTools = new Set([
@@ -143,6 +161,7 @@ export function executionItems(
       label: string;
       status: ConsumerExecutionStatus;
       result?: unknown;
+      audit?: ToolActivityAudit;
       sequence: number;
     }[];
     sequence: number;
@@ -168,6 +187,7 @@ export function executionItems(
     const label = activityDisplayLabel(part, taskLabels);
     const result = recordProperty(part.payload, 'output');
     const error = stringProperty(recordProperty(part.payload, 'failure'), 'message');
+    const audit = toolActivityAudit(part);
     if (toolId && utilityTools.has(toolId)) {
       if (!utility || utility.sequence > part.sequence) {
         utility = {
@@ -185,6 +205,7 @@ export function executionItems(
         label,
         status,
         ...(Object.keys(result).length ? { result } : {}),
+        ...(audit ? { audit } : {}),
         sequence: part.sequence,
       };
       utility.items =
@@ -206,6 +227,7 @@ export function executionItems(
         stages,
         ...(Object.keys(result).length ? { result } : {}),
         ...(error ? { error } : {}),
+        ...(audit ? { audit } : {}),
       };
       items[items.indexOf(existing)] = next;
     } else {
@@ -218,6 +240,7 @@ export function executionItems(
         stages: lifecycleStagesForPart(part, label),
         ...(Object.keys(result).length ? { result } : {}),
         ...(error ? { error } : {}),
+        ...(audit ? { audit } : {}),
         sequence: part.sequence,
       });
     }

@@ -118,6 +118,16 @@
 .run-process-pipeline li,
 .run-process-utility li {
   display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.run-process-utility li {
+  flex-direction: column;
+}
+
+.utility-item-heading {
+  display: flex;
   align-items: center;
   gap: 6px;
 }
@@ -149,6 +159,40 @@
   margin: 4px 0 7px 19px;
   color: #b34b43;
   font-size: 11px;
+}
+
+.tool-audit-details {
+  min-width: 0;
+  margin: 4px 0 7px 19px;
+  color: #777873;
+  font-size: 10px;
+}
+
+.tool-audit-details > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.tool-audit-details dl {
+  display: grid;
+  gap: 3px;
+  margin: 5px 0 0;
+}
+
+.tool-audit-details dl > div {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.tool-audit-details dt {
+  color: #999a94;
+}
+
+.tool-audit-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .run-inspector {

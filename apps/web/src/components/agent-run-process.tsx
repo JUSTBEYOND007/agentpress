@@ -11,6 +11,7 @@ import type {
 } from '../lib/agent-runtime-contracts';
 import { consumerTaskLabel, parseRunPart, statusLabel } from './agent-view-model';
 import { ReasoningPart } from './agent-reasoning-part';
+import { AgentToolAudit } from './agent-tool-audit';
 
 const toolLabels: Readonly<Record<string, string>> = {
   'article.read_current': '读取正文',
@@ -200,8 +201,11 @@ function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): 
         <ul>
           {item.items.map((child) => (
             <li key={child.id}>
-              <Check size={12} aria-hidden="true" />
-              <span>{child.label}</span>
+              <div className="utility-item-heading">
+                <Check size={12} aria-hidden="true" />
+                <span>{child.label}</span>
+              </div>
+              {child.audit ? <AgentToolAudit audit={child.audit} /> : null}
             </li>
           ))}
         </ul>
@@ -231,6 +235,7 @@ function ExecutionItemView({ item }: { readonly item: ConsumerExecutionItem }): 
         <span className={`execution-status is-${item.status}`}>{statusText(item.status)}</span>
       </summary>
       {item.result ? <div className="execution-result">{resultSummary(item.result)}</div> : null}
+      {item.audit ? <AgentToolAudit audit={item.audit} /> : null}
       {item.stages.length > 1 ? (
         <ol>
           {item.stages.map((stage) => (

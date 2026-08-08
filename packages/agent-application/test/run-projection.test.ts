@@ -49,6 +49,40 @@ describe('run projection', () => {
     ]);
   });
 
+  it('retains immutable MCP provenance across the folded ToolCall lifecycle', () => {
+    const transportProvenance = {
+      kind: 'mcp',
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    const [part] = projectRunParts([
+      event(1, 'tool.proposed', {
+        toolCallId: 'tool-mcp',
+        toolId: 'web.search',
+        arguments: { query: 'bounded research' },
+        transportProvenance,
+      }),
+      event(2, 'tool.executing', { toolCallId: 'tool-mcp' }),
+      event(3, 'tool.succeeded', {
+        toolCallId: 'tool-mcp',
+        output: { source: 'mcp', value: [] },
+      }),
+    ]);
+
+    expect(part).toMatchObject({
+      type: 'activity',
+      status: 'tool.succeeded',
+      payload: {
+        toolId: 'web.search',
+        arguments: { query: 'bounded research' },
+        transportProvenance,
+      },
+    });
+  });
+
   it('projects a bounded reasoning summary from durable planning lifecycle events', () => {
     const parts = projectRunParts([
       event(1, 'run.planning', { recovered: false }),

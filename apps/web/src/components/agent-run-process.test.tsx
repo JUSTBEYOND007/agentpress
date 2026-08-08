@@ -202,6 +202,61 @@ describe('Agent run process disclosure', () => {
     expect(markup).toContain('已生成修改');
     expect(markup).toContain('2 秒');
   });
+
+  it('discloses MCP provenance on demand without exposing argument values', () => {
+    const markup = renderToStaticMarkup(
+      <AgentRunProcess
+        data={{
+          runId: 'run-1',
+          status: 'completed',
+          terminal: true,
+          durationMs: 420,
+          items: [
+            {
+              kind: 'utility-group',
+              id: 'utility-mcp',
+              count: 1,
+              status: 'completed',
+              sequence: 1,
+              items: [
+                {
+                  id: 'tool:mcp-1',
+                  label: '搜索资料',
+                  status: 'completed',
+                  sequence: 1,
+                  audit: {
+                    kind: 'mcp',
+                    serverId: 'web_research',
+                    serverRevision: '1.0.0',
+                    toolName: 'search',
+                    toolRevision: '1.0.0',
+                    adapterRevision: 'agentpress-mcp-adapter-v1',
+                    taskAttempt: 2,
+                    argumentNames: ['limit', 'query'],
+                    argumentCount: 2,
+                    outputReference: {
+                      artifactId: 'artifact-1',
+                      uri: 'artifact://artifact-1/versions/1',
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+          parts: [],
+        }}
+      />,
+    );
+
+    expect(markup).toContain('搜索资料');
+    expect(markup).toContain('MCP 调用详情');
+    expect(markup).toContain('web_research@1.0.0');
+    expect(markup).toContain('search@1.0.0');
+    expect(markup).toContain('agentpress-mcp-adapter-v1');
+    expect(markup).toContain('limit、query');
+    expect(markup).toContain('artifact://artifact-1/versions/1');
+    expect(markup).not.toContain('top-secret-query');
+  });
 });
 
 function activity(

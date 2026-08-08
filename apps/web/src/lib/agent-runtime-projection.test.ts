@@ -203,6 +203,64 @@ describe('run presentation projection', () => {
     ]);
   });
 
+  it('projects bounded MCP audit details without retaining argument values', () => {
+    const content = projectionContent(
+      projection([
+        part('activity', 'tool.succeeded', 1, {
+          toolId: 'web.search',
+          toolCallId: 'search-audit',
+          taskAttempt: 2,
+          arguments: { query: 'top-secret-query', limit: 2 },
+          transportProvenance: {
+            kind: 'mcp',
+            serverId: 'web_research',
+            serverRevision: '1.0.0',
+            toolName: 'search',
+            toolRevision: '1.0.0',
+            adapterRevision: 'agentpress-mcp-adapter-v1',
+          },
+          output: {
+            value: {
+              artifactId: 'artifact-1',
+              versionId: 'version-1',
+              uri: 'artifact://artifact-1/versions/1',
+            },
+          },
+        }),
+        usage(2),
+      ]),
+    );
+    const process = dataByName(content, 'agentpress-run-process');
+    expect(process.items).toMatchObject([
+      {
+        kind: 'utility-group',
+        items: [
+          {
+            label: '搜索资料',
+            audit: {
+              kind: 'mcp',
+              serverId: 'web_research',
+              serverRevision: '1.0.0',
+              toolName: 'search',
+              toolRevision: '1.0.0',
+              adapterRevision: 'agentpress-mcp-adapter-v1',
+              taskAttempt: 2,
+              argumentNames: ['limit', 'query'],
+              argumentCount: 2,
+              outputReference: {
+                artifactId: 'artifact-1',
+                versionId: 'version-1',
+                uri: 'artifact://artifact-1/versions/1',
+              },
+            },
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(content)).not.toContain('top-secret-query');
+    expect(JSON.stringify(content)).not.toContain('transportProvenance');
+  });
+
   it('keeps failed tool activity outside the collapsed process', () => {
     const content = projectionContent(
       projection(
@@ -210,6 +268,15 @@ describe('run presentation projection', () => {
           part('activity', 'tool.failed', 1, {
             toolId: 'web.search',
             toolCallId: 'call-1',
+            arguments: { query: 'private failed query' },
+            transportProvenance: {
+              kind: 'mcp',
+              serverId: 'web_research',
+              serverRevision: '1.0.0',
+              toolName: 'search',
+              toolRevision: '1.0.0',
+              adapterRevision: 'agentpress-mcp-adapter-v1',
+            },
           }),
           part('warning', 'run.failed', 2, {}),
           usage(3),
@@ -225,6 +292,9 @@ describe('run presentation projection', () => {
       'agentpress-run-process',
     ]);
     expect(JSON.stringify(content)).toContain('call-1');
+    expect(JSON.stringify(content)).not.toContain('private failed query');
+    expect(JSON.stringify(content)).not.toContain('transportProvenance');
+    expect(JSON.stringify(content)).toContain('toolAudit');
   });
 
   it('uses a consumer task label and suppresses an orphaned started task after failure', () => {
@@ -251,6 +321,33 @@ describe('run presentation projection', () => {
     expect(JSON.stringify(content)).not.toContain('SHA-256');
     expect(JSON.stringify(content)).toContain('task-1');
     expect(names(content)).toEqual(['agentpress-run-part', 'agentpress-run-process']);
+  });
+
+  it('removes raw MCP arguments and transport from approval transcript data', () => {
+    const content = projectionContent(
+      projection(
+        [
+          part('tool-approval', 'tool.approval_requested', 1, {
+            toolCallId: 'approval-mcp',
+            sideEffect: '读取授权来源',
+            arguments: { token: 'credential-value' },
+            transportProvenance: {
+              kind: 'mcp',
+              serverId: 'licensed_media',
+              serverRevision: '1.0.0',
+              toolName: 'search',
+              toolRevision: '1.0.0',
+              adapterRevision: 'agentpress-mcp-adapter-v1',
+            },
+          }),
+        ],
+        false,
+        'waiting_for_approval',
+      ),
+    );
+    expect(JSON.stringify(content)).toContain('读取授权来源');
+    expect(JSON.stringify(content)).not.toContain('credential-value');
+    expect(JSON.stringify(content)).not.toContain('transportProvenance');
   });
 
   it('preserves typed timeout, cancellation, interruption, stale and degraded stage outcomes', () => {

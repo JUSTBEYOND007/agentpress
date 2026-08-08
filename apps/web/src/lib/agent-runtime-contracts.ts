@@ -94,6 +94,23 @@ export type ConsumerExecutionStage = {
   readonly progress?: Readonly<Record<string, unknown>>;
 };
 
+export type ToolActivityAudit = {
+  readonly kind: 'mcp';
+  readonly serverId: string;
+  readonly serverRevision: string;
+  readonly toolName: string;
+  readonly toolRevision: string;
+  readonly adapterRevision: string;
+  readonly taskAttempt?: number;
+  readonly argumentNames: readonly string[];
+  readonly argumentCount: number;
+  readonly outputReference?: {
+    readonly artifactId: string;
+    readonly versionId?: string;
+    readonly uri?: string;
+  };
+};
+
 export type ConsumerExecutionItem =
   | {
       readonly kind: 'pipeline';
@@ -104,6 +121,7 @@ export type ConsumerExecutionItem =
       readonly stages: readonly ConsumerExecutionStage[];
       readonly result?: unknown;
       readonly error?: string;
+      readonly audit?: ToolActivityAudit;
       readonly sequence: number;
     }
   | {
@@ -116,6 +134,7 @@ export type ConsumerExecutionItem =
         readonly label: string;
         readonly status: ConsumerExecutionStatus;
         readonly result?: unknown;
+        readonly audit?: ToolActivityAudit;
         readonly sequence: number;
       }[];
       readonly sequence: number;

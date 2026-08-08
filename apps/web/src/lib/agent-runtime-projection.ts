@@ -16,6 +16,7 @@ import {
   isStaleTerminalActivity,
   processDurationMs,
   sanitizeProcessPart,
+  sanitizeVisiblePart,
 } from './agent-execution-projection';
 
 export function buildRunTurns(
@@ -151,7 +152,7 @@ export function projectionContent(
       parts.push({ type: 'data', name: 'agentpress-run-part', data: visiblePart });
       continue;
     }
-    parts.push({ type: 'data', name: 'agentpress-run-part', data: part });
+    parts.push({ type: 'data', name: 'agentpress-run-part', data: sanitizeVisiblePart(part) });
   }
   if (liveText && !projection.parts.some(({ type }) => type === 'text')) {
     parts.push({ type: 'text', text: liveText });

@@ -35,6 +35,8 @@ import { AgentUsagePart } from './agent-usage-part';
 import { AgentProgressPart } from './agent-progress-part';
 import { PlanPart } from './agent-plan-part';
 import { AgentRunProcess, processPart } from './agent-run-process';
+import { AgentToolAudit } from './agent-tool-audit';
+import { toolActivityAudit } from '../lib/agent-tool-audit-projection';
 
 export function UserMessage(): React.JSX.Element {
   return (
@@ -183,11 +185,15 @@ function ActionProposalPart({ part }: { readonly part: RunPart }): React.JSX.Ele
 
 function ActivityPart({ part }: { readonly part: RunPart }): React.JSX.Element {
   const active = part.status.includes('started') || part.status.includes('executing');
+  const audit = toolActivityAudit(part);
   return (
-    <div className={`run-part activity-part${active ? ' is-active' : ''}`} role="status">
-      {active ? <LoaderCircle className="activity-spinner" size={13} /> : <Clock3 size={13} />}
-      <span>{activityLabel(part)}</span>
-      <small>{statusLabel(part.status)}</small>
+    <div className={`run-part activity-part${active ? ' is-active' : ''}`}>
+      <div role="status">
+        {active ? <LoaderCircle className="activity-spinner" size={13} /> : <Clock3 size={13} />}
+        <span>{activityLabel(part)}</span>
+        <small>{statusLabel(part.status)}</small>
+      </div>
+      {audit ? <AgentToolAudit audit={audit} /> : null}
     </div>
   );
 }

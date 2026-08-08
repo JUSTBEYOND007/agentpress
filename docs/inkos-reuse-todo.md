@@ -99,6 +99,11 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
 - [x] ToolCall 状态、审批、用户可操作错误、Evidence/Artifact 结果与恢复状态来自统一 RunPart projector。
 - [ ] 审计详情展示 server/tool/revision、参数摘要、耗时、重试、输出引用和脱敏错误；凭据、原始 header、
       stack、私有 thinking 与超大输出正文不得进入消费者 transcript。
+      当前 Web consumer projector 已把 MCP provenance 转为有界 `ToolActivityAudit`，在过程详情内按需
+      展示 server/tool/adapter revision、Specialist task attempt、参数名和 Artifact 引用；普通标签仍只显示“搜索资料”等
+      业务动作。原始参数值和 transport 对象会在进入 assistant-ui transcript 前从成功、失败和待审批
+      ToolCall 中删除，刷新后再次净化不会丢失 Artifact 引用。schema-aware 参数值摘要、retry 和统一
+      redacted failure 尚未完成，因此总项保持未勾选。
 - [ ] Server/tool revision 变化、断线重连、调用中断线、重复结果、`outcome_unknown` 和旧连接晚到结果必须
       有独立 projection fixture 与 Playwright 场景。
 
@@ -123,6 +128,8 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       retry、duration、schema-aware 参数摘要、output refs 和脱敏错误只进入按需详情。
 - [ ] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
       超大输出只以 Evidence/Artifact/reference 展示。
+      当前 consumer boundary 已覆盖 MCP `arguments`、`transportProvenance` 和 Artifact output reference，
+      并有成功、失败、审批三种投影回归；JSON-RPC/header/stack/private thinking 的全事件矩阵仍待验证。
 - [ ] projector fixture 覆盖正常、审批拒绝、Schema 非法、超大输出、timeout/rate limit、断线前后、重连、
       duplicate end、stale late result、cancel/retry/revision drift，并验证 live/replay 等价。
 - [ ] PostgreSQL 集成验证 ToolCall ledger、RunEvent、Evidence/Artifact ref 同构恢复且重复/晚到不改已结算事实；
