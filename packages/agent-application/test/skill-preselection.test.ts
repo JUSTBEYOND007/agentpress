@@ -166,6 +166,22 @@ describe('PiSkillPreselector', () => {
 
     await expect(
       selector.select({ prompt: 'Invalid output', explicitSkills: [], candidates }),
+    ).rejects.toMatchObject({ name: 'SkillSelectionError', code: 'invalid_output' });
+  });
+
+  it('keeps provider failures distinct from invalid structured output', async () => {
+    const runtime: AgentRuntime = {
+      execute: () =>
+        Promise.resolve({
+          status: 'failed',
+          messages: [],
+          error: { code: 'provider_error', message: 'provider unavailable', retryable: true },
+        }),
+    };
+    const selector = new PiSkillPreselector({ create: () => runtime }, 100);
+
+    await expect(
+      selector.select({ prompt: 'Provider failure', explicitSkills: [], candidates }),
     ).rejects.toMatchObject({ name: 'SkillSelectionError', code: 'provider_failure' });
   });
 });

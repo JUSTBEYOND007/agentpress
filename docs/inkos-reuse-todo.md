@@ -614,7 +614,9 @@ TODO：
       的失败矩阵。
       模型预选现在隔离损坏/身份不匹配的 catalog revision：候选列表只包含可加载项，
       `skill.selection.completed.catalogFailures` 保留 `load_failed|identity_mismatch` typed 事实，
-      不再因单个损坏 Skill 阻塞整个 Run 创建；显式绑定仍由 Context/Binding 校验 fail closed。
+      不再因单个损坏 Skill 阻塞整个 Run 创建；`protocol_error` 预选结果映射为
+      `SkillSelectionError(code=invalid_output)`，provider error 保持 `provider_failure`；显式绑定仍由
+      Context/Binding 校验 fail closed。
 - [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，

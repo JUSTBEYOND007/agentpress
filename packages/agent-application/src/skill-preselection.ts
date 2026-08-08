@@ -128,7 +128,10 @@ export class PiSkillPreselector {
     }
     if (result.status === 'cancelled' || input.signal?.aborted) return [];
     if (result.status === 'failed') {
-      throw new SkillSelectionError('provider_failure', result.error.message);
+      throw new SkillSelectionError(
+        result.error.code === 'protocol_error' ? 'invalid_output' : 'provider_failure',
+        result.error.message,
+      );
     }
     if (!selected) throw new Error('Skill selection completed without structured output');
 
