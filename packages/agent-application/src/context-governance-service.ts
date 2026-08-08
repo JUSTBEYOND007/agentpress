@@ -94,8 +94,16 @@ export class ContextGovernanceService {
       .where(eq(skillRevisions.workspaceId, workspaceId))
       .orderBy(skillRevisions.skillId, desc(skillRevisions.createdAt));
     return rows.map((row) => {
-      const parsed = loadSkill(row.content);
-      return toPublicSkill(row, parsed.description);
+      try {
+        const parsed = loadSkill(row.content);
+        return toPublicSkill(
+          row,
+          parsed.description,
+          parsed.disableModelInvocation === true ? 'policy_disabled' : 'available',
+        );
+      } catch {
+        return toPublicSkill(row, '技能加载失败，无法绑定。', 'load_failed');
+      }
     });
   }
 
@@ -350,7 +358,11 @@ export function registerContextTools(
   });
 }
 
-function toPublicSkill(row: typeof skillRevisions.$inferSelect, description: string) {
+function toPublicSkill(
+  row: typeof skillRevisions.$inferSelect,
+  description: string,
+  status: 'available' | 'policy_disabled' | 'load_failed' = 'available',
+) {
   return {
     id: row.id,
     skillId: row.skillId,
@@ -358,6 +370,7 @@ function toPublicSkill(row: typeof skillRevisions.$inferSelect, description: str
     description,
     allowedTools: row.allowedTools,
     contentHash: row.contentHash,
+    status,
     createdAt: row.createdAt.toISOString(),
   };
 }

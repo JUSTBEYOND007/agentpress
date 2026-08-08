@@ -152,7 +152,8 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 - [ ] 明确展示“用户显式选择、模型自主选择、被策略禁用、加载失败、历史已过期”五种不同状态。
       `skill.selection.completed` 现在对普通显式选择和模型预选都持久化，并通过 Run projection 的
       `context.skillSelections` 在上下文来源中展示“用户选择”或“Agent 选择”；刷新/replay 不再从 Composer
-      临时状态猜测来源。策略禁用、加载失败和历史过期的消费者状态仍待补齐。
+      临时状态猜测来源。Skill catalog 现在保留 `policy_disabled` 与 `load_failed` 公共诊断，Composer
+      将前者标为“仅用户显式选择”、后者标为“加载失败，无法绑定”；历史过期的消费者状态仍待补齐。
 - [ ] PostgreSQL replay 和浏览器验证 worker 重启、恢复、分支切换后 revision/hash 不漂移，旧 instructions
       不重新进入新 turn。
 

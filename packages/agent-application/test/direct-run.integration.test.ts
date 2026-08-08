@@ -1394,6 +1394,33 @@ describeWithDatabase('Direct Run application flow', () => {
     ).resolves.toHaveLength(0);
   });
 
+  it('keeps disabled and malformed Skills visible as catalog diagnostics', async () => {
+    const disabledId = `explicit-only-${randomUUID()}`;
+    await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${disabledId}\nversion: 1.0.0\ndescription: Explicit only\ndisable-model-invocation: true\n---\nUse only when the user asks.`,
+    );
+    const malformedId = `broken-${randomUUID()}`;
+    await connection.db.insert(skillRevisions).values({
+      id: randomUUID(),
+      workspaceId: ids.workspace,
+      skillId: malformedId,
+      version: '1.0.0',
+      content: 'not a Skill document',
+      contentHash: 'malformed-fixture',
+      allowedTools: [],
+    });
+
+    const listed = await governance.listSkills(ids.workspace);
+    expect(listed.find(({ skillId }) => skillId === disabledId)).toMatchObject({
+      status: 'policy_disabled',
+    });
+    expect(listed.find(({ skillId }) => skillId === malformedId)).toMatchObject({
+      status: 'load_failed',
+      description: '技能加载失败，无法绑定。',
+    });
+  });
+
   it('binds a regenerated Run to the copied fork message without duplicating the user turn', async () => {
     const branchId = randomUUID();
     const messageId = randomUUID();

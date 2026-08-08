@@ -189,13 +189,15 @@ export function AgentComposer({
     commands: skills.map((skill) => ({
       id: skill.skillId,
       label: `/${skill.skillId}`,
-      description: selectedSkillKeys.includes(`${skill.skillId}@${skill.version}`)
-        ? '已启用'
-        : skill.description,
+      description: skillCommandDescription(
+        skill,
+        selectedSkillKeys.includes(`${skill.skillId}@${skill.version}`),
+      ),
       icon: 'skill',
       execute: () => {
         const key = `${skill.skillId}@${skill.version}`;
-        if (!selectedSkillKeys.includes(key)) onSkillChange([...selectedSkillKeys, key]);
+        if (skill.status !== 'load_failed' && !selectedSkillKeys.includes(key))
+          onSkillChange([...selectedSkillKeys, key]);
       },
     })),
     removeOnExecute: true,
@@ -427,4 +429,11 @@ export function AgentComposer({
       </div>
     </ComposerPrimitive.Unstable_TriggerPopoverRoot>
   );
+}
+
+export function skillCommandDescription(skill: SkillView, selected: boolean): string {
+  if (skill.status === 'load_failed') return '加载失败，无法绑定';
+  if (selected) return '已启用';
+  if (skill.status === 'policy_disabled') return `仅用户显式选择 · ${skill.description}`;
+  return skill.description;
 }
