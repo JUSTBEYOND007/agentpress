@@ -5,6 +5,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
+import { ToolRegistry } from '@agentpress/tool-runtime';
+import { Type } from '@sinclair/typebox';
 import * as z from 'zod/v4';
 import { describe, expect, it } from 'vitest';
 
@@ -24,7 +26,7 @@ describe('MCP Streamable HTTP real fixture', () => {
     try {
       const client = await createStreamableHttpClient({ url: fixture.url });
       const listed = await client.listTools();
-      expect(listed.tools.map(({ name }) => name)).toEqual(['echo', 'slow']);
+      expect(listed.tools.map(({ name }) => name)).toEqual(['echo', 'slow', 'stubborn']);
       const result = await client.callTool({ name: 'echo', arguments: { value: 'hello' } });
       expect(result.structuredContent).toEqual({ value: 'hello' });
       const sessionId = fixture.transport.sessionId;
@@ -56,6 +58,73 @@ describe('MCP Streamable HTTP real fixture', () => {
       expect(fixture.slowAbortCount()).toBe(1);
       await client.close();
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it('fences a non-cooperative server timeout and ignores its late completion', async () => {
+    const fixture = await startFixture(false);
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: fixture.url }),
+    });
+    const gateway = new McpClientGateway(manager);
+    const registry = new ToolRegistry();
+    registry.register({
+      toolId: 'publication.stubborn_mcp',
+      version: '1.0.0',
+      owner: 'test',
+      description: 'Exercise a non-cooperative MCP write',
+      capabilities: ['publication.write'],
+      inputSchema: Type.Object({ value: Type.String() }, { additionalProperties: false }),
+      outputSchema: Type.String(),
+      risk: 'external_write',
+      sideEffect: 'Write one remote value',
+      idempotency: 'provider_key',
+      timeoutMs: 25,
+      estimateCost: () => ({}),
+      execute: (input, context) =>
+        gateway.call({
+          serverId: 'web_research',
+          toolName: 'stubborn',
+          arguments: input,
+          context,
+        }) as Promise<string>,
+    });
+
+    try {
+      const pending = registry.execute(
+        registry.get('publication.stubborn_mcp', '1.0.0'),
+        { value: 'late' },
+        {
+          runId: 'run-real-streamable-http',
+          toolCallId: 'stubborn-timeout',
+          idempotencyKey: 'stubborn:1',
+        },
+      );
+      await fixture.waitForStubbornStart();
+      await expect(pending).rejects.toMatchObject({
+        name: 'ToolExecutionError',
+        outcome: 'unknown',
+        outcomeReason: 'timeout_after_dispatch',
+      });
+      await waitUntil(() => fixture.stubbornAbortCount() === 1);
+      expect(fixture.stubbornCallCount()).toBe(1);
+      expect(fixture.stubbornAbortCount()).toBe(1);
+      expect(manager.state('web_research')).toBe('ready');
+
+      fixture.finishStubborn('late');
+      await expect(gateway.call(toolCallInput('fresh-after-timeout', 'fresh'))).resolves.toBe(
+        'fresh',
+      );
+      expect(fixture.echoCallCount()).toBe(1);
+      expect(fixture.stubbornCallCount()).toBe(1);
+      await manager.stop('web_research');
+    } finally {
+      fixture.finishStubborn('cleanup');
       await fixture.close();
     }
   });
@@ -120,6 +189,7 @@ describe('MCP Streamable HTTP real fixture', () => {
     await expect(gateway.listTools('web_research')).resolves.toMatchObject([
       { name: 'echo' },
       { name: 'slow' },
+      { name: 'stubborn' },
     ]);
     await manager.markDegraded('web_research');
     await first.close();
@@ -129,6 +199,7 @@ describe('MCP Streamable HTTP real fixture', () => {
       await expect(gateway.listTools('web_research')).resolves.toMatchObject([
         { name: 'echo' },
         { name: 'slow' },
+        { name: 'stubborn' },
       ]);
       expect(manager.state('web_research')).toBe('ready');
       await manager.stop('web_research');
@@ -178,17 +249,33 @@ async function startFixture(
   readonly transport: StreamableHTTPServerTransport;
   readonly requests: { readonly method: string; readonly session?: string }[];
   readonly slowAbortCount: () => number;
+  readonly stubbornAbortCount: () => number;
+  readonly stubbornCallCount: () => number;
   readonly echoCallCount: () => number;
   readonly waitForSlowStart: () => Promise<void>;
+  readonly waitForStubbornStart: () => Promise<void>;
+  readonly finishStubborn: (value: string) => void;
   readonly close: () => Promise<void>;
 }> {
   const requests: { method: string; session?: string }[] = [];
   let slowAbortCount = 0;
+  let stubbornAbortCount = 0;
+  let stubbornCallCount = 0;
   let echoCallCount = 0;
   let markSlowStarted: (() => void) | undefined;
   const slowStarted = new Promise<void>((resolve) => {
     markSlowStarted = resolve;
   });
+  let markStubbornStarted: (() => void) | undefined;
+  const stubbornStarted = new Promise<void>((resolve) => {
+    markStubbornStarted = resolve;
+  });
+  let settleStubborn:
+    | ((value: {
+        content: { type: 'text'; text: string }[];
+        structuredContent: { value: string };
+      }) => void)
+    | undefined;
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: randomUUID,
     enableJsonResponse,
@@ -222,6 +309,27 @@ async function startFixture(
         else extra.signal.addEventListener('abort', aborted, { once: true });
       }),
   );
+  mcp.registerTool(
+    'stubborn',
+    {
+      inputSchema: { value: z.string() },
+      outputSchema: { value: z.string() },
+    },
+    (_arguments, extra) => {
+      stubbornCallCount += 1;
+      markStubbornStarted?.();
+      extra.signal.addEventListener(
+        'abort',
+        () => {
+          stubbornAbortCount += 1;
+        },
+        { once: true },
+      );
+      return new Promise((resolve) => {
+        settleStubborn = resolve;
+      });
+    },
+  );
   // SDK 1.30 optional callback types are not exactOptionalPropertyTypes-safe.
   await mcp.connect(transport as unknown as Transport);
   const server = createServer((request, response) => {
@@ -240,8 +348,17 @@ async function startFixture(
     transport,
     requests,
     slowAbortCount: () => slowAbortCount,
+    stubbornAbortCount: () => stubbornAbortCount,
+    stubbornCallCount: () => stubbornCallCount,
     echoCallCount: () => echoCallCount,
     waitForSlowStart: () => slowStarted,
+    waitForStubbornStart: () => stubbornStarted,
+    finishStubborn: (value) => {
+      settleStubborn?.({
+        content: [{ type: 'text', text: value }],
+        structuredContent: { value },
+      });
+    },
     close: async () => {
       await transport.close();
       await mcp.close();

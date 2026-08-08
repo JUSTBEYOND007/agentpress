@@ -168,7 +168,9 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 - [ ] projector fixture 覆盖正常、审批拒绝、Schema 非法、超大输出、timeout/rate limit、断线前后、重连、
       duplicate end、stale late result、cancel/retry/revision drift，并验证 live/replay 等价。
       timeout 已有 ToolRuntime 相反风险契约、PostgreSQL ToolCall settlement 和 Web fail-closed 文案测试；
-      rate limit、真实 transport cancel、duplicate end、stale late result、revision drift 和 Playwright 未完成。
+      官方 SDK Streamable HTTP fixture 进一步证明 timeout cancel 到达真实 Server，Server 忽略取消并迟到
+      完成时旧调用不重放、不污染下一逻辑调用，连接也不被误判 degraded。rate limit、duplicate end、
+      断线后的真实 stale late result、revision drift 和 Playwright 未完成。
 - [ ] PostgreSQL 集成验证 ToolCall ledger、RunEvent、Evidence/Artifact ref 同构恢复且重复/晚到不改已结算事实；
       Playwright 验证业务标签、详情披露、手动折叠、长名称/错误脱敏和桌面/移动端无溢出。
 
@@ -596,7 +598,9 @@ Tool/MCP provider timeout 不再依赖 handler 主动响应取消：`ToolRegistr
 deadline，并在父 signal 已取消时拒绝 dispatch。read-only timeout 保持 typed `tool_timeout`；外部写入
 timeout 以 `timeout_after_dispatch` 进入 `outcome_unknown`，避免误导性自动重试。PostgreSQL fixture
 证明两类非协作 handler 各执行一次、ledger 与 durable event 风险分流正确、live/replay 等价；Web 仅消费
-有界公共 failure 并显示不同核对文案。真实 MCP Server 的 timeout/cancel wire contract 仍待补齐。
+有界公共 failure 并显示不同核对文案。官方 SDK Streamable HTTP 真实 Server fixture 还证明 cancel wire
+到达非协作工具、迟到完成不改变宿主 timeout、旧调用执行次数保持 1 且下一调用复用健康会话。该 fixture
+不替代 PostgreSQL + 真实 Server 的端到端组合、rate limit、断线 stale result 或浏览器矩阵。
 
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
@@ -781,9 +785,10 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 34 个 MCP Runtime 测试
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 35 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放和旧 client result identity fence；
-      ToolRegistry 19 个测试及 PostgreSQL ToolCall fixture 已覆盖非协作 handler 的硬 timeout 与风险分流；
+      ToolRegistry 19 个测试、PostgreSQL ToolCall fixture 和官方 SDK 真实 HTTP Server 已覆盖非协作 handler
+      的硬 timeout、wire cancel、迟到完成与风险分流；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置
