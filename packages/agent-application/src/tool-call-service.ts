@@ -16,6 +16,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import {
   APPROVAL_RISKS,
   ToolCallApplicationError,
+  transportProvenanceMatches,
   type DecideToolCallApprovalInput,
   type ProposeToolCallInput,
   type ToolCallServiceOptions,
@@ -135,6 +136,7 @@ export class ToolCallService {
             existing.runId !== input.runId ||
             existing.toolId !== definition.toolId ||
             existing.toolVersion !== definition.version ||
+            !transportProvenanceMatches(existing.transportProvenance, definition.transport) ||
             existing.evidenceProviderRevision !== (definition.evidence?.providerRevision ?? null) ||
             existing.argumentsHash !== argumentsHash ||
             (!sameTaskOperation &&
@@ -246,6 +248,7 @@ export class ToolCallService {
         ...(input.providerToolCallId ? { providerToolCallId: input.providerToolCallId } : {}),
         toolId: definition.toolId,
         toolVersion: definition.version,
+        ...(definition.transport ? { transportProvenance: definition.transport } : {}),
         ...(definition.evidence
           ? { evidenceProviderRevision: definition.evidence.providerRevision }
           : {}),
@@ -287,6 +290,7 @@ export class ToolCallService {
           toolCallId,
           toolId: definition.toolId,
           toolVersion: definition.version,
+          ...(definition.transport ? { transportProvenance: definition.transport } : {}),
           ...(definition.evidence
             ? { evidenceProviderRevision: definition.evidence.providerRevision }
             : {}),

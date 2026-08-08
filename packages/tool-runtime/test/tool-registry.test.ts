@@ -151,6 +151,29 @@ describe('ToolRegistry', () => {
     }).toThrow(/provider revision/u);
   });
 
+  it('keeps validated MCP transport provenance on the immutable tool definition', () => {
+    const registry = new ToolRegistry();
+    const transport = {
+      kind: 'mcp' as const,
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    registry.register({ ...tool('web.search', 'web.read'), transport });
+    expect(registry.get('web.search', '1.0.0').transport).toEqual(transport);
+
+    for (const invalidValue of ['', ' padded ', 'x'.repeat(161)]) {
+      expect(() => {
+        registry.register({
+          ...tool(`web.invalid-${invalidValue.length}`, 'web.read'),
+          transport: { ...transport, serverId: invalidValue },
+        });
+      }).toThrow(/transport provenance/u);
+    }
+  });
+
   it('hashes equivalent JSON arguments identically', () => {
     expect(hashToolArguments({ articleId: 'a', revision: 2 })).toBe(
       hashToolArguments({ revision: 2, articleId: 'a' }),

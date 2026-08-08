@@ -62,6 +62,14 @@ type AgentRunMode = 'direct' | 'planned';
 type AgentTaskCriticality = 'required' | 'optional';
 type SpecialistRole = 'researcher' | 'writer' | 'editor' | 'fact_checker' | 'illustrator';
 type ToolRisk = 'read_only' | 'draft_write' | 'external_write' | 'destructive';
+type ToolTransportProvenance = {
+  readonly kind: 'mcp';
+  readonly serverId: string;
+  readonly serverRevision: string;
+  readonly toolName: string;
+  readonly toolRevision: string;
+  readonly adapterRevision: string;
+};
 
 const createdAt = timestamp('created_at', { withTimezone: true, precision: 3 })
   .notNull()
@@ -1195,6 +1203,7 @@ export const toolCalls = pgTable(
     providerToolCallId: varchar('provider_tool_call_id', { length: 240 }),
     toolId: varchar('tool_id', { length: 180 }).notNull(),
     toolVersion: varchar('tool_version', { length: 80 }).notNull(),
+    transportProvenance: jsonb('transport_provenance').$type<ToolTransportProvenance>(),
     evidenceProviderRevision: varchar('evidence_provider_revision', { length: 160 }),
     arguments: jsonb('arguments').$type<Readonly<Record<string, unknown>>>().notNull(),
     argumentsHash: varchar('arguments_hash', { length: 80 }).notNull(),

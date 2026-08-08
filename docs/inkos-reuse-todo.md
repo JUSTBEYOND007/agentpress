@@ -109,6 +109,12 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 
 - [ ] ToolCall/RunEvent 事实补齐 `serverId/toolName/server/tool/provider/adapter revision/attempt`、
       authoritative timestamps、retry/reconnect、output reference 和 redacted failure；Web 不生成权威状态或时间。
+      当前 `ToolDefinition.transport` 已固定内置 MCP 的 server/tool/revision/adapter，ToolCall ledger 与
+      `tool.proposed`/`tool.approval_requested` durable event 会保存同一 PostgreSQL JSONB 快照；执行与
+      idempotency replay 都校验当前定义和持久化来源完全一致，revision drift 会在 provider 调用前以
+      `approval_mismatch` fail closed。Tool Registry、三个内置 MCP 工具和 21 个 ToolCall PostgreSQL
+      集成场景已通过；attempt、authoritative timestamps、retry/reconnect、output reference 和完整
+      redacted failure 仍未补齐，因此总项保持未勾选。
 - [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影独立 `outcome_unknown`；
       不压成普通 error/completed，也不自动重放可能有副作用的调用。
 - [ ] approval/denied/cancel/degraded/duplicate-result/recovered 各有 typed event；权限只来自宿主 capability、

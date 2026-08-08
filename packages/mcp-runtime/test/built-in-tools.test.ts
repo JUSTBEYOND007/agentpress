@@ -5,7 +5,7 @@ import {
 } from '@agentpress/tool-runtime';
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerBuiltInMcpTools } from '../src/index.js';
+import { BUILT_IN_MCP_ADAPTER_REVISION, registerBuiltInMcpTools } from '../src/index.js';
 
 describe('built-in MCP tools', () => {
   it('registers only three bounded server capabilities', async () => {
@@ -16,6 +16,41 @@ describe('built-in MCP tools', () => {
       'web.search',
       'workspace.search',
       'media.search',
+    ]);
+    expect(registry.list().map(({ toolId, transport }) => ({ toolId, transport }))).toEqual([
+      {
+        toolId: 'web.search',
+        transport: {
+          kind: 'mcp',
+          serverId: 'web_research',
+          serverRevision: '1.0.0',
+          toolName: 'search',
+          toolRevision: '1.0.0',
+          adapterRevision: BUILT_IN_MCP_ADAPTER_REVISION,
+        },
+      },
+      {
+        toolId: 'workspace.search',
+        transport: {
+          kind: 'mcp',
+          serverId: 'workspace_knowledge',
+          serverRevision: '1.0.0',
+          toolName: 'search',
+          toolRevision: '1.0.0',
+          adapterRevision: BUILT_IN_MCP_ADAPTER_REVISION,
+        },
+      },
+      {
+        toolId: 'media.search',
+        transport: {
+          kind: 'mcp',
+          serverId: 'licensed_media',
+          serverRevision: '1.0.0',
+          toolName: 'search',
+          toolRevision: '1.0.0',
+          adapterRevision: BUILT_IN_MCP_ADAPTER_REVISION,
+        },
+      },
     ]);
     const catalog = new CapabilityCatalog(registry);
     const allowed = new Set(['web.research']);

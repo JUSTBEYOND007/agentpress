@@ -106,7 +106,7 @@ export class CapabilityCatalog {
 function validateDefinition(
   definition: Pick<
     ToolDefinition,
-    'toolId' | 'version' | 'capabilities' | 'timeoutMs' | 'guidance' | 'evidence'
+    'toolId' | 'version' | 'capabilities' | 'timeoutMs' | 'guidance' | 'evidence' | 'transport'
   >,
 ): void {
   if (!definition.toolId || !definition.version || definition.capabilities.length === 0) {
@@ -125,6 +125,23 @@ function validateDefinition(
   }
   if (guidance.length > 16) throw new TypeError('Tool guidance is limited to 16 entries');
   if (definition.evidence) validateEvidenceProvenance(definition.evidence);
+  if (definition.transport) validateTransportProvenance(definition.transport);
+}
+
+function validateTransportProvenance(transport: NonNullable<ToolDefinition['transport']>): void {
+  const values = [
+    transport.serverId,
+    transport.serverRevision,
+    transport.toolName,
+    transport.toolRevision,
+    transport.adapterRevision,
+  ];
+  if (
+    transport.kind !== 'mcp' ||
+    values.some((value) => !value.trim() || value !== value.trim() || value.length > 160)
+  ) {
+    throw new TypeError('Tool transport provenance values must be 1-160 trimmed characters');
+  }
 }
 
 function validateEvidenceProvenance(evidence: NonNullable<ToolDefinition['evidence']>): void {

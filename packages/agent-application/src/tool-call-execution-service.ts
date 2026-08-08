@@ -15,6 +15,7 @@ import { AGENT_RUN_COMMAND_TOPIC, type DurableRunEvent } from './contracts.js';
 import {
   APPROVAL_RISKS,
   ToolCallApplicationError,
+  transportProvenanceMatches,
   type DecideToolCallApprovalInput,
   type ToolCallServiceOptions,
 } from './tool-call-contracts.js';
@@ -185,6 +186,12 @@ export class ToolCallExecutionService {
         );
       }
       const definition = this.options.registry.get(call.toolId, call.toolVersion);
+      if (!transportProvenanceMatches(call.transportProvenance, definition.transport)) {
+        throw new ToolCallApplicationError(
+          'approval_mismatch',
+          'Stored Tool Call transport provenance no longer matches its definition',
+        );
+      }
       if (call.evidenceProviderRevision !== (definition.evidence?.providerRevision ?? null)) {
         throw new ToolCallApplicationError(
           'approval_mismatch',

@@ -1,0 +1,1 @@
+ALTER TABLE "tool_calls" ADD COLUMN "transport_provenance" jsonb;

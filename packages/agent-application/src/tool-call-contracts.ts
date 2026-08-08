@@ -1,10 +1,27 @@
 import type { AgentPressDatabase, DatabaseTransaction } from '@agentpress/database';
-import type { ToolRegistry } from '@agentpress/tool-runtime';
+import type { ToolDefinition, ToolRegistry } from '@agentpress/tool-runtime';
 
 import type { RunEventPublisher } from './contracts.js';
 import type { PersistToolEvidenceInput } from './tool-evidence-store.js';
 
 export const APPROVAL_RISKS = new Set(['external_write', 'destructive']);
+
+export function transportProvenanceMatches(
+  stored: unknown,
+  expected: ToolDefinition['transport'] | undefined,
+): boolean {
+  if (!expected) return stored === null || stored === undefined;
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return false;
+  const record = stored as Record<string, unknown>;
+  return (
+    record.kind === expected.kind &&
+    record.serverId === expected.serverId &&
+    record.serverRevision === expected.serverRevision &&
+    record.toolName === expected.toolName &&
+    record.toolRevision === expected.toolRevision &&
+    record.adapterRevision === expected.adapterRevision
+  );
+}
 
 export class ToolCallApplicationError extends Error {
   public constructor(

@@ -45,6 +45,7 @@ const guardedOutput = Type.Object({
 });
 
 export const WEB_SEARCH_EVIDENCE_PROVIDER_REVISION = 'anysearch-api-v1+pi-web-access-v0.15.0';
+export const BUILT_IN_MCP_ADAPTER_REVISION = 'agentpress-mcp-adapter-v1';
 
 export function registerBuiltInMcpTools(
   registry: ToolRegistry,
@@ -76,6 +77,14 @@ export function registerBuiltInMcpTools(
       toolId: tool.toolId,
       version: '1.0.0',
       owner: 'agentpress.mcp',
+      transport: {
+        kind: 'mcp',
+        serverId: tool.serverId,
+        serverRevision: '1.0.0',
+        toolName: 'search',
+        toolRevision: '1.0.0',
+        adapterRevision: BUILT_IN_MCP_ADAPTER_REVISION,
+      },
       description: tool.description,
       guidance: [
         {

@@ -25,6 +25,15 @@ export type ToolEvidenceProvenance = {
   readonly providerRevision: string;
 };
 
+export type ToolTransportProvenance = {
+  readonly kind: 'mcp';
+  readonly serverId: string;
+  readonly serverRevision: string;
+  readonly toolName: string;
+  readonly toolRevision: string;
+  readonly adapterRevision: string;
+};
+
 export type ToolDefinition<TInput extends TSchema = TSchema, TOutput extends TSchema = TSchema> = {
   readonly toolId: string;
   readonly version: string;
@@ -32,6 +41,7 @@ export type ToolDefinition<TInput extends TSchema = TSchema, TOutput extends TSc
   readonly description: string;
   readonly guidance?: readonly ToolGuidance[];
   readonly evidence?: ToolEvidenceProvenance;
+  readonly transport?: ToolTransportProvenance;
   readonly capabilities: readonly string[];
   readonly inputSchema: TInput;
   readonly outputSchema: TOutput;

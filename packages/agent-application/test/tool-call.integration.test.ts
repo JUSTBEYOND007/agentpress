@@ -51,6 +51,7 @@ describeWithDatabase('Tool Call application flow', () => {
   const published: LiveRunEvent[] = [];
   const registry = new ToolRegistry();
   let searchExecutions = 0;
+  let webSearchExecutions = 0;
   let externalExecutions = 0;
   let delayedExternalExecutions = 0;
   let successfulExternalExecutions = 0;
@@ -96,6 +97,14 @@ describeWithDatabase('Tool Call application flow', () => {
     version: '1.0.0',
     owner: 'research',
     description: 'Search public sources',
+    transport: {
+      kind: 'mcp',
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    },
     evidence: { providerRevision: 'anysearch-api-v1+pi-web-access-v0.15.0' },
     capabilities: ['web.research'],
     inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
@@ -105,15 +114,17 @@ describeWithDatabase('Tool Call application flow', () => {
     idempotency: 'none',
     timeoutMs: 1_000,
     estimateCost: () => ({}),
-    execute: () =>
-      Promise.resolve([
+    execute: () => {
+      webSearchExecutions += 1;
+      return Promise.resolve([
         {
           source: 'AnySearch',
           url: 'https://example.com/source',
           title: 'Primary source',
           text: 'Citable source text',
         },
-      ]),
+      ]);
+    },
   });
   registry.register({
     toolId: 'publication.delayed_publish',
@@ -247,6 +258,86 @@ describeWithDatabase('Tool Call application flow', () => {
     await expect(service.execute(proposal.toolCallId)).rejects.toMatchObject({
       code: 'approval_mismatch',
     });
+    await expect(
+      connection.db
+        .select({ status: toolCalls.status })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([{ status: 'proposed' }]);
+  });
+
+  it('snapshots MCP transport provenance in the Tool Call and proposed event', async () => {
+    const runId = await createRunningRun();
+    const idempotencyKey = `web-search:${randomUUID()}`;
+    const input = {
+      runId,
+      toolId: 'web.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'transport provenance' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['web.research']),
+      idempotencyKey,
+    } as const;
+    const proposal = await service.propose(input);
+    const replay = await service.propose(input);
+    expect(replay.toolCallId).toBe(proposal.toolCallId);
+
+    const expectedTransport = {
+      kind: 'mcp',
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    } as const;
+    await expect(
+      connection.db
+        .select({ transportProvenance: toolCalls.transportProvenance })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([{ transportProvenance: expectedTransport }]);
+    const events = await connection.db
+      .select({ payload: runEvents.payload })
+      .from(runEvents)
+      .where(and(eq(runEvents.runId, runId), eq(runEvents.eventType, 'tool.proposed')));
+    expect(events).toMatchObject([{ payload: { transportProvenance: expectedTransport } }]);
+
+    await connection.db
+      .update(toolCalls)
+      .set({ transportProvenance: { ...expectedTransport, serverRevision: '2.0.0' } })
+      .where(eq(toolCalls.id, proposal.toolCallId));
+    await expect(service.propose(input)).rejects.toMatchObject({ code: 'approval_mismatch' });
+  });
+
+  it('fails closed before provider execution when MCP transport provenance drifts', async () => {
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'web.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'transport drift' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['web.research']),
+    });
+    await connection.db
+      .update(toolCalls)
+      .set({
+        transportProvenance: {
+          kind: 'mcp',
+          serverId: 'web_research',
+          serverRevision: 'retired-revision',
+          toolName: 'search',
+          toolRevision: '1.0.0',
+          adapterRevision: 'agentpress-mcp-adapter-v1',
+        },
+      })
+      .where(eq(toolCalls.id, proposal.toolCallId));
+    const before = webSearchExecutions;
+
+    await expect(service.execute(proposal.toolCallId)).rejects.toMatchObject({
+      code: 'approval_mismatch',
+    });
+    expect(webSearchExecutions).toBe(before);
     await expect(
       connection.db
         .select({ status: toolCalls.status })
