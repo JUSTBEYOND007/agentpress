@@ -49,6 +49,56 @@ describe('typed execution outcomes', () => {
       items: [{ status: 'outcome_unknown' }],
     });
   });
+
+  it('isolates MCP transport diagnostics from the consumer business item', () => {
+    const activity = part('tool.outcome_unknown', {
+      toolId: 'web.search',
+      toolCallId: 'unknown-mcp',
+      arguments: { query: 'private query value' },
+      transportProvenance: {
+        kind: 'mcp',
+        serverId: 'web_research',
+        serverRevision: '1.0.0',
+        toolName: 'search',
+        toolRevision: '1.0.0',
+        adapterRevision: 'agentpress-mcp-adapter-v1',
+      },
+      failure: {
+        code: 'outcome_unknown',
+        messageKey: 'tool.failure.outcome_unknown',
+        retryable: false,
+        outcomeReason: 'stale_client_result',
+        message: 'authorization=private-token',
+        stack: '/private/provider-client.ts:42',
+      },
+    });
+
+    const [item] = executionItems([activity], [activity]);
+    expect(item).toMatchObject({
+      kind: 'utility-group',
+      status: 'outcome_unknown',
+      items: [
+        {
+          label: '搜索资料',
+          status: 'outcome_unknown',
+          audit: {
+            kind: 'mcp',
+            serverId: 'web_research',
+            serverRevision: '1.0.0',
+            toolName: 'search',
+            toolRevision: '1.0.0',
+            adapterRevision: 'agentpress-mcp-adapter-v1',
+            argumentNames: ['query'],
+            argumentCount: 1,
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(item)).not.toContain('private query value');
+    expect(JSON.stringify(item)).not.toContain('stale_client_result');
+    expect(JSON.stringify(item)).not.toContain('private-token');
+    expect(JSON.stringify(item)).not.toContain('/private/provider-client.ts');
+  });
 });
 
 function part(status: string, payload: Readonly<Record<string, unknown>>): RunPart {

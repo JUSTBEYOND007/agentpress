@@ -228,6 +228,105 @@ describe('run projection', () => {
     ]);
   });
 
+  it('keeps MCP lifecycle projection deterministic and fences duplicate or late results', () => {
+    const transportProvenance = {
+      kind: 'mcp',
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    const events = [
+      event(1, 'tool.proposed', {
+        toolCallId: 'mcp-call-1',
+        toolId: 'web.search',
+        transportProvenance,
+      }),
+      event(2, 'tool.executing', { toolCallId: 'mcp-call-1' }),
+      event(3, 'tool.succeeded', {
+        toolCallId: 'mcp-call-1',
+        output: { artifactId: 'artifact-1', value: ['source-1'] },
+      }),
+      event(4, 'tool.duplicate_result_ignored', {
+        toolCallId: 'mcp-call-1',
+        reason: 'duplicate_result',
+        output: { artifactId: 'artifact-late' },
+      }),
+      event(5, 'tool.outcome_unknown', {
+        toolCallId: 'mcp-call-1',
+        reason: 'stale_client_result',
+        output: { artifactId: 'artifact-stale' },
+      }),
+    ];
+
+    const live = projectRunParts(events);
+    const replay = projectRunParts([...events]);
+    expect(replay).toEqual(live);
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({
+      type: 'activity',
+      status: 'tool.succeeded',
+      outcome: 'succeeded',
+      payload: {
+        toolId: 'web.search',
+        output: { artifactId: 'artifact-1', value: ['source-1'] },
+        transportProvenance,
+      },
+    });
+    expect(live[0]?.payload.lifecycleStages).toEqual([
+      {
+        stageId: 'run-1:tool:mcp-call-1:1',
+        labelKey: 'execution.started',
+        status: 'tool.proposed',
+        startedAt: new Date(1).toISOString(),
+        eventAt: new Date(1).toISOString(),
+      },
+      {
+        stageId: 'run-1:tool:mcp-call-1:2',
+        labelKey: 'execution.executing',
+        status: 'tool.executing',
+        startedAt: new Date(2).toISOString(),
+        eventAt: new Date(2).toISOString(),
+      },
+      {
+        stageId: 'run-1:tool:mcp-call-1:3',
+        labelKey: 'execution.succeeded',
+        status: 'tool.succeeded',
+        outcome: 'succeeded',
+        completedAt: new Date(3).toISOString(),
+        eventAt: new Date(3).toISOString(),
+      },
+    ]);
+  });
+
+  it('keeps a connection-loss outcome unknown and ignores a late success', () => {
+    const events = [
+      event(1, 'tool.proposed', { toolCallId: 'mcp-call-2', toolId: 'web.search' }),
+      event(2, 'tool.executing', { toolCallId: 'mcp-call-2' }),
+      event(3, 'tool.outcome_unknown', {
+        toolCallId: 'mcp-call-2',
+        reason: 'connection_lost_after_dispatch',
+      }),
+      event(4, 'tool.succeeded', {
+        toolCallId: 'mcp-call-2',
+        output: { value: 'late provider result' },
+      }),
+    ];
+    const [part] = projectRunParts(events);
+    expect(part).toMatchObject({
+      type: 'warning',
+      status: 'tool.outcome_unknown',
+      outcome: 'outcome_unknown',
+    });
+    expect(part?.payload.output).toBeUndefined();
+    expect(part?.payload.lifecycleStages).toHaveLength(3);
+    expect(part?.payload.lifecycleStages?.at(-1)).toMatchObject({
+      status: 'tool.outcome_unknown',
+      outcome: 'outcome_unknown',
+    });
+  });
+
   it('projects one terminal warning for a typed synthesis failure', () => {
     const parts = projectRunParts([
       event(1, 'synthesis.failed', {

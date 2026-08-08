@@ -50,6 +50,10 @@ export function projectRunParts(
         });
       } else {
         const previous = projected[previousIndex];
+        // A durable ToolCall/task terminal fact is immutable. Late provider
+        // callbacks may still be persisted for audit, but they must not
+        // replace the settled consumer projection during replay.
+        if (previous?.outcome !== undefined) continue;
         const startedAt = previous
           ? dateProperty(previous.payload, 'lifecycleStartedAt')
           : undefined;
