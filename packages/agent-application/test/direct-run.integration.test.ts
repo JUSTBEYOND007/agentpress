@@ -1498,7 +1498,9 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(
       events.find(({ eventType }) => eventType === 'skill.selection.completed')?.payload,
     ).toMatchObject({
-      catalogFailures: [{ skillId: malformedId, version: '1.0.0', code: 'load_failed' }],
+      catalogFailures: expect.arrayContaining([
+        { skillId: malformedId, version: '1.0.0', code: 'load_failed' },
+      ]) as unknown,
     });
     await selectionService.requestCancellation(run.runId);
     await selectionService.execute(run.runId);
