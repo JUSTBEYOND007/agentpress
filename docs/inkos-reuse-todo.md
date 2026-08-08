@@ -358,10 +358,12 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       PostgreSQL 事实链定位所属层，再决定是否实现，不把单场景模型行为写成通用 coordinator 分支。
 - [ ] **P1：完成恢复与 MCP 失败矩阵。** 先接现有 recovery policy、validator、ToolCall ledger 和
       settlement，不建立第二套恢复或 MCP manager；所有新增 Agent-facing 源文件继续保持 <= 500 行。
-- [ ] Skill replay/recovery 的实现已补充 PostgreSQL 集成回归：旧 Run 固定 `run_skill_bindings` 与
-      Context Pack，新 Skill revision 发布后重启加载仍保持旧 hash/allowedTools。该回归已使用仓库
-      PostgreSQL（`DATABASE_URL=postgresql://agentpress:agentpress@localhost:5432/agentpress`）通过；
-      完整的 worker recovery、branch switch、旧 instructions 不进入新 turn 仍待补齐，因此总项不勾选。
+- [x] Skill replay/recovery 已补充 PostgreSQL 集成回归：旧 Run 固定 `run_skill_bindings` 与
+      Context Pack，新 Skill revision 发布后重启加载仍保持旧 hash/allowedTools；真实 worker 中断后，
+      `prepareRecovery -> execute` 通过新的 `DirectRunService` 和真实 `PiRuntimeAdapter` 只消费冻结的 v1
+      instructions，模型预选器调用次数为 0，v2 不进入旧 Run，binding/revision/hash 全程不漂移。
+      sibling branch 可显式绑定 v2，未再次选择 Skill 的新 turn 不继承 v1/v2。该矩阵已使用仓库
+      PostgreSQL（`DATABASE_URL=postgresql://agentpress:agentpress@localhost:5432/agentpress`）通过。
 - [ ] **P2：浏览器结果投影验收。** 真实 PostgreSQL replay 与 live SSE 使用同一 projector；Playwright
       验证桌面/移动端的结果优先展示、折叠、错误脱敏、恢复和无重叠，不在 React 中推断运行状态。
 
@@ -795,7 +797,8 @@ TODO：
       旧 Skill 指令不进入新 turn；Playwright 验证显式禁用、缺失/失效 Skill 与诊断详情。当前已补充
       binding hash drift 的 fail-closed 回归（`PersistentToolBridge`），并用 PostgreSQL 证明旧 Run 在新
       revision 发布后保持 v1、sibling branch 可显式绑定 v2、未再次选择 Skill 的新 turn 不注入 v1/v2
-      instructions。完整 worker recovery 和 Playwright 状态矩阵仍待完成。
+      instructions。worker recovery 现在也通过真实 `PiRuntimeAdapter` 证明只消费冻结 v1，且恢复不会重新
+      discovery/model selection；本项只剩 Playwright 的显式禁用、缺失/失效 Skill 与诊断详情矩阵。
 - [x] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
       2026-08-07 使用真实 Pi Runtime 与目标模型 `gpt-5.6-terra` 运行 5 个固定用例：5/5 exact match、
       0 forbidden selection、0 error。版本化报告为

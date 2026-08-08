@@ -138,6 +138,16 @@ the compact Skill identity while revision/hash/resource diagnostics remain persi
 online `pnpm eval:skill` target-model gate remains intentionally unchecked until credentials and a
 provider/model manifest are supplied.
 
+Worker recovery keeps the same ownership boundary: `RunRecoveryService` only fences interrupted
+work and changes the Run lifecycle, while `RunContextService.load` reads the already persisted
+Context Pack. It does not rediscover a Skill directory, query the latest revision, or invoke
+`PiSkillPreselector`. A PostgreSQL integration fixture interrupts a v1-bound Run, publishes v2,
+constructs a fresh `DirectRunService`, calls `prepareRecovery -> execute`, and captures the request
+that crosses the real `PiRuntimeAdapter`. The request contains only v1 instructions; the preselector
+is not called, v2 is absent, and the Context Pack plus `run_skill_bindings` revision/hash/allowlist
+remain byte-for-byte unchanged. This is intentionally a contract test around the existing narrow
+owners, not a new Skill recovery manager or a second state machine.
+
 Web Research retains the existing SSRF/DNS/redirect/media/size guards and built-in `web_research`
 MCP route. `packages/web-research` now owns product enums, the typed ResearchBrief schema,
 claim-to-Evidence validation, provider-neutral search/fetch/synthesis Ports, depth-specific query,

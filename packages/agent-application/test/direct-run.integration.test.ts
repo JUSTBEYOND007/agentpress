@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
+import {
+  PiRuntimeAdapter,
+  type AgentRuntime,
+  type RuntimeRequest,
+} from '@agentpress/agent-runtime';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
 import { fauxAssistantMessage, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import {
@@ -1864,6 +1868,107 @@ describeWithDatabase('Direct Run application flow', () => {
     await service.execute(siblingRun.runId);
     await service.requestCancellation(unboundRun.runId);
     await service.execute(unboundRun.runId);
+  });
+
+  it('recovers an interrupted worker with the frozen Skill revision', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      title: 'Frozen Skill worker recovery',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const skillId = `recovery-skill-${randomUUID()}`;
+    const revisionOne = await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${skillId}\nversion: 1.0.0\ndescription: Recovery revision one\nallowedTools:\n  - article.read_current\n---\nRECOVERY_SKILL_REVISION_ONE`,
+    );
+    const interruptedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => ({
+          execute: () => Promise.reject(new Error('Worker process stopped')),
+        }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await interruptedService.create({
+      conversationId,
+      userId: ids.user,
+      branchId,
+      prompt: 'Use the frozen recovery Skill',
+      idempotencyKey: randomUUID(),
+      skills: [{ skillId, version: '1.0.0' }],
+    });
+    const [packBefore] = await connection.db
+      .select({ content: runContextPacks.content, contentHash: runContextPacks.contentHash })
+      .from(runContextPacks)
+      .where(eq(runContextPacks.runId, run.runId));
+    const bindingsBefore = await connection.db
+      .select()
+      .from(runSkillBindings)
+      .where(eq(runSkillBindings.runId, run.runId));
+    expect(bindingsBefore).toMatchObject([
+      {
+        skillRevisionId: revisionOne.id,
+        contentHash: revisionOne.contentHash,
+        allowedTools: ['article.read_current'],
+      },
+    ]);
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(interruptedService.execute(run.runId, controller.signal)).rejects.toThrow();
+    await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${skillId}\nversion: 2.0.0\ndescription: Recovery revision two\nallowedTools:\n  - web_research.search\n---\nRECOVERY_SKILL_REVISION_TWO`,
+    );
+
+    const runtimeRequests: RuntimeRequest[] = [];
+    const recoveryDelegate = PiRuntimeAdapter.forTests({
+      responses: ['Recovered with revision one.'],
+    });
+    let preselectionCalls = 0;
+    const recoveryRuntime: AgentRuntime = {
+      execute(request, sink, signal) {
+        runtimeRequests.push(request);
+        return recoveryDelegate.execute(request, sink, signal);
+      },
+    };
+    const recoveryService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => recoveryRuntime },
+      skillPreselector: {
+        select() {
+          preselectionCalls += 1;
+          return Promise.resolve([{ skillId, version: '2.0.0' }]);
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+
+    await expect(recoveryService.prepareRecovery(run.runId)).resolves.toBe(true);
+    await expect(recoveryService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    expect(preselectionCalls).toBe(0);
+    expect(runtimeRequests).toHaveLength(1);
+    const recoveredContext = runtimeRequests[0]?.currentTurn.context;
+    expect(recoveredContext).toBeDefined();
+    expect(recoveredContext?.content).toContain('RECOVERY_SKILL_REVISION_ONE');
+    expect(recoveredContext?.content).not.toContain('RECOVERY_SKILL_REVISION_TWO');
+    const [packAfter, bindingsAfter] = await Promise.all([
+      connection.db
+        .select({ content: runContextPacks.content, contentHash: runContextPacks.contentHash })
+        .from(runContextPacks)
+        .where(eq(runContextPacks.runId, run.runId)),
+      connection.db.select().from(runSkillBindings).where(eq(runSkillBindings.runId, run.runId)),
+    ]);
+    expect(packAfter).toEqual([packBefore]);
+    expect(bindingsAfter).toEqual(bindingsBefore);
   });
 
   it('persists cancellation before aborting Pi and reaches a terminal state', async () => {
