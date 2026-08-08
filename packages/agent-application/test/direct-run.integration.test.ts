@@ -72,6 +72,7 @@ import {
   PersistentToolBridge,
   RunContextService,
   SkillSelectionError,
+  SpecialistResultStore,
   runtimeToolName,
   ToolCallService,
   type LiveRunEvent,
@@ -2255,6 +2256,128 @@ describeWithDatabase('Direct Run application flow', () => {
       projection?.parts.filter(({ type, status }) => type === 'warning' && status === 'run.failed'),
     ).toHaveLength(1);
     expect(projection?.parts.some(({ status }) => status === 'synthesis.failed')).toBe(false);
+  });
+
+  it('converts an Artifact persistence exception into a durable claim-free Task failure', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '生成一份草稿',
+      idempotencyKey: randomUUID(),
+    });
+    const planId = randomUUID();
+    const revisionId = randomUUID();
+    const taskId = randomUUID();
+    await connection.db.insert(executionPlans).values({ id: planId, runId: run.runId });
+    await connection.db.insert(planRevisions).values({
+      id: revisionId,
+      planId,
+      revisionNumber: 1,
+      reason: 'main_agent',
+      summary: 'Persistence failure fixture',
+    });
+    await connection.db.insert(agentTasks).values({
+      id: taskId,
+      runId: run.runId,
+      planRevisionId: revisionId,
+      objective: 'Persist an invalid draft',
+      criticality: 'required',
+      owner: 'writer',
+      acceptanceCriteria: ['The draft is persisted atomically'],
+      outputSchema: {},
+      toolPolicy: {},
+      budget: {},
+      status: 'running',
+      attempt: 1,
+    });
+    await connection.db.transaction(async (transaction) => {
+      await initializeRunSpecialistBudget(transaction, { runId: run.runId, maxTokens: 10_000 });
+      await reserveTaskBudget(transaction, {
+        reservationId: randomUUID(),
+        runId: run.runId,
+        planRevisionId: revisionId,
+        taskId,
+        attempt: 1,
+        tokens: 2_000,
+      });
+    });
+    const store = new SpecialistResultStore({
+      database: connection.db,
+      publisher,
+      createId: randomUUID,
+      now: () => new Date(),
+    });
+    await expect(
+      store.persistTaskResult(
+        run.runId,
+        {
+          id: taskId,
+          clientKey: 'invalid-draft',
+          owner: 'writer',
+          objective: 'Persist an invalid draft',
+          criticality: 'required',
+          acceptanceCriteria: ['The draft is persisted atomically'],
+          dependencyIds: [],
+          capabilities: [],
+          detached: false,
+          status: 'succeeded',
+          summary: 'Draft before persistence failure',
+          artifacts: [
+            {
+              type: 'ArticleDraft',
+              title: 'Invalid draft',
+              summary: 'The content cannot be serialized',
+              content: { unserializable: BigInt(1) },
+              evidenceIds: [],
+            },
+          ],
+          warnings: [],
+        },
+        1,
+      ),
+    ).resolves.toBe(true);
+    const taskRows = await connection.db
+      .select({ status: agentTasks.status })
+      .from(agentTasks)
+      .where(eq(agentTasks.runId, run.runId));
+    expect(taskRows).toEqual([{ status: 'failed' }]);
+    const resultRows = await connection.db
+      .select({ artifacts: taskResults.artifacts, failure: taskResults.failure })
+      .from(taskResults)
+      .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+      .where(eq(agentTasks.runId, run.runId));
+    expect(resultRows).toEqual([
+      {
+        artifacts: [],
+        failure: { code: 'persistence_failed', message: 'persistence_failed' },
+      },
+    ]);
+    const reservationRows = await connection.db
+      .select({
+        status: taskBudgetReservations.status,
+        actualTokens: taskBudgetReservations.actualTokens,
+      })
+      .from(taskBudgetReservations)
+      .where(eq(taskBudgetReservations.taskId, taskId));
+    expect(reservationRows).toEqual([{ status: 'forfeited', actualTokens: 2_000 }]);
+    const failureEvent = await connection.db
+      .select({ payload: runEvents.payload })
+      .from(runEvents)
+      .where(and(eq(runEvents.runId, run.runId), eq(runEvents.eventType, 'task.failed')));
+    expect(failureEvent[0]?.payload.failure).toBe('persistence_failed');
+    expect(failureEvent).toHaveLength(1);
+    expect(JSON.stringify(failureEvent)).not.toMatch(/BigInt|serialize/u);
+    const artifactsForRun = await connection.db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(eq(artifacts.runId, run.runId));
+    expect(artifactsForRun).toEqual([]);
   });
 
   it('projects only a Specialist public result to Main while keeping private thinking isolated', async () => {

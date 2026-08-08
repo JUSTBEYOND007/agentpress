@@ -482,7 +482,10 @@ TODO：
       `synthesis.failed` typed fact，并由唯一的 `run.failed` WarningPart 展示；成功 synthesis 的相反语义
       测试确保不会误报。Specialist submission validator 现在区分 `task_result_schema_invalid`、
       `task_artifact_invalid`、`task_evidence_invalid` 和 `task_evidence_provenance_invalid`，并在有界 repair
-      失败后持久化 typed `task.failed`。真实 Kafka fixture 现覆盖同 `messageId` 重复 recovery command、
+      失败后持久化 typed `task.failed`。`SpecialistResultStore` 的 Artifact/Evidence 原子事务失败后现在会
+      回滚全部候选内容，再以无 Artifact/Evidence 的 `persistence_failed` TaskResult 结算，并保守 forfeiture
+      当前预算 reservation；底层序列化/数据库错误不进入公开 RunEvent。真实 Kafka fixture 现覆盖同
+      `messageId` 重复 recovery command、
       不同 `messageId` 的 recovery command 先到而旧 original command 晚到，以及取消后 late command；
       Task terminal/attempt fence 保证只产生 attempt 2 的唯一 TaskResult，两个乱序消息各自写入 inbox，
       不新增 Kafka manager 或第二套幂等状态。并发预算现有独立 `run_specialist_budgets` ledger 与
@@ -702,11 +705,13 @@ TODO：
       `executeWebResearchSearch` handler 只保留成功来源、记录 partial/all fetch failure，并保留调用方
       cancellation；`fetchResearchSource` 通过 `ResearchFetchError` 区分 timeout、DNS/URL、私网重定向、
       redirect loop、空正文、PDF 签名/页数、内容类型和大小限制，MCP `value.results` 也能进入 Evidence
-      projector；synthesis、Token/费用和持久化故障注入仍待补齐。
+      projector；Specialist Artifact/Evidence 持久化异常已原子回滚并结算为 claim-free
+      `persistence_failed`，synthesis、Token/费用故障注入仍待补齐。
 - [ ] partial query/fetch failure 必须保留已成功来源；全部 search/fetch/synthesis 失败只允许产出无 Claim、
       `confidence=0` 的 typed degraded Artifact；handler 的全部 search failure 已输出空 `results` 与 typed
       failure，partial/all fetch failure 已只保留成功 `results` 并追加 `all_sources_failed`；ResearchBrief
-      synthesis 和持久化失败仍需接入 Artifact owner 后才能勾选。
+      synthesis failure 仍需形成 degraded Artifact 后才能勾选；持久化失败当前保留 typed Task failure，
+      不会伪造成功 Claim 或留下半个 Artifact。
 - [ ] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
 - [ ] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝

@@ -37,122 +37,199 @@ export class SpecialistResultStore {
     result: SettledTask,
     expectedAttempt: number,
   ): Promise<boolean> {
-    const event = await this.options.database.transaction(async (transaction) => {
-      const now = this.options.now();
-      let effectiveAttempt = expectedAttempt;
-      let settled =
-        expectedAttempt > 0
-          ? await settleAgentTaskAttempt(transaction, {
-              taskId: result.id,
-              attempt: expectedAttempt,
-              status: result.status,
-              now,
+    let event: Awaited<ReturnType<typeof appendRunEvent>> | undefined;
+    try {
+      event = await this.options.database.transaction(async (transaction) => {
+        const now = this.options.now();
+        let effectiveAttempt = expectedAttempt;
+        let settled =
+          expectedAttempt > 0
+            ? await settleAgentTaskAttempt(transaction, {
+                taskId: result.id,
+                attempt: expectedAttempt,
+                status: result.status,
+                now,
+              })
+            : false;
+        if (!settled && result.failure === 'detached_task_timeout' && expectedAttempt === 0) {
+          const claimedByHost = await transaction
+            .update(agentTasks)
+            .set({
+              status: 'failed',
+              attempt: sql`${agentTasks.attempt} + 1`,
+              completedAt: now,
+              updatedAt: now,
+              version: sql`${agentTasks.version} + 1`,
             })
-          : false;
-      if (!settled && result.failure === 'detached_task_timeout' && expectedAttempt === 0) {
-        const claimedByHost = await transaction
-          .update(agentTasks)
-          .set({
-            status: 'failed',
-            attempt: sql`${agentTasks.attempt} + 1`,
-            completedAt: now,
-            updatedAt: now,
-            version: sql`${agentTasks.version} + 1`,
-          })
-          .where(
-            and(
-              eq(agentTasks.id, result.id),
-              inArray(agentTasks.status, ['pending', 'ready']),
-              eq(agentTasks.attempt, 0),
-              sql`${agentTasks.attempt} < ${agentTasks.maxAttempts}`,
-            ),
-          )
-          .returning({ attempt: agentTasks.attempt });
-        effectiveAttempt = claimedByHost[0]?.attempt ?? expectedAttempt;
-        settled = claimedByHost.length === 1;
-      }
-      if (!settled) return undefined;
-      if (result.status === 'cancelled') {
-        await forfeitActiveTaskBudgets(transaction, { taskIds: [result.id], now });
-      } else {
-        await settleTaskBudget(transaction, {
-          taskId: result.id,
-          attempt: effectiveAttempt,
-          actualTokens: actualUsageTokens(result.usage),
-          now,
-        });
-      }
-      const persistedArtifacts = [];
-      for (const artifact of result.artifacts) {
-        const artifactId = this.options.createId();
-        const versionId = this.options.createId();
-        const contentHash = createHash('sha256')
-          .update(JSON.stringify(artifact.content))
-          .digest('hex');
-        await transaction.insert(artifacts).values({
-          id: artifactId,
-          runId,
-          taskId: result.id,
-          type: artifact.type,
-          title: artifact.title,
-        });
-        await transaction.insert(artifactVersions).values({
-          id: versionId,
-          artifactId,
-          version: 1,
-          summary: artifact.summary,
-          content: artifact.content,
-          contentHash,
-        });
-        if (artifact.evidenceIds.length > 0) {
-          await transaction.insert(artifactEvidence).values(
-            artifact.evidenceIds.map((evidenceId, ordinal) => ({
-              artifactVersionId: versionId,
-              evidenceId,
-              claim: artifact.summary,
-              ordinal: ordinal + 1,
-            })),
-          );
+            .where(
+              and(
+                eq(agentTasks.id, result.id),
+                inArray(agentTasks.status, ['pending', 'ready']),
+                eq(agentTasks.attempt, 0),
+                sql`${agentTasks.attempt} < ${agentTasks.maxAttempts}`,
+              ),
+            )
+            .returning({ attempt: agentTasks.attempt });
+          effectiveAttempt = claimedByHost[0]?.attempt ?? expectedAttempt;
+          settled = claimedByHost.length === 1;
         }
-        persistedArtifacts.push({ artifactId, versionId, ...artifact });
-      }
-      if (result.status !== 'cancelled' && result.status !== 'skipped') {
-        await transaction.insert(taskResults).values({
+        if (!settled) return undefined;
+        if (result.status === 'cancelled') {
+          await forfeitActiveTaskBudgets(transaction, { taskIds: [result.id], now });
+        } else {
+          await settleTaskBudget(transaction, {
+            taskId: result.id,
+            attempt: effectiveAttempt,
+            actualTokens: actualUsageTokens(result.usage),
+            now,
+          });
+        }
+        const persistedArtifacts = [];
+        for (const artifact of result.artifacts) {
+          const artifactId = this.options.createId();
+          const versionId = this.options.createId();
+          const contentHash = createHash('sha256')
+            .update(JSON.stringify(artifact.content))
+            .digest('hex');
+          await transaction.insert(artifacts).values({
+            id: artifactId,
+            runId,
+            taskId: result.id,
+            type: artifact.type,
+            title: artifact.title,
+          });
+          await transaction.insert(artifactVersions).values({
+            id: versionId,
+            artifactId,
+            version: 1,
+            summary: artifact.summary,
+            content: artifact.content,
+            contentHash,
+          });
+          if (artifact.evidenceIds.length > 0) {
+            await transaction.insert(artifactEvidence).values(
+              artifact.evidenceIds.map((evidenceId, ordinal) => ({
+                artifactVersionId: versionId,
+                evidenceId,
+                claim: artifact.summary,
+                ordinal: ordinal + 1,
+              })),
+            );
+          }
+          persistedArtifacts.push({ artifactId, versionId, ...artifact });
+        }
+        if (result.status !== 'cancelled' && result.status !== 'skipped') {
+          await transaction.insert(taskResults).values({
+            id: this.options.createId(),
+            taskId: result.id,
+            attempt: effectiveAttempt,
+            status: result.status,
+            summary: result.summary ?? result.failure ?? `${result.owner} task ${result.status}`,
+            artifacts: persistedArtifacts,
+            evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
+            usage: result.usage ?? {},
+            warnings: result.warnings,
+            ...(result.failure
+              ? { failure: { code: result.failure, message: result.failure } }
+              : {}),
+          });
+        }
+        await appendCheckpoint(transaction, {
           id: this.options.createId(),
-          taskId: result.id,
-          attempt: effectiveAttempt,
-          status: result.status,
-          summary: result.summary ?? result.failure ?? `${result.owner} task ${result.status}`,
-          artifacts: persistedArtifacts,
-          evidence: [...new Set(result.artifacts.flatMap(({ evidenceIds }) => evidenceIds))],
-          usage: result.usage ?? {},
-          warnings: result.warnings,
-          ...(result.failure ? { failure: { code: result.failure, message: result.failure } } : {}),
+          runId,
+          reason: 'task_settled',
+          state: { taskId: result.id, attempt: effectiveAttempt, status: result.status },
         });
+        const event = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: `task.${result.status}`,
+          payload: {
+            taskId: result.id,
+            attempt: effectiveAttempt,
+            owner: result.owner,
+            criticality: result.criticality,
+            summary: result.summary,
+            artifacts: persistedArtifacts.map(({ artifactId, type, title, summary }) => ({
+              artifactId,
+              type,
+              title,
+              summary,
+            })),
+            ...(result.failure ? { failure: result.failure } : {}),
+          },
+        });
+        await enqueueOutboxMessage(transaction, {
+          id: this.options.createId(),
+          aggregateType: 'AgentRun',
+          aggregateId: runId,
+          topic: AGENT_RUN_COMMAND_TOPIC,
+          messageKey: runId,
+          payload: { command: 'run.execute', messageId: this.options.createId(), runId },
+          occurredAt: this.options.now(),
+        });
+        return event;
+      });
+    } catch (error) {
+      if (expectedAttempt < 1) throw error;
+      let fallback: Awaited<ReturnType<typeof appendRunEvent>> | undefined;
+      try {
+        fallback = await this.persistFailureAfterRollback(runId, result, expectedAttempt);
+      } catch {
+        throw error;
       }
+      if (!fallback) return false;
+      event = fallback;
+    }
+    if (!event) return false;
+    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
+    return true;
+  }
+
+  private async persistFailureAfterRollback(
+    runId: string,
+    result: SettledTask,
+    expectedAttempt: number,
+  ): Promise<Awaited<ReturnType<typeof appendRunEvent>> | undefined> {
+    return this.options.database.transaction(async (transaction) => {
+      const now = this.options.now();
+      const settled = await settleAgentTaskAttempt(transaction, {
+        taskId: result.id,
+        attempt: expectedAttempt,
+        status: 'failed',
+        now,
+      });
+      if (!settled) return undefined;
+      await forfeitActiveTaskBudgets(transaction, { taskIds: [result.id], now });
+      await transaction.insert(taskResults).values({
+        id: this.options.createId(),
+        taskId: result.id,
+        attempt: expectedAttempt,
+        status: 'failed',
+        summary: `${result.owner} result persistence failed`,
+        artifacts: [],
+        evidence: [],
+        usage: {},
+        warnings: ['No Artifact or Evidence was committed from the failed result.'],
+        failure: { code: 'persistence_failed', message: 'persistence_failed' },
+      });
       await appendCheckpoint(transaction, {
         id: this.options.createId(),
         runId,
         reason: 'task_settled',
-        state: { taskId: result.id, attempt: effectiveAttempt, status: result.status },
+        state: { taskId: result.id, attempt: expectedAttempt, status: 'failed' },
       });
       const event = await appendRunEvent(transaction, {
         id: this.options.createId(),
         runId,
-        eventType: `task.${result.status}`,
+        eventType: 'task.failed',
         payload: {
           taskId: result.id,
-          attempt: effectiveAttempt,
+          attempt: expectedAttempt,
           owner: result.owner,
           criticality: result.criticality,
-          summary: result.summary,
-          artifacts: persistedArtifacts.map(({ artifactId, type, title, summary }) => ({
-            artifactId,
-            type,
-            title,
-            summary,
-          })),
-          ...(result.failure ? { failure: result.failure } : {}),
+          summary: `${result.owner} result persistence failed`,
+          failure: 'persistence_failed',
         },
       });
       await enqueueOutboxMessage(transaction, {
@@ -162,13 +239,10 @@ export class SpecialistResultStore {
         topic: AGENT_RUN_COMMAND_TOPIC,
         messageKey: runId,
         payload: { command: 'run.execute', messageId: this.options.createId(), runId },
-        occurredAt: this.options.now(),
+        occurredAt: now,
       });
       return event;
     });
-    if (!event) return false;
-    await this.options.publisher.publish({ durable: true, event: toDurableEvent(event) });
-    return true;
   }
 
   public async updateTaskStatus(
