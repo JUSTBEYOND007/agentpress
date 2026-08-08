@@ -822,7 +822,10 @@ TODO：
       被模型伪选的相反场景。现已补充真实 PostgreSQL recovery 回归：绑定后资源表被篡改时恢复不重新读取
       resource，仍使用冻结 Context Pack；显式 v1 与模型返回 v2 时 selected 仍固定为显式 v1，并保留
       explicit/model/selected 三份 typed 事实。Skill revision 删除由 PostgreSQL `ON DELETE RESTRICT` 阻止；
-      revision 缺失的显式损坏注入与对应 fail-closed projection 仍待补齐。
+      revision 缺失也已补齐显式损坏注入：`PersistentToolBridge` 改用 left join 校验 binding，孤儿 revision
+      不再被误判为“零个 Skill”并放宽工具集合，而是以 `unauthorized_tool` fail closed；真实 PostgreSQL
+      fixture 临时禁用 FK trigger 注入孤儿 binding、验证拒绝后恢复 revision。当前总项只剩资源读取过程中断
+      的恢复投影矩阵，因此保持未勾选。
 - [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，

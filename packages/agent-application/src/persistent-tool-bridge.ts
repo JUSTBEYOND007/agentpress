@@ -222,15 +222,21 @@ export class PersistentToolBridge implements RuntimeToolFactory {
       .select({
         allowedTools: runSkillBindings.allowedTools,
         bindingHash: runSkillBindings.contentHash,
+        revisionId: skillRevisions.id,
         revisionHash: skillRevisions.contentHash,
       })
       .from(runSkillBindings)
-      .innerJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
+      .leftJoin(skillRevisions, eq(skillRevisions.id, runSkillBindings.skillRevisionId))
       .where(eq(runSkillBindings.runId, runId));
-    if (skillRows.some(({ bindingHash, revisionHash }) => bindingHash !== revisionHash)) {
+    if (
+      skillRows.some(
+        ({ bindingHash, revisionHash, revisionId }) =>
+          revisionId === null || bindingHash !== revisionHash,
+      )
+    ) {
       throw new ToolCallApplicationError(
         'unauthorized_tool',
-        'Agent Run Skill binding does not match its pinned revision',
+        'Agent Run Skill binding is missing or does not match its pinned revision',
       );
     }
     const policyDefinitions = this.options.registry

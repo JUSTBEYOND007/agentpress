@@ -31,7 +31,7 @@ import {
   ToolRuntimeError,
 } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -1575,6 +1575,49 @@ describeWithDatabase('Tool Call application flow', () => {
       name: 'ToolCallApplicationError',
       code: 'unauthorized_tool',
     });
+  });
+
+  it('fails closed when a persisted Skill binding revision is missing', async () => {
+    const runId = await createRunningRun();
+    const markdown =
+      '---\nid: missing-revision-skill\nversion: 1.0.0\ndescription: Detect missing revision\nallowedTools:\n  - workspace.search\n---\nUse the pinned revision.';
+    const contentHash = createHash('sha256').update(markdown).digest('hex');
+    const skillRevisionId = randomUUID();
+    const revision = {
+      id: skillRevisionId,
+      workspaceId,
+      skillId: 'missing-revision-skill',
+      version: '1.0.0',
+      content: markdown,
+      contentHash,
+      allowedTools: ['workspace.search'],
+    } as const;
+    await connection.db.insert(skillRevisions).values(revision);
+    await connection.db.insert(runSkillBindings).values({
+      runId,
+      skillRevisionId,
+      contentHash,
+      allowedTools: ['workspace.search'],
+    });
+    await connection.db.transaction(async (transaction) => {
+      await transaction.execute(sql`set local session_replication_role = replica`);
+      await transaction.delete(skillRevisions).where(eq(skillRevisions.id, skillRevisionId));
+    });
+
+    try {
+      await expect(
+        new PersistentToolBridge({
+          database: connection.db,
+          registry,
+          toolCalls: service,
+        }).createForRun(runId, ['workspace.read']),
+      ).rejects.toMatchObject({
+        name: 'ToolCallApplicationError',
+        code: 'unauthorized_tool',
+      });
+    } finally {
+      await connection.db.insert(skillRevisions).values(revision);
+    }
   });
 
   it('uses the capability catalog to expose only the semantically relevant tool set', async () => {
