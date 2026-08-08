@@ -159,8 +159,12 @@ original resource bytes, proving resource loading is not repeated. Normal Postgr
 policy prevents deleting a revision referenced by `run_skill_bindings` (`ON DELETE RESTRICT`). Explicit
 Skill selection wins when an untrusted selector returns a newer revision for the same Skill ID; the
 durable `skill.selection.completed` payload retains `explicit`, `model`, and final `selected` values.
-The remaining negative case is an explicitly injected missing-revision fact and its fail-closed public
-projection, which is still tracked in the local TODO.
+An explicitly injected missing-revision fact now fails closed in `PersistentToolBridge` rather than
+being mistaken for an empty Skill set. Initial resource-read interruption is separately injected with
+a real PostgreSQL table lock and session statement timeout: the Run-creation transaction leaves no
+Message, RootRequest, Run, Context Pack, or Skill Binding, and the same idempotency key succeeds after
+the lock is released. Recovery still reads only the already frozen Context Pack, so it has no resource
+read to retry and no second Skill recovery state machine.
 
 InkOS chapter recovery's retry boundary is represented by the existing `recoverSettlement` policy,
 not by another generation loop. It permits at most one replay-safe settlement, validates the settled

@@ -813,7 +813,7 @@ TODO：
       prompt injection、历史过期和 Skill 越权。
 - [x] 补齐 path traversal、非 UTF-8、单文件/总资源分别超限和发现后文件/hash 改变的资源边界测试；
       `013d7b8` 使用 fatal UTF-8 decode、独立预算和内容寻址 revision fail closed，`skill.ts` 保持 400 行。
-- [ ] 补齐恢复时 revision 缺失、资源读取中断、模型选择 Schema 非法/timeout、显式选择与模型选择冲突
+- [x] 补齐恢复时 revision 缺失、资源读取中断、模型选择 Schema 非法/timeout、显式选择与模型选择冲突
       的失败矩阵。
       模型预选现在隔离损坏/身份不匹配的 catalog revision：候选列表只包含可加载项，
       `skill.selection.completed.catalogFailures` 保留 `load_failed|identity_mismatch` typed 事实，
@@ -826,8 +826,12 @@ TODO：
       explicit/model/selected 三份 typed 事实。Skill revision 删除由 PostgreSQL `ON DELETE RESTRICT` 阻止；
       revision 缺失也已补齐显式损坏注入：`PersistentToolBridge` 改用 left join 校验 binding，孤儿 revision
       不再被误判为“零个 Skill”并放宽工具集合，而是以 `unauthorized_tool` fail closed；真实 PostgreSQL
-      fixture 临时禁用 FK trigger 注入孤儿 binding、验证拒绝后恢复 revision。当前总项只剩资源读取过程中断
-      的恢复投影矩阵，因此保持未勾选。
+      fixture 临时禁用 FK trigger 注入孤儿 binding、验证拒绝后恢复 revision。资源读取中断现在由
+      `skill-resource-interruption.integration.test.ts` 使用真实 PostgreSQL `ACCESS EXCLUSIVE` 表锁和
+      session `statement_timeout` 注入：读取不可变 resource row 失败时，创建事务不会留下 Message、
+      RootRequest、Run、Context Pack 或 Skill Binding；解除故障后同一 idempotency key 可安全重试并绑定
+      原始资源。恢复阶段继续只读冻结 Context Pack，不重新读取 resource table，因此没有新增 Skill
+      recovery manager 或第二套状态机。
 - [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，
