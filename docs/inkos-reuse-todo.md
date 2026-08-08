@@ -626,11 +626,11 @@ MCP JSON-RPC error 与工具消失也已收敛到 adapter：官方 SDK `McpError
 `connection_lost_after_dispatch/outcome_unknown`，不能被普通 protocol failure 吞掉。动态 tool-list revision
 通知与 Run 冻结版本的组合验收仍未完成。
 
-官方 SDK `McpServer`/linked transport 与 PostgreSQL ToolCall 的真实组合现已落在 `runtime-tools` 集成测试：
-`PersistentToolBridge` 执行 `web.search` 后，guarded output、server/tool/adapter revisions 和 succeeded
-settlement 写入 ledger；相同 providerToolCallId 重放时 Server handler 总执行次数保持 1。公开 durable event
-合同与 PostgreSQL replay 相等，RunPart 保留同一 MCP provenance。Runtime Tools 共 11 个测试通过；该证据
-不替代 Streamable HTTP + PostgreSQL 的同进程组合、浏览器投影或真实 Pi 目标模型调用。
+官方 SDK `McpServer`/Streamable HTTP 与 PostgreSQL ToolCall 的真实组合现已落在 `runtime-tools` 集成测试：
+`PersistentToolBridge` 经 TCP/HTTP 执行 `web.search` 后，guarded output、server/tool/adapter revisions 和
+succeeded settlement 写入 ledger；相同 providerToolCallId 重放时 Server handler 总执行次数保持 1。公开
+durable event 合同与 PostgreSQL replay 相等，RunPart 保留同一 MCP provenance。Runtime Tools 共 11 个
+测试通过；该证据不替代浏览器投影或真实 Pi 目标模型调用。
 
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
@@ -820,8 +820,8 @@ MCP manager。
       脱敏、拒绝后 session 健康、非 429 相反语义、401/403 初始化认证失败和非法 protocol handshake；
       ToolRegistry 19 个测试、29 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
       handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流、初始化失败和 JSON-RPC error；
-      Runtime Tools 11 个测试另覆盖官方 MCP Server -> PersistentToolBridge -> PostgreSQL settlement/replay
-      的单次执行与幂等重放；
+      Runtime Tools 11 个测试另覆盖官方 MCP Streamable HTTP Server -> PersistentToolBridge -> PostgreSQL
+      settlement/replay 的单次执行与幂等重放；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置

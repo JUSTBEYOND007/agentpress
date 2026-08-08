@@ -32,5 +32,9 @@
     "@agentpress/web-research": "workspace:*",
     "@sinclair/typebox": "catalog:",
     "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
+    "zod": "catalog:"
   }
 }

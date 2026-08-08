@@ -21,7 +21,7 @@ import {
   workspaces,
 } from '@agentpress/database';
 import {
-  createInMemoryBuiltInDefinitions,
+  createStreamableHttpDefinition,
   McpClientGateway,
   McpServerManager,
   registerBuiltInMcpTools,
@@ -29,7 +29,12 @@ import {
 import { ToolRegistry } from '@agentpress/tool-runtime';
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import {
+  startStreamableHttpSearchFixture,
+  type StreamableHttpSearchFixture,
+} from './fixtures/streamable-http-search-server.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -40,17 +45,7 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
   const workspaceId = randomUUID();
   const conversationId = randomUUID();
   const published: LiveRunEvent[] = [];
-  const search = vi.fn((request: unknown) =>
-    Promise.resolve([{ evidenceId: 'evidence-real-mcp', request }]),
-  );
   const manager = new McpServerManager();
-  for (const definition of createInMemoryBuiltInDefinitions({
-    web_research: search,
-    workspace_knowledge: search,
-    licensed_media: search,
-  })) {
-    manager.register(definition);
-  }
   const registry = new ToolRegistry();
   registerBuiltInMcpTools(registry, new McpClientGateway(manager));
   const service = new ToolCallService({
@@ -63,6 +58,7 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
       },
     },
   });
+  let fixture: StreamableHttpSearchFixture;
 
   beforeAll(async () => {
     await migrate(connection.db, {
@@ -83,14 +79,20 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
       workspaceId,
       title: 'MCP Composition',
     });
+    fixture = await startStreamableHttpSearchFixture();
+    manager.register(
+      createStreamableHttpDefinition({
+        serverId: 'web_research',
+        version: '1.0.0',
+        displayName: 'Web Research',
+        transport: { url: fixture.url },
+      }),
+    );
   });
 
   afterAll(async () => {
-    await Promise.all([
-      manager.stop('web_research'),
-      manager.stop('workspace_knowledge'),
-      manager.stop('licensed_media'),
-    ]);
+    await manager.stop('web_research');
+    await fixture.close();
     await connection.close();
   });
 
@@ -130,7 +132,7 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
         },
       ],
     });
-    expect(search).toHaveBeenCalledTimes(1);
+    expect(fixture.callCount()).toBe(1);
 
     await expect(
       connection.db
