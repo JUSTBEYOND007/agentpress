@@ -46,6 +46,14 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
   );
   const taskAttempt = positiveInteger(existing.taskAttempt ?? part.payload.taskAttempt);
   const durationMs = boundedDuration(existing.durationMs ?? part.payload.durationMs);
+  const transportRetryCount = boundedInteger(
+    existing.transportRetryCount ?? part.payload.transportRetryCount,
+    100,
+  );
+  const transportReconnectCount = boundedInteger(
+    existing.transportReconnectCount ?? part.payload.transportReconnectCount,
+    100,
+  );
   const outputReference = outputArtifactReference(
     Object.keys(existing).length ? existing.outputReference : part.payload.output,
   );
@@ -58,6 +66,12 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
     adapterRevision,
     ...(taskAttempt ? { taskAttempt } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(transportRetryCount !== undefined ? { transportRetryCount } : {}),
+    ...(transportReconnectCount !== undefined &&
+    transportRetryCount !== undefined &&
+    transportReconnectCount <= transportRetryCount
+      ? { transportReconnectCount }
+      : {}),
     argumentNames,
     argumentCount,
     ...(argumentSummary ? { argumentSummary } : {}),

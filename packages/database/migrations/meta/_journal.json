@@ -316,6 +316,20 @@
       "when": 1786190336431,
       "tag": "0044_low_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786191044338,
+      "tag": "0045_closed_rattler",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786191592179,
+      "tag": "0046_nice_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

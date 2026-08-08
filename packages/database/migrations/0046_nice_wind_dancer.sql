@@ -1,0 +1,3 @@
+ALTER TABLE "tool_calls" DROP CONSTRAINT "tool_calls_transport_retry_check";--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD COLUMN "transport_last_reconnect_ordinal" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "tool_calls" ADD CONSTRAINT "tool_calls_transport_retry_check" CHECK ("tool_calls"."transport_retry_count" >= 0 and "tool_calls"."transport_reconnect_count" >= 0 and "tool_calls"."transport_reconnect_count" <= "tool_calls"."transport_retry_count" and "tool_calls"."transport_last_reconnect_ordinal" >= 0 and "tool_calls"."transport_last_reconnect_ordinal" <= "tool_calls"."transport_retry_count");

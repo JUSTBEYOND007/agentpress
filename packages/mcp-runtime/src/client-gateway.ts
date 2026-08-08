@@ -10,7 +10,12 @@ import {
 import { ToolExecutionError } from '@agentpress/tool-runtime';
 
 import type { BuiltInMcpGateway } from './built-in-tools.js';
-import type { BuiltInMcpServerId, McpNotificationHandlers } from './contracts.js';
+import type {
+  BuiltInMcpServerId,
+  McpNotificationHandlers,
+  McpTransportAuditEvent,
+  McpTransportAuditObserver,
+} from './contracts.js';
 import type { McpServerManager } from './server-manager.js';
 
 type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
@@ -36,10 +41,13 @@ export class McpCallOutcomeUnknownError extends ToolExecutionError {
 }
 
 export class McpClientGateway implements BuiltInMcpGateway {
-  public constructor(private readonly manager: McpServerManager) {}
+  public constructor(
+    private readonly manager: McpServerManager,
+    private readonly observer?: McpTransportAuditObserver,
+  ) {}
 
   public async call(input: Parameters<BuiltInMcpGateway['call']>[0]): Promise<unknown> {
-    const client = await this.getClientBeforeCall(input.serverId, input.context.signal);
+    const client = await this.getClientBeforeCall(input);
     try {
       const result = await callTool(client, input);
       if (!this.manager.isCurrentClient(input.serverId, client)) {
@@ -160,16 +168,47 @@ export class McpClientGateway implements BuiltInMcpGateway {
   }
 
   private async getClientBeforeCall(
-    serverId: BuiltInMcpServerId,
-    signal: AbortSignal,
+    input: Parameters<BuiltInMcpGateway['call']>[0],
   ): Promise<Client> {
-    try {
-      return await this.manager.getClient(serverId);
-    } catch (error) {
-      throwIfAborted(signal);
-      if (!isConnectionFailure(error)) throw error;
-      return this.manager.getClient(serverId);
+    let retryOrdinal = 0;
+    const reconnecting = this.manager.state(input.serverId) === 'degraded';
+    if (reconnecting) {
+      retryOrdinal += 1;
+      await this.emitTransportEvent(input, 'retry_attempted', 'degraded_client', retryOrdinal);
     }
+    try {
+      const client = await this.manager.getClient(input.serverId);
+      if (reconnecting) {
+        await this.emitTransportEvent(input, 'reconnected', 'degraded_client', retryOrdinal);
+      }
+      return client;
+    } catch (error) {
+      throwIfAborted(input.context.signal);
+      if (!isConnectionFailure(error)) throw error;
+      retryOrdinal += 1;
+      await this.emitTransportEvent(input, 'retry_attempted', 'connect_failure', retryOrdinal);
+      const client = await this.manager.getClient(input.serverId);
+      await this.emitTransportEvent(input, 'reconnected', 'connect_failure', retryOrdinal);
+      return client;
+    }
+  }
+
+  private async emitTransportEvent(
+    input: Parameters<BuiltInMcpGateway['call']>[0],
+    event: McpTransportAuditEvent['event'],
+    reason: McpTransportAuditEvent['reason'],
+    retryOrdinal: number,
+  ): Promise<void> {
+    await this.observer?.onTransportEvent({
+      event,
+      phase: 'before_dispatch',
+      reason,
+      retryOrdinal,
+      serverId: input.serverId,
+      toolName: input.toolName,
+      runId: input.context.runId,
+      toolCallId: input.context.toolCallId,
+    });
   }
 }
 

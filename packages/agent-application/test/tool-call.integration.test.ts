@@ -26,7 +26,7 @@ import {
 } from '@agentpress/database';
 import { hashToolArguments, ToolExecutionError, ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -36,6 +36,7 @@ import {
   RunProjectionService,
   ToolEvidenceStore,
   ToolCallService,
+  ToolTransportAuditService,
   type LiveRunEvent,
 } from '../src/index.js';
 import { projectRunParts } from '../src/run-projection.js';
@@ -403,6 +404,130 @@ describeWithDatabase('Tool Call application flow', () => {
         .from(toolCalls)
         .where(eq(toolCalls.id, proposal.toolCallId)),
     ).resolves.toEqual([{ status: 'proposed' }]);
+  });
+
+  it('persists idempotent MCP reconnect audit facts with live and replay parity', async () => {
+    const publishedFrom = published.length;
+    const transportAudit = new ToolTransportAuditService({
+      database: connection.db,
+      publisher: {
+        publish(event) {
+          published.push(event);
+          return Promise.resolve();
+        },
+      },
+    });
+    const auditResults: { readonly persisted: boolean }[] = [];
+    registry.register({
+      toolId: 'web.audited_search',
+      version: '1.0.0',
+      owner: 'research',
+      description: 'Search with a reconnect audit fixture',
+      transport: {
+        kind: 'mcp',
+        serverId: 'web_research',
+        serverRevision: '1.0.0',
+        toolName: 'search',
+        toolRevision: '1.0.0',
+        adapterRevision: 'agentpress-mcp-adapter-v1',
+      },
+      capabilities: ['web.research'],
+      inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+      outputSchema: Type.Object({ result: Type.String() }, { additionalProperties: false }),
+      risk: 'read_only',
+      sideEffect: 'No side effect',
+      idempotency: 'none',
+      timeoutMs: 1_000,
+      estimateCost: () => ({}),
+      execute: async (_input, context) => {
+        const retry = {
+          runId: context.runId,
+          toolCallId: context.toolCallId,
+          serverId: 'web_research',
+          toolName: 'search',
+          retryOrdinal: 1,
+          phase: 'before_dispatch',
+          reason: 'connect_failure',
+        } as const;
+        auditResults.push(await transportAudit.record({ ...retry, event: 'retry_attempted' }));
+        auditResults.push(await transportAudit.record({ ...retry, event: 'retry_attempted' }));
+        auditResults.push(
+          await transportAudit.record({ ...retry, event: 'retry_attempted', retryOrdinal: 2 }),
+        );
+        auditResults.push(
+          await transportAudit.record({ ...retry, event: 'reconnected', retryOrdinal: 2 }),
+        );
+        auditResults.push(
+          await transportAudit.record({ ...retry, event: 'reconnected', retryOrdinal: 2 }),
+        );
+        return { result: 'ok' };
+      },
+    });
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'web.audited_search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'retry audit' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['web.research']),
+    });
+
+    await expect(service.execute(proposal.toolCallId)).resolves.toMatchObject({
+      status: 'succeeded',
+    });
+    expect(auditResults).toMatchObject([
+      { persisted: true },
+      { persisted: false },
+      { persisted: true },
+      { persisted: true },
+      { persisted: false },
+    ]);
+    await expect(
+      connection.db
+        .select({
+          retryCount: toolCalls.transportRetryCount,
+          reconnectCount: toolCalls.transportReconnectCount,
+        })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([{ retryCount: 2, reconnectCount: 1 }]);
+    const auditEvents = await connection.db
+      .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, runId))
+      .orderBy(asc(runEvents.sequence));
+    expect(
+      auditEvents.filter(({ eventType }) => eventType.startsWith('tool.transport_')),
+    ).toMatchObject([
+      {
+        eventType: 'tool.transport_retrying',
+        payload: { transportRetryCount: 1, transportReconnectCount: 0 },
+      },
+      {
+        eventType: 'tool.transport_retrying',
+        payload: { transportRetryCount: 2, transportReconnectCount: 0 },
+      },
+      {
+        eventType: 'tool.transport_reconnected',
+        payload: { transportRetryCount: 2, transportReconnectCount: 1 },
+      },
+    ]);
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const livePart = projectRunParts(liveEvents).find(
+      ({ correlationId }) => correlationId === `tool:${proposal.toolCallId}`,
+    );
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const replayPart = replay?.parts.find(
+      ({ correlationId }) => correlationId === `tool:${proposal.toolCallId}`,
+    );
+    expect(replayPart).toEqual(livePart);
+    expect(replayPart?.payload).toMatchObject({
+      transportRetryCount: 2,
+      transportReconnectCount: 1,
+    });
   });
 
   it('rolls back succeeded settlement when Evidence projection fails', async () => {

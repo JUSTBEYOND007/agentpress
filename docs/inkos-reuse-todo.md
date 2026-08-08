@@ -108,7 +108,10 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       input Schema 生成字段名、required、Schema/实际类型及字符串/数组/对象规模，只把该版本化摘要写入
       durable RunEvent；受保护的 ToolCall ledger 继续持有执行所需原始参数。PostgreSQL migration 为历史
       ToolCall 回填不伪造字段类型的空 v1 摘要，Web 只消费有界结构并在按需详情展示，参数值不会进入
-      transcript。retry 审计仍未完成，因此总项保持未勾选；redacted failure 已单独完成。
+      transcript。retry/reconnect 审计已完成：MCP gateway 只审计 dispatch 前的连接探测，ToolTransportAuditService
+      以 `tool.transport_retrying`/`tool.transport_reconnected` durable event 和 ledger 计数保证 ordinal
+      幂等；dispatch 后断线仍只结算 `outcome_unknown`，不会自动重放。完整断线/旧结果/浏览器矩阵仍未完成，
+      因此总项保持未勾选；redacted failure 已单独完成。
       其中 redacted failure 已完成：ToolCall settlement 依据 typed `ToolRuntimeError`、
       `ToolExecutionError` 和 side-effect 风险生成 `code/messageKey/retryable`；ledger 只在 protected
       failure 中保留截断后的诊断，RunEvent/live/replay 只携带公共结构，Web 对旧的非结构化 failure
@@ -126,9 +129,10 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       当前 `ToolDefinition.transport` 已固定内置 MCP 的 server/tool/revision/adapter，ToolCall ledger 与
       `tool.proposed`/`tool.approval_requested` durable event 会保存同一 PostgreSQL JSONB 快照；执行与
       idempotency replay 都校验当前定义和持久化来源完全一致，revision drift 会在 provider 调用前以
-      `approval_mismatch` fail closed。Tool Registry、三个内置 MCP 工具和 21 个 ToolCall PostgreSQL
-      集成场景已通过；attempt、authoritative timestamps、retry/reconnect 和完整 output reference 仍未
-      补齐，redacted failure 已完成，因此总项保持未勾选。
+      `approval_mismatch` fail closed。Tool Registry、三个内置 MCP 工具和 23 个 ToolCall PostgreSQL
+      集成场景已通过；retry/reconnect 已由独立 audit owner 固化为 durable 计数和事件，并通过真实 HTTP
+      reconnect fixture；attempt、authoritative timestamps 和完整 output reference 仍未补齐，redacted
+      failure 已完成，因此总项保持未勾选。
 - [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影独立 `outcome_unknown`；
       不压成普通 error/completed，也不自动重放可能有副作用的调用。
       当前 `tool.outcome_unknown` 已由 Agent Application projector 投影为独立 warning part，并写入

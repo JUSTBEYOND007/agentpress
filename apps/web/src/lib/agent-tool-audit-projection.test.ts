@@ -109,6 +109,44 @@ describe('MCP tool audit projection', () => {
     });
     expect(JSON.stringify(projected)).not.toContain('must-not-survive');
   });
+
+  it('keeps only ordered bounded reconnect counters', () => {
+    const base = {
+      kind: 'mcp' as const,
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    expect(
+      toolActivityAudit(
+        activity({
+          transportProvenance: base,
+          transportRetryCount: 2,
+          transportReconnectCount: 2,
+        }),
+      ),
+    ).toMatchObject({ transportRetryCount: 2, transportReconnectCount: 2 });
+    expect(
+      toolActivityAudit(
+        activity({
+          transportProvenance: base,
+          transportRetryCount: 1,
+          transportReconnectCount: 2,
+        }),
+      ),
+    ).toMatchObject({ transportRetryCount: 1 });
+    expect(
+      toolActivityAudit(
+        activity({
+          transportProvenance: base,
+          transportRetryCount: 101,
+          transportReconnectCount: 0,
+        }),
+      )?.transportRetryCount,
+    ).toBeUndefined();
+  });
 });
 
 function activity(payload: Readonly<Record<string, unknown>>): RunPart {

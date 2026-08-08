@@ -105,6 +105,8 @@ export type ToolActivityAudit = {
   readonly adapterRevision: string;
   readonly taskAttempt?: number;
   readonly durationMs?: number;
+  readonly transportRetryCount?: number;
+  readonly transportReconnectCount?: number;
   readonly argumentNames: readonly string[];
   readonly argumentCount: number;
   readonly argumentSummary?: {

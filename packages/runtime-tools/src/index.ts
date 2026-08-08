@@ -5,6 +5,7 @@ import {
   PersistentToolBridge,
   registerContextTools,
   ToolCallService,
+  ToolTransportAuditService,
   type RunEventPublisher,
 } from '@agentpress/agent-application';
 import {
@@ -49,16 +50,24 @@ export function createBuiltInToolRuntime(
   const handlers = createHandlers(database);
   for (const definition of createInMemoryBuiltInDefinitions(handlers)) manager.register(definition);
   const registry = new ToolRegistry();
-  registerBuiltInMcpTools(registry, new McpClientGateway(manager), {
-    writeOversizedOutputArtifact: ({ value, bytes, context }) =>
-      persistToolOutputArtifact(database, {
-        value,
-        bytes,
-        runId: context.runId,
-        ...(context.taskId ? { taskId: context.taskId } : {}),
-        toolCallId: context.toolCallId,
-      }),
-  });
+  const toolCalls = new ToolCallService({ database, publisher, registry });
+  const transportAudit = new ToolTransportAuditService({ database, publisher });
+  registerBuiltInMcpTools(
+    registry,
+    new McpClientGateway(manager, {
+      onTransportEvent: (event) => transportAudit.record(event).then(() => undefined),
+    }),
+    {
+      writeOversizedOutputArtifact: ({ value, bytes, context }) =>
+        persistToolOutputArtifact(database, {
+          value,
+          bytes,
+          runId: context.runId,
+          ...(context.taskId ? { taskId: context.taskId } : {}),
+          toolCallId: context.toolCallId,
+        }),
+    },
+  );
   registerArticleTools(registry, database, new ProposalService(database));
   registerContextTools(registry, new ContextGovernanceService(database));
   const environment = loadWorkerEnvironment();
@@ -125,7 +134,6 @@ export function createBuiltInToolRuntime(
       });
     },
   });
-  const toolCalls = new ToolCallService({ database, publisher, registry });
   return {
     bridge: new PersistentToolBridge({ database, registry, toolCalls }),
     manager,

@@ -37,6 +37,7 @@ export * from './execution-fact-cache.js';
 export * from './terminal-outcome-policy.js';
 export * from './tool-call-service.js';
 export * from './tool-evidence-store.js';
+export * from './tool-transport-audit-service.js';
 export * from './specialist-task-contract.js';
 export * from './specialist-result-store.js';
 export * from './agent-registry.js';

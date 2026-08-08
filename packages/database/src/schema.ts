@@ -1281,6 +1281,11 @@ export const toolCalls = pgTable(
       .notNull()
       .default({ schemaVersion: 1, fieldCount: 0, additionalFieldCount: 0, fields: [] }),
     argumentsHash: varchar('arguments_hash', { length: 80 }).notNull(),
+    transportRetryCount: integer('transport_retry_count').notNull().default(0),
+    transportReconnectCount: integer('transport_reconnect_count').notNull().default(0),
+    transportLastReconnectOrdinal: integer('transport_last_reconnect_ordinal')
+      .notNull()
+      .default(0),
     risk: toolRiskEnum('risk').$type<ToolRisk>().notNull(),
     sideEffect: text('side_effect').notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 200 }),
@@ -1314,6 +1319,10 @@ export const toolCalls = pgTable(
     check(
       'tool_calls_task_operation_shape_check',
       sql`(${table.taskOperationKey} is null and ${table.taskOperationOrdinal} is null) or (${table.taskId} is not null and ${table.taskAttempt} is not null and ${table.taskOperationKey} is not null and ${table.taskOperationOrdinal} is not null and ${table.idempotencyKey} = ${table.taskOperationKey})`,
+    ),
+    check(
+      'tool_calls_transport_retry_check',
+      sql`${table.transportRetryCount} >= 0 and ${table.transportReconnectCount} >= 0 and ${table.transportReconnectCount} <= ${table.transportRetryCount} and ${table.transportLastReconnectOrdinal} >= 0 and ${table.transportLastReconnectOrdinal} <= ${table.transportRetryCount}`,
     ),
   ],
 );

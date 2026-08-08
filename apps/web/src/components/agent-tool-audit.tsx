@@ -28,6 +28,12 @@ export function AgentToolAudit({
             <dd>{audit.taskAttempt}</dd>
           </div>
         ) : null}
+        {audit.transportRetryCount ? (
+          <div>
+            <dt>连接恢复</dt>
+            <dd>{`${String(audit.transportRetryCount)} 次重试，${String(audit.transportReconnectCount ?? 0)} 次重连`}</dd>
+          </div>
+        ) : null}
         {audit.argumentCount > 0 ? (
           <div>
             <dt>参数</dt>

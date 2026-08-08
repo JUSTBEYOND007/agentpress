@@ -50,3 +50,18 @@ export type McpNotificationHandlers = {
   ) => void | Promise<void>;
   readonly toolListChanged?: (notification: ToolListChangedNotification) => void | Promise<void>;
 };
+
+export type McpTransportAuditEvent = {
+  readonly event: 'retry_attempted' | 'reconnected';
+  readonly phase: 'before_dispatch';
+  readonly reason: 'connect_failure' | 'degraded_client';
+  readonly retryOrdinal: number;
+  readonly serverId: BuiltInMcpServerId;
+  readonly toolName: string;
+  readonly runId: string;
+  readonly toolCallId: string;
+};
+
+export type McpTransportAuditObserver = {
+  readonly onTransportEvent: (event: McpTransportAuditEvent) => Promise<void>;
+};

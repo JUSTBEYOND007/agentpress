@@ -234,6 +234,8 @@ describe('Agent run process disclosure', () => {
                     taskAttempt: 2,
                     argumentNames: ['limit', 'query'],
                     argumentCount: 2,
+                    transportRetryCount: 1,
+                    transportReconnectCount: 1,
                     argumentSummary: {
                       schemaVersion: 1,
                       fieldCount: 2,
@@ -275,6 +277,7 @@ describe('Agent run process disclosure', () => {
     expect(markup).toContain('agentpress-mcp-adapter-v1');
     expect(markup).toContain('limit (integer)');
     expect(markup).toContain('query (string, 长度 16)');
+    expect(markup).toContain('1 次重试，1 次重连');
     expect(markup).toContain('artifact://artifact-1/versions/1');
     expect(markup).not.toContain('top-secret-query');
   });

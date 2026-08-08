@@ -28,7 +28,13 @@ describe('MCP client gateway', () => {
         );
       },
     });
-    const gateway = new McpClientGateway(manager);
+    const transportEvents: unknown[] = [];
+    const gateway = new McpClientGateway(manager, {
+      onTransportEvent(event) {
+        transportEvents.push(event);
+        return Promise.resolve();
+      },
+    });
     await expect(gateway.call(toolCallInput('outcome-unknown'))).rejects.toMatchObject({
       name: 'McpCallOutcomeUnknownError',
       serverId: 'web_research',
@@ -48,6 +54,28 @@ describe('MCP client gateway', () => {
     expect(firstClose).toHaveBeenCalledTimes(1);
     expect(connection).toBe(2);
     expect(manager.state('web_research')).toBe('ready');
+    expect(transportEvents).toEqual([
+      {
+        event: 'retry_attempted',
+        phase: 'before_dispatch',
+        reason: 'degraded_client',
+        retryOrdinal: 1,
+        serverId: 'web_research',
+        toolName: 'search',
+        runId: 'run',
+        toolCallId: 'next-logical-call',
+      },
+      {
+        event: 'reconnected',
+        phase: 'before_dispatch',
+        reason: 'degraded_client',
+        retryOrdinal: 1,
+        serverId: 'web_research',
+        toolName: 'search',
+        runId: 'run',
+        toolCallId: 'next-logical-call',
+      },
+    ]);
   });
 
   it('allows one connection probe before invoking a tool', async () => {
@@ -66,9 +94,81 @@ describe('MCP client gateway', () => {
       },
     });
 
-    await expect(new McpClientGateway(manager).call(toolCallInput())).resolves.toBe('ok');
+    const transportEvents: unknown[] = [];
+    await expect(
+      new McpClientGateway(manager, {
+        onTransportEvent(event) {
+          transportEvents.push(event);
+          return Promise.resolve();
+        },
+      }).call(toolCallInput()),
+    ).resolves.toBe('ok');
     expect(connection).toBe(2);
     expect(callTool).toHaveBeenCalledTimes(1);
+    expect(transportEvents).toEqual([
+      expect.objectContaining({
+        event: 'retry_attempted',
+        phase: 'before_dispatch',
+        reason: 'connect_failure',
+        retryOrdinal: 1,
+        toolCallId: 'call',
+      }),
+      expect.objectContaining({
+        event: 'reconnected',
+        phase: 'before_dispatch',
+        reason: 'connect_failure',
+        retryOrdinal: 1,
+        toolCallId: 'call',
+      }),
+    ]);
+  });
+
+  it('audits a failed degraded reconnect before the connection probe succeeds', async () => {
+    const callTool = vi.fn(() => Promise.resolve({ structuredContent: { value: 'ok' } }));
+    const oldClient = { close: () => Promise.resolve() } as unknown as Client;
+    let connection = 0;
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => {
+        connection += 1;
+        if (connection === 1) return Promise.resolve(oldClient);
+        if (connection === 2) return Promise.reject(new Error('fetch failed'));
+        return Promise.resolve({ callTool, close: () => Promise.resolve() } as unknown as Client);
+      },
+    });
+    await manager.getClient('web_research');
+    await manager.markDegraded('web_research');
+    const transportEvents: unknown[] = [];
+
+    await expect(
+      new McpClientGateway(manager, {
+        onTransportEvent(event) {
+          transportEvents.push(event);
+          return Promise.resolve();
+        },
+      }).call(toolCallInput('degraded-probe')),
+    ).resolves.toBe('ok');
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(transportEvents).toEqual([
+      expect.objectContaining({
+        event: 'retry_attempted',
+        reason: 'degraded_client',
+        retryOrdinal: 1,
+      }),
+      expect.objectContaining({
+        event: 'retry_attempted',
+        reason: 'connect_failure',
+        retryOrdinal: 2,
+      }),
+      expect.objectContaining({
+        event: 'reconnected',
+        reason: 'connect_failure',
+        retryOrdinal: 2,
+      }),
+    ]);
   });
 
   it('does not retire the current client for a non-connection tool error', async () => {
@@ -175,10 +275,14 @@ describe('MCP client gateway', () => {
       createClient: create,
     });
 
+    const onTransportEvent = vi.fn(() => Promise.resolve());
     await expect(
-      new McpClientGateway(manager).call(toolCallInput('cancelled', controller.signal)),
+      new McpClientGateway(manager, { onTransportEvent }).call(
+        toolCallInput('cancelled', controller.signal),
+      ),
     ).rejects.toBe(aborted);
     expect(create).toHaveBeenCalledTimes(1);
+    expect(onTransportEvent).not.toHaveBeenCalled();
   });
 
   it('sorts discovered tools independently of server response order', async () => {
