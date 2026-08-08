@@ -44,6 +44,7 @@ export function createStreamableHttpDefinition(input: {
   readonly serverId: BuiltInMcpServerId;
   readonly version: string;
   readonly displayName: string;
+  readonly requiredCredentialKeys?: readonly string[];
   readonly transport: StreamableHttpMcpOptions;
 }): McpServerDefinition {
   validateBuiltInMcpUrl(input.transport.url);
@@ -51,6 +52,9 @@ export function createStreamableHttpDefinition(input: {
     serverId: input.serverId,
     version: input.version,
     displayName: input.displayName,
+    ...(input.requiredCredentialKeys
+      ? { requiredCredentialKeys: input.requiredCredentialKeys }
+      : {}),
     createClient: () => createStreamableHttpClient(input.transport),
   };
 }

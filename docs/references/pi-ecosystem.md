@@ -528,6 +528,13 @@ the recovered Run completes without degradation. This is an AgentPress adaptatio
 boundary, not copied InkOS code; `packages/database/src/schema.ts` and migration `0047_bent_serpent_society.sql`
 own the durable invalidation fact.
 
+MCP configuration now has an explicit adapter boundary for required credentials. `McpServerDefinition`
+declares only credential key names; `McpServerManager` receives host-owned values, rejects missing or blank
+keys before `createClient`, and raises `McpCredentialConfigurationError` without recording a reconnect
+failure or exposing secret values. The lifecycle opposite-path coverage is in
+`packages/mcp-runtime/test/server-manager.test.ts`; credentials remain configuration input rather than a
+Domain fact or consumer event.
+
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
 ### Implemented InkOS behavior baseline

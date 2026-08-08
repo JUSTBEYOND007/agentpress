@@ -14,6 +14,8 @@ export type McpServerDefinition = {
   readonly serverId: BuiltInMcpServerId;
   readonly version: string;
   readonly displayName: string;
+  /** Names are configuration keys only; values never enter public errors or events. */
+  readonly requiredCredentialKeys?: readonly string[];
   readonly createClient: () => Promise<Client>;
 };
 

@@ -4,7 +4,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { describe, expect, it, vi } from 'vitest';
 
-import { McpServerManager } from '../src/index.js';
+import { McpCredentialConfigurationError, McpServerManager } from '../src/index.js';
 
 function fakeClient(close = vi.fn(() => Promise.resolve())): Client {
   return { close } as unknown as Client;
@@ -136,6 +136,49 @@ describe('MCP Server lifecycle', () => {
     }
     expect(createClient).toHaveBeenCalledTimes(4);
     expect(manager.state('web_research')).toBe('degraded');
+  });
+
+  it('fails closed for missing declared credentials without opening reconnect circuit', async () => {
+    const createClient = vi.fn(() => Promise.resolve(fakeClient()));
+    const manager = new McpServerManager({
+      reconnectFailureThreshold: 1,
+      credentialValues: { MCP_TOKEN: '   ' },
+    });
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      requiredCredentialKeys: ['MCP_TOKEN', 'MCP_SECRET'],
+      createClient,
+    });
+
+    await expect(manager.getClient('web_research')).rejects.toMatchObject({
+      name: 'McpCredentialConfigurationError',
+      serverId: 'web_research',
+      missingKeys: ['MCP_TOKEN', 'MCP_SECRET'],
+    } satisfies Partial<McpCredentialConfigurationError>);
+    expect(createClient).not.toHaveBeenCalled();
+    expect(manager.state('web_research')).toBe('idle');
+    await expect(manager.getClient('web_research')).rejects.toThrow(
+      McpCredentialConfigurationError,
+    );
+  });
+
+  it('allows startup when every declared credential is non-empty', async () => {
+    const client = fakeClient();
+    const manager = new McpServerManager({
+      credentialValues: { MCP_TOKEN: 'configured', MCP_SECRET: 'configured' },
+    });
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      requiredCredentialKeys: ['MCP_TOKEN', 'MCP_SECRET'],
+      createClient: () => Promise.resolve(client),
+    });
+
+    await expect(manager.getClient('web_research')).resolves.toBe(client);
+    expect(manager.state('web_research')).toBe('ready');
   });
 
   it('lists registered built-ins in stable order', () => {

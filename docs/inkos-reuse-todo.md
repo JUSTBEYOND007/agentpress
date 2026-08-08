@@ -629,12 +629,16 @@ MCP 初始化失败也已按 dispatch 事实分流：官方 SDK 在 `Client.conn
 `initialization_failed_before_dispatch`，绝不因工具是 external write 而变为 `outcome_unknown`。真实 HTTP
 fixture 分别覆盖无 Authorization 的 401、携带 `Bearer expired` 的 403 和不支持 protocol version，均只
 发出一次 initialize 且 `tools/call=0`；PostgreSQL ledger、live/replay 与 Web fail-closed 投影已覆盖。
-具体内置 Server 的“配置声明凭据必需但缺失”校验仍未完成。
+具体内置 Server 的配置边界也已补齐：`McpServerDefinition.requiredCredentialKeys` 只声明配置键名，
+`McpServerManager` 在创建 client 前用 host-provided `credentialValues` fail closed；缺失/空白配置抛出
+typed `McpCredentialConfigurationError`，不调用远端、不进入 reconnect circuit，也不把凭据值放入错误。
+`server-manager.test.ts` 覆盖缺失和完整配置的相反语义；真实部署仍需由配置 adapter 注入值，Domain 不读取环境变量。
 
 MCP reconnect circuit 现在只累计共享 classifier 证明的连接错误。真实关闭 TCP endpoint 会进行一次初始
 连接和一次安全 probe，然后以 `connection_unavailable_before_dispatch` 失败；连续认证或协议拒绝不会打开
 circuit，第四次仍保持相同 typed authentication/initialization failure。连接拒绝的相反语义测试继续证明
-达到阈值会开 circuit 并在 cooldown 后只允许一次 probe。具体内置 Server 的本地必需凭据配置校验仍未完成。
+达到阈值会开 circuit 并在 cooldown 后只允许一次 probe。具体内置 Server 的本地必需凭据配置校验已由
+`requiredCredentialKeys` + host resolver 完成；远端认证/握手失败仍按 transport classifier 处理。
 
 MCP Approval 拒绝沿用同一 ToolCall ledger，没有另建 MCP 审批路径：测试型 external-write MCP Tool 在
 `awaiting_approval` 被拒绝后结算为 `tool.denied`，provider 执行次数为 0，持久化 transport revisions 不变，

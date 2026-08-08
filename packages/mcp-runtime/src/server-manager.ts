@@ -16,10 +16,21 @@ export class McpCircuitOpenError extends Error {
   }
 }
 
+export class McpCredentialConfigurationError extends Error {
+  public constructor(
+    public readonly serverId: BuiltInMcpServerId,
+    public readonly missingKeys: readonly string[],
+  ) {
+    super(`MCP Server ${serverId} is missing required credentials`);
+    this.name = 'McpCredentialConfigurationError';
+  }
+}
+
 export type McpServerManagerOptions = {
   readonly reconnectFailureThreshold?: number;
   readonly reconnectCooldownMs?: number;
   readonly now?: () => Date;
+  readonly credentialValues?: Readonly<Record<string, string | undefined>>;
 };
 
 export class McpServerManager {
@@ -34,11 +45,13 @@ export class McpServerManager {
   private readonly failureThreshold: number;
   private readonly cooldownMs: number;
   private readonly now: () => Date;
+  private readonly credentialValues: Readonly<Record<string, string | undefined>>;
 
   public constructor(options: McpServerManagerOptions = {}) {
     this.failureThreshold = options.reconnectFailureThreshold ?? 3;
     this.cooldownMs = options.reconnectCooldownMs ?? 30_000;
     this.now = options.now ?? (() => new Date());
+    this.credentialValues = options.credentialValues ?? {};
     if (!Number.isSafeInteger(this.failureThreshold) || this.failureThreshold < 1) {
       throw new RangeError('MCP reconnect failure threshold must be positive');
     }
@@ -78,6 +91,7 @@ export class McpServerManager {
     if (!definition) {
       throw new Error(`MCP Server ${serverId} is not registered`);
     }
+    this.assertCredentials(definition);
     this.assertCircuitClosed(serverId);
     this.states.set(serverId, 'starting');
     const start = (async () => {
@@ -131,6 +145,16 @@ export class McpServerManager {
     const retryAt = new Date(failure.openedAt.getTime() + this.cooldownMs);
     if (retryAt.getTime() > this.now().getTime()) throw new McpCircuitOpenError(serverId, retryAt);
     this.failures.delete(serverId);
+  }
+
+  private assertCredentials(definition: McpServerDefinition): void {
+    const missing = (definition.requiredCredentialKeys ?? []).filter((key) => {
+      const value = this.credentialValues[key];
+      return value === undefined || value.trim() === '';
+    });
+    if (missing.length > 0) {
+      throw new McpCredentialConfigurationError(definition.serverId, missing);
+    }
   }
 
   private recordFailure(serverId: BuiltInMcpServerId): void {
