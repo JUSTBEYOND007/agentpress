@@ -147,6 +147,47 @@ describe('MCP tool audit projection', () => {
       )?.transportRetryCount,
     ).toBeUndefined();
   });
+
+  it('keeps only bounded Evidence output references in audit detail', () => {
+    const base = {
+      kind: 'mcp' as const,
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    const projected = toolActivityAudit(
+      activity({
+        transportProvenance: base,
+        evidenceReferences: [
+          {
+            evidenceId: 'evidence-1',
+            title: 'Primary source',
+            source: 'https://example.test/source',
+            sourceRevision: 'sha256:source',
+            excerpt: 'must-not-survive',
+          },
+          {
+            evidenceId: 'evidence-2',
+            title: 'x'.repeat(241),
+            source: 'https://example.test/invalid',
+            sourceRevision: 'sha256:invalid',
+          },
+        ],
+      }),
+    );
+
+    expect(projected?.evidenceReferences).toEqual([
+      {
+        evidenceId: 'evidence-1',
+        title: 'Primary source',
+        source: 'https://example.test/source',
+        sourceRevision: 'sha256:source',
+      },
+    ]);
+    expect(JSON.stringify(projected)).not.toContain('must-not-survive');
+  });
 });
 
 function activity(payload: Readonly<Record<string, unknown>>): RunPart {

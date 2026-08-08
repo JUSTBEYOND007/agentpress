@@ -57,6 +57,9 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
   const outputReference = outputArtifactReference(
     Object.keys(existing).length ? existing.outputReference : part.payload.output,
   );
+  const evidenceReferences = boundedEvidenceReferences(
+    Object.keys(existing).length ? existing.evidenceReferences : part.payload.evidenceReferences,
+  );
   return {
     kind: 'mcp',
     serverId,
@@ -76,7 +79,24 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
     argumentCount,
     ...(argumentSummary ? { argumentSummary } : {}),
     ...(outputReference ? { outputReference } : {}),
+    ...(evidenceReferences.length > 0 ? { evidenceReferences } : {}),
   };
+}
+
+function boundedEvidenceReferences(
+  value: unknown,
+): NonNullable<ToolActivityAudit['evidenceReferences']> {
+  if (!Array.isArray(value) || value.length > 32) return [];
+  return value.flatMap((candidate) => {
+    const reference = asRecord(candidate);
+    const evidenceId = boundedString(reference, 'evidenceId');
+    const title = boundedString(reference, 'title');
+    const source = boundedString(reference, 'source');
+    const sourceRevision = boundedString(reference, 'sourceRevision');
+    return evidenceId && title && source && sourceRevision
+      ? [{ evidenceId, title, source, sourceRevision }]
+      : [];
+  });
 }
 
 function boundedArgumentSummary(value: unknown): ToolActivityAudit['argumentSummary'] | undefined {

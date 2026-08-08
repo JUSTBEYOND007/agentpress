@@ -51,6 +51,12 @@ export function AgentToolAudit({
             <dd>{audit.outputReference.uri ?? audit.outputReference.artifactId}</dd>
           </div>
         ) : null}
+        {audit.evidenceReferences?.length ? (
+          <div>
+            <dt>证据引用</dt>
+            <dd>{audit.evidenceReferences.map(({ title }) => title).join('、')}</dd>
+          </div>
+        ) : null}
       </dl>
     </details>
   );

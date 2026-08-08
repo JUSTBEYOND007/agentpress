@@ -128,6 +128,12 @@ export type ToolActivityAudit = {
     readonly versionId?: string;
     readonly uri?: string;
   };
+  readonly evidenceReferences?: readonly {
+    readonly evidenceId: string;
+    readonly title: string;
+    readonly source: string;
+    readonly sourceRevision: string;
+  }[];
 };
 
 export type ConsumerExecutionItem =
