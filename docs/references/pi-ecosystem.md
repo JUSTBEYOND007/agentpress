@@ -173,6 +173,13 @@ expression tag removal; PDF extraction continues through `unpdf@1.8.0`. Provider
 untrusted and must become Evidence before a ResearchBrief claim can cite it. Search provider fields
 stay behind `runtime-tools`/MCP adapters and do not enter the domain contract.
 
+The hostile-page boundary is covered across domains, not only by a string classifier. A PostgreSQL
+integration runs the real Pi research failure path with an Evidence excerpt instructing the agent to
+bind a Skill and publish an article. The resulting ResearchBrief remains claim-free, the ToolCall
+ledger contains only the original `web.search`, and both `run_skill_bindings` and `edit_proposals`
+remain empty. Untrusted source text therefore cannot manufacture host capabilities or production
+facts.
+
 The target-model workflow gate exposed a provider-adapter gap: the local Google News plus Chinese
 Wikipedia implementation returned successful empty arrays for technical documentation queries, so
 the Researcher repeated 8-12 searches and reached its runtime deadline while already emitting

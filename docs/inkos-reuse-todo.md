@@ -865,7 +865,9 @@ TODO：
       和精确 Artifact-Evidence 边，Task/Run 仍保持 failed，不伪造 `task.succeeded`。PostgreSQL 集成测试
       证明 retained Evidence、`claims=[]`、`confidence=0` 与失败事件同存；用户取消的现有回归继续不生成
       失败 Artifact。持久化失败仍原子回滚为 typed `persistence_failed`，不留下半个 Artifact。
-- [ ] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。
+- [x] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。
+      已补充 PostgreSQL/真实 Pi 研究失败集成：恶意 Evidence excerpt 只保留原始 `web.search` ToolCall，
+      不创建额外 ToolCall、Run Skill Binding 或 `edit_proposals`；ResearchBrief 保持 claim-free。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
 - [ ] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝
       硬结论通过率，并在报告记录 provider/model/Prompt/Tool/Skill/Context/Runtime revision。
