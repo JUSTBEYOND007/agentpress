@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { searchPublicSources } from '../src/web-search.js';
+import { PublicSearchError, searchPublicSources } from '../src/web-search.js';
 
 describe('public web search', () => {
   it('adapts an anonymous AnySearch request to bounded public results', async () => {
@@ -72,7 +72,7 @@ describe('public web search', () => {
       );
     await expect(
       searchPublicSources('keyed', 5, { fetch: request, apiKey: 'secret-key' }),
-    ).rejects.toThrow('AnySearch API error 401');
+    ).rejects.toMatchObject({ name: 'PublicSearchError', kind: 'search_failed' });
     await expect(
       searchPublicSources('keyed', 5, { fetch: request, apiKey: 'secret-key' }),
     ).rejects.not.toThrow(/secret-key|generated|password/u);
@@ -89,5 +89,34 @@ describe('public web search', () => {
     await expect(
       searchPublicSources('cancelled', 5, { fetch: request, signal: AbortSignal.abort() }),
     ).rejects.toBeDefined();
+  });
+
+  it('keeps timeout, rate limit, and provider Schema failures distinct', async () => {
+    const hanging = vi.fn<typeof fetch>().mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    await expect(
+      searchPublicSources('timeout', 5, { fetch: hanging, timeoutMs: 1 }),
+    ).rejects.toMatchObject({ name: 'PublicSearchError', kind: 'search_timeout' });
+    await expect(
+      searchPublicSources('limited', 5, {
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 429 })),
+      }),
+    ).rejects.toMatchObject({ name: 'PublicSearchError', kind: 'rate_limited' });
+    await expect(
+      searchPublicSources('schema', 5, {
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ code: 0, data: {} })),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<PublicSearchError>>({
+        name: 'PublicSearchError',
+        kind: 'provider_schema_invalid',
+      }),
+    );
   });
 });

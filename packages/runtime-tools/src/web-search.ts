@@ -12,6 +12,7 @@ type SearchOptions = {
   readonly signal?: AbortSignal;
   readonly apiKey?: string;
   readonly baseUrl?: string;
+  readonly timeoutMs?: number;
 };
 
 type AnySearchResult = {
@@ -23,6 +24,27 @@ type AnySearchResult = {
 const ANYSEARCH_API_URL = 'https://api.anysearch.com/v1/search';
 const SEARCH_TIMEOUT_MS = 30_000;
 
+type PublicSearchFailureKind =
+  | 'search_failed'
+  | 'search_timeout'
+  | 'rate_limited'
+  | 'provider_schema_invalid';
+
+export class PublicSearchError extends Error {
+  public override readonly name = 'PublicSearchError';
+
+  public constructor(
+    public readonly kind: PublicSearchFailureKind,
+    message: string,
+  ) {
+    super(message);
+  }
+
+  public toResearchFailure(): { readonly kind: PublicSearchFailureKind; readonly detail: string } {
+    return { kind: this.kind, detail: this.message };
+  }
+}
+
 export async function searchPublicSources(
   query: string,
   limit: number,
@@ -30,22 +52,42 @@ export async function searchPublicSources(
 ): Promise<readonly PublicSearchResult[]> {
   const request = options.fetch ?? fetch;
   const apiKey = options.apiKey ?? process.env.ANYSEARCH_API_KEY?.trim();
-  const response = await request(options.baseUrl ?? ANYSEARCH_API_URL, {
-    method: 'POST',
-    headers: {
-      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ query, max_results: normalizeLimit(limit) }),
-    signal: options.signal
-      ? AbortSignal.any([AbortSignal.timeout(SEARCH_TIMEOUT_MS), options.signal])
-      : AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-  });
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? SEARCH_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await request(options.baseUrl ?? ANYSEARCH_API_URL, {
+      method: 'POST',
+      headers: {
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ query, max_results: normalizeLimit(limit) }),
+      signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout,
+    });
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    if (timeout.aborted) {
+      throw new PublicSearchError('search_timeout', 'Public search provider timed out');
+    }
+    throw new PublicSearchError('search_failed', 'Public search provider request failed');
+  }
   if (!response.ok) {
     await response.body?.cancel();
-    throw new Error(`AnySearch API error ${String(response.status)}`);
+    if (response.status === 429) {
+      throw new PublicSearchError('rate_limited', 'Public search provider rate limit exceeded');
+    }
+    throw new PublicSearchError(
+      'search_failed',
+      `Public search provider returned HTTP ${String(response.status)}`,
+    );
   }
-  const results = parseResponse(await response.json());
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw invalidResponse('expected JSON response');
+  }
+  const results = parseResponse(payload);
   return results.slice(0, normalizeLimit(limit)).map((result) => ({
     title: result.title,
     url: result.url,
@@ -85,8 +127,11 @@ function normalizeLimit(value: number): number {
   return Math.max(1, Math.min(Math.floor(value), 20));
 }
 
-function invalidResponse(message: string): Error {
-  return new Error(`AnySearch API returned invalid response: ${message}`);
+function invalidResponse(message: string): PublicSearchError {
+  return new PublicSearchError(
+    'provider_schema_invalid',
+    `AnySearch API returned invalid response: ${message}`,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

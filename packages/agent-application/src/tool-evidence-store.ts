@@ -150,13 +150,16 @@ type ToolEvidence = {
 
 function extractToolEvidence(output: unknown): readonly ToolEvidence[] {
   const root = recordValue(output);
+  const nestedValue = recordValue(root.value);
   const candidates = Array.isArray(root.value)
     ? root.value
-    : Array.isArray(root.results)
-      ? root.results
-      : Array.isArray(output)
-        ? output
-        : [];
+    : Array.isArray(nestedValue.results)
+      ? nestedValue.results
+      : Array.isArray(root.results)
+        ? root.results
+        : Array.isArray(output)
+          ? output
+          : [];
   return candidates.flatMap((candidate) => {
     const item = recordValue(candidate);
     const sourceUri = firstString(item.url, item.pageUrl, item.uri, item.source);

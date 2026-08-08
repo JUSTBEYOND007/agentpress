@@ -32,10 +32,10 @@ import {
 import { loadWorkerEnvironment } from '@agentpress/config';
 import { ArkImageGenerator, MediaService, MinioObjectStorage } from '@agentpress/media-application';
 import { Type } from '@sinclair/typebox';
-import { fetchPublicImage, fetchResearchSource } from '@agentpress/web-research';
+import { fetchPublicImage } from '@agentpress/web-research';
 import { and, eq } from 'drizzle-orm';
 
-import { searchPublicSources } from './web-search.js';
+import { executeWebResearchSearch } from './web-research-handler.js';
 
 export function createBuiltInToolRuntime(
   database: AgentPressDatabase,
@@ -194,25 +194,7 @@ function createHandlers(database: AgentPressDatabase): BuiltInSearchHandlers {
       : undefined;
   return {
     web_research: async ({ query, limit }, signal) => {
-      const results = await searchPublicSources(query, limit, { signal });
-      return Promise.all(
-        results.map(async (result) => {
-          try {
-            const source = await fetchResearchSource(result.url, { signal, maxBytes: 750_000 });
-            return {
-              ...result,
-              title: source.title,
-              text: source.text.slice(0, 20_000),
-              fetchedAt: source.fetchedAt,
-            };
-          } catch (error) {
-            return {
-              ...result,
-              fetchError: error instanceof Error ? error.message : 'Source extraction failed',
-            };
-          }
-        }),
-      );
+      return executeWebResearchSearch({ query, limit, signal });
     },
     licensed_media: async ({ query, limit }, signal) => {
       const endpoint = new URL('https://commons.wikimedia.org/w/api.php');

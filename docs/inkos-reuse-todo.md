@@ -698,9 +698,13 @@ TODO：
       失败、redirect loop、非法 URL、空正文、PDF 签名或页数失败、synthesis timeout/Schema 失败、
       Token/费用耗尽以及 Evidence/Artifact 持久化失败的执行链矩阵。
       `packages/web-research` 已先固定 provider-neutral typed failure vocabulary，覆盖上述阶段；实际
-      Port/ToolCall/Task/Artifact 持久化与投影故障注入仍待补齐。
+      Search Port 现在将 timeout/rate-limit/provider Schema failure 映射为 typed envelope，独立
+      `executeWebResearchSearch` handler 保留成功来源并记录 partial fetch failure，MCP `value.results`
+      也能进入 Evidence projector；PDF/DNS/redirect、synthesis、Token/费用和持久化故障注入仍待补齐。
 - [ ] partial query/fetch failure 必须保留已成功来源；全部 search/fetch/synthesis 失败只允许产出无 Claim、
-      `confidence=0` 的 typed degraded Artifact；持久化失败不能投影为成功 Artifact。
+      `confidence=0` 的 typed degraded Artifact；handler 的全部 search failure 已输出空 `results` 与 typed
+      failure，partial fetch 已保留成功 `results`；ResearchBrief synthesis 和持久化失败仍需接入 Artifact
+      owner 后才能勾选。
 - [ ] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
 - [ ] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝
