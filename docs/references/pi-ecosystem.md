@@ -487,6 +487,10 @@ If the user cancels while the Run is recovering, the same aggregate lock path mo
 read-only call to `tool.cancelled` before dispatch. PostgreSQL evidence fixes the event order, proves
 zero provider calls, and rejects both later recovery preparation and execution; live and replay merge
 to the same cancelled activity.
+Stale-worker settlement is fenced at both ownership levels. A late Specialist attempt cannot persist
+its TaskResult, Artifact, or RunEvent after a newer attempt succeeds. A stale Main worker cannot write
+an assistant message, checkpoint, or terminal event after the Run enters recovery. Both paths are
+verified against PostgreSQL row counts and leave the authoritative newer/recovering state unchanged.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 

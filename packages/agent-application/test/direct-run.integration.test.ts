@@ -72,6 +72,7 @@ import {
   PersistentToolBridge,
   RunContextService,
   RunProjectionService,
+  RunSettlementService,
   SkillSelectionError,
   SpecialistResultStore,
   runtimeToolName,
@@ -3064,12 +3065,151 @@ describeWithDatabase('Direct Run application flow', () => {
         .from(taskResults)
         .where(eq(taskResults.taskId, interruptedTaskId)),
     ).resolves.toEqual([{ attempt: 2 }]);
+    const staleResultStore = new SpecialistResultStore({
+      database: connection.db,
+      publisher,
+      createId: randomUUID,
+      now: () => new Date(),
+    });
+    const [artifactsBeforeStaleResult, resultsBeforeStaleResult, eventsBeforeStaleResult] =
+      await Promise.all([
+        connection.db
+          .select({ id: artifacts.id })
+          .from(artifacts)
+          .where(eq(artifacts.runId, run.runId)),
+        connection.db
+          .select({ id: taskResults.id })
+          .from(taskResults)
+          .where(eq(taskResults.taskId, interruptedTaskId)),
+        connection.db
+          .select({ id: runEvents.id })
+          .from(runEvents)
+          .where(eq(runEvents.runId, run.runId)),
+      ]);
+    await expect(
+      staleResultStore.persistTaskResult(
+        run.runId,
+        {
+          id: interruptedTaskId,
+          clientKey: 'stale-attempt-one',
+          owner: 'researcher',
+          objective: 'Late stale research',
+          criticality: 'required',
+          acceptanceCriteria: ['Must never replace attempt two'],
+          dependencyIds: [],
+          capabilities: [],
+          detached: false,
+          status: 'succeeded',
+          summary: 'Late attempt one result',
+          artifacts: [
+            {
+              type: 'ResearchBrief',
+              title: 'Stale artifact',
+              summary: 'Must not persist',
+              content: { stale: true },
+              evidenceIds: [],
+            },
+          ],
+          warnings: [],
+        },
+        1,
+      ),
+    ).resolves.toBe(false);
+    const [artifactsAfterStaleResult, resultsAfterStaleResult, eventsAfterStaleResult] =
+      await Promise.all([
+        connection.db
+          .select({ id: artifacts.id })
+          .from(artifacts)
+          .where(eq(artifacts.runId, run.runId)),
+        connection.db
+          .select({ id: taskResults.id })
+          .from(taskResults)
+          .where(eq(taskResults.taskId, interruptedTaskId)),
+        connection.db
+          .select({ id: runEvents.id })
+          .from(runEvents)
+          .where(eq(runEvents.runId, run.runId)),
+      ]);
+    expect(artifactsAfterStaleResult).toEqual(artifactsBeforeStaleResult);
+    expect(resultsAfterStaleResult).toEqual(resultsBeforeStaleResult);
+    expect(eventsAfterStaleResult).toEqual(eventsBeforeStaleResult);
     await expect(
       connection.db
         .select({ revisionNumber: planRevisions.revisionNumber })
         .from(planRevisions)
         .where(eq(planRevisions.planId, planId)),
     ).resolves.toEqual([{ revisionNumber: 1 }]);
+  });
+
+  it('rejects a stale Main worker settlement after recovery starts', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: 'Start recovery before the old worker settles',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db
+      .update(agentRuns)
+      .set({ status: 'recovering' })
+      .where(eq(agentRuns.id, run.runId));
+    const [messagesBefore, checkpointsBefore, eventsBefore] = await Promise.all([
+      connection.db
+        .select({ id: conversationMessages.id })
+        .from(conversationMessages)
+        .where(eq(conversationMessages.runId, run.runId)),
+      connection.db
+        .select({ id: checkpoints.id })
+        .from(checkpoints)
+        .where(eq(checkpoints.runId, run.runId)),
+      connection.db
+        .select({ id: runEvents.id })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+    ]);
+    const settlement = new RunSettlementService({
+      database: connection.db,
+      publisher,
+      createId: randomUUID,
+      now: () => new Date(),
+      compactConversation: () => Promise.resolve({ status: 'not_needed' }),
+      activateNextFollowUp: () => Promise.resolve(),
+    });
+
+    await expect(
+      settlement.settle(branchId, run.runId, {
+        status: 'completed',
+        messages: [assistantMessage('stale-main-worker')],
+      }),
+    ).rejects.toMatchObject({ name: 'StaleWorkerSettlementError' });
+    await expect(
+      connection.db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, run.runId)),
+    ).resolves.toEqual([{ status: 'recovering' }]);
+    const [messagesAfter, checkpointsAfter, eventsAfter] = await Promise.all([
+      connection.db
+        .select({ id: conversationMessages.id })
+        .from(conversationMessages)
+        .where(eq(conversationMessages.runId, run.runId)),
+      connection.db
+        .select({ id: checkpoints.id })
+        .from(checkpoints)
+        .where(eq(checkpoints.runId, run.runId)),
+      connection.db
+        .select({ id: runEvents.id })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+    ]);
+    expect(messagesAfter).toEqual(messagesBefore);
+    expect(checkpointsAfter).toEqual(checkpointsBefore);
+    expect(eventsAfter).toEqual(eventsBefore);
   });
 
   it('reuses a persisted logical Main Session and appends transcript sequences', async () => {
