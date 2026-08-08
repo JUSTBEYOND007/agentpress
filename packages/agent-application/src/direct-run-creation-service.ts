@@ -27,6 +27,7 @@ import {
   type SkillPreselector,
 } from './contracts.js';
 import { RunContextService } from './run-context-service.js';
+import { SkillSelectionError } from './skill-preselection.js';
 import { toDurableEvent } from './run-projection-service.js';
 import { decodeRuntimeMessage, encodeRuntimeMessage } from './runtime-message-codec.js';
 
@@ -194,8 +195,11 @@ export class DirectRunCreationService {
       const candidates = this.options.skillPreselector
         ? await loadSkillPreselectionCandidates(transaction, branch.workspaceId)
         : [];
-      const modelSkills = this.options.skillPreselector
-        ? validateModelSkillSelections(
+      let modelSkills: readonly SelectedSkillInput[] = [];
+      let modelSelectionFailure: SkillSelectionError | undefined;
+      if (this.options.skillPreselector) {
+        try {
+          modelSkills = validateModelSkillSelections(
             candidates,
             await this.options.skillPreselector.select({
               prompt,
@@ -203,8 +207,12 @@ export class DirectRunCreationService {
               candidates,
               maxSelections: 8,
             }),
-          )
-        : [];
+          );
+        } catch (error) {
+          if (!(error instanceof SkillSelectionError)) throw error;
+          modelSelectionFailure = error;
+        }
+      }
       const selectedSkills = mergeSkillSelections(explicitSkills, modelSkills);
 
       await transaction.execute(
@@ -325,7 +333,19 @@ export class DirectRunCreationService {
           id: this.options.createId(),
           runId,
           eventType: 'skill.selection.completed',
-          payload: { explicit: explicitSkills, model: modelSkills, selected: selectedSkills },
+          payload: {
+            explicit: explicitSkills,
+            model: modelSkills,
+            selected: selectedSkills,
+            ...(modelSelectionFailure
+              ? {
+                  modelSelection: {
+                    status: 'failed',
+                    code: modelSelectionFailure.code,
+                  },
+                }
+              : {}),
+          },
         });
       }
       if (this.options.dispatchCommands) {

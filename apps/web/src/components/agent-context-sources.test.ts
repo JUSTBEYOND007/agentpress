@@ -21,6 +21,7 @@ describe('contextSourcesView', () => {
         skillSelections: {
           explicit: [{ skillId: 'explicit-skill', version: 'v1' }],
           model: [{ skillId: 'model-skill', version: 'v2' }],
+          modelSelection: { status: 'failed', code: 'timeout' },
         },
       }),
     ).toEqual({
@@ -44,6 +45,7 @@ describe('contextSourcesView', () => {
       maxInputTokens: 1000,
       provider: 'openai',
       model: 'gpt-5',
+      selectionFailure: 'failed',
     });
   });
 });

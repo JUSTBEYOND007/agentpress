@@ -66,6 +66,7 @@ import {
   DirectRunService,
   PersistentToolBridge,
   RunContextService,
+  SkillSelectionError,
   runtimeToolName,
   ToolCallService,
   type LiveRunEvent,
@@ -1419,6 +1420,45 @@ describeWithDatabase('Direct Run application flow', () => {
       status: 'load_failed',
       description: '技能加载失败，无法绑定。',
     });
+  });
+
+  it('preserves explicit Skills when model preselection times out', async () => {
+    const selectingService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+      skillPreselector: {
+        select: () => Promise.reject(new SkillSelectionError('timeout', 'selection timed out')),
+      },
+    });
+    const run = await selectingService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Use the explicit Skill even if model selection times out.',
+      idempotencyKey: randomUUID(),
+      skills: [{ skillId: 'concise', version: '1.0.0' }],
+    });
+    await expect(
+      connection.db
+        .select({ eventType: runEvents.eventType })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ eventType: 'skill.selection.completed' })]),
+    );
+    await expect(selectingService.getProjection(run.runId)).resolves.toMatchObject({
+      context: {
+        skillSelections: {
+          model: [],
+          selected: [{ skillId: 'concise', version: '1.0.0' }],
+          modelSelection: { status: 'failed', code: 'timeout' },
+        },
+      },
+    });
+    await selectingService.requestCancellation(run.runId);
+    await selectingService.execute(run.runId);
   });
 
   it('binds a regenerated Run to the copied fork message without duplicating the user turn', async () => {

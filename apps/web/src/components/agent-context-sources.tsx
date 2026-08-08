@@ -81,6 +81,7 @@ function ContextSourcesBody({
         ))}
       </ul>
       {view.droppedCount > 0 ? <p>{view.droppedCount} 项因预算或权限状态未加入本次运行</p> : null}
+      {view.selectionFailure ? <p>Agent Skill 自动选择失败，本轮仅保留用户显式选择。</p> : null}
     </>
   );
 }
@@ -90,6 +91,8 @@ export function contextSourcesView(payload: Readonly<Record<string, unknown>>) {
   const skillSelections = recordValue(payload.skillSelections);
   const explicitSkills = skillSelectionIds(skillSelections.explicit);
   const modelSkills = skillSelectionIds(skillSelections.model);
+  const selectionFailure =
+    recordValue(skillSelections.modelSelection).status === 'failed' ? 'failed' : undefined;
   const sources = Array.isArray(manifest.included)
     ? manifest.included
         .map(recordValue)
@@ -110,6 +113,7 @@ export function contextSourcesView(payload: Readonly<Record<string, unknown>>) {
     tokenCount: numberValue(manifest.tokenCount),
     maxInputTokens: numberValue(manifest.maxInputTokens),
     droppedCount: Array.isArray(manifest.dropped) ? manifest.dropped.length : 0,
+    ...(selectionFailure ? { selectionFailure } : {}),
     model: stringValue(payload.model),
     provider: stringValue(payload.provider),
   };
