@@ -37,16 +37,39 @@ export class SpecialistResultStore {
   ): Promise<boolean> {
     const event = await this.options.database.transaction(async (transaction) => {
       const now = this.options.now();
-      if (
-        !(await settleAgentTaskAttempt(transaction, {
-          taskId: result.id,
-          attempt: expectedAttempt,
-          status: result.status,
-          now,
-        }))
-      ) {
-        return undefined;
+      let effectiveAttempt = expectedAttempt;
+      let settled =
+        expectedAttempt > 0
+          ? await settleAgentTaskAttempt(transaction, {
+              taskId: result.id,
+              attempt: expectedAttempt,
+              status: result.status,
+              now,
+            })
+          : false;
+      if (!settled && result.failure === 'detached_task_timeout' && expectedAttempt === 0) {
+        const claimedByHost = await transaction
+          .update(agentTasks)
+          .set({
+            status: 'failed',
+            attempt: sql`${agentTasks.attempt} + 1`,
+            completedAt: now,
+            updatedAt: now,
+            version: sql`${agentTasks.version} + 1`,
+          })
+          .where(
+            and(
+              eq(agentTasks.id, result.id),
+              inArray(agentTasks.status, ['pending', 'ready']),
+              eq(agentTasks.attempt, 0),
+              sql`${agentTasks.attempt} < ${agentTasks.maxAttempts}`,
+            ),
+          )
+          .returning({ attempt: agentTasks.attempt });
+        effectiveAttempt = claimedByHost[0]?.attempt ?? expectedAttempt;
+        settled = claimedByHost.length === 1;
       }
+      if (!settled) return undefined;
       const persistedArtifacts = [];
       for (const artifact of result.artifacts) {
         const artifactId = this.options.createId();
@@ -85,7 +108,7 @@ export class SpecialistResultStore {
         await transaction.insert(taskResults).values({
           id: this.options.createId(),
           taskId: result.id,
-          attempt: expectedAttempt,
+          attempt: effectiveAttempt,
           status: result.status,
           summary: result.summary ?? result.failure ?? `${result.owner} task ${result.status}`,
           artifacts: persistedArtifacts,
@@ -99,7 +122,7 @@ export class SpecialistResultStore {
         id: this.options.createId(),
         runId,
         reason: 'task_settled',
-        state: { taskId: result.id, attempt: expectedAttempt, status: result.status },
+        state: { taskId: result.id, attempt: effectiveAttempt, status: result.status },
       });
       const event = await appendRunEvent(transaction, {
         id: this.options.createId(),
@@ -107,7 +130,7 @@ export class SpecialistResultStore {
         eventType: `task.${result.status}`,
         payload: {
           taskId: result.id,
-          attempt: expectedAttempt,
+          attempt: effectiveAttempt,
           owner: result.owner,
           criticality: result.criticality,
           summary: result.summary,

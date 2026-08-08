@@ -475,8 +475,8 @@ TODO：
       现有数据库事实保持 `task.failed`，但 `task_timeout`/`detached_task_timeout` failure code 已由
       RunPart projector typed 映射为 `outcome: timed_out` 和 `execution.timed_out`，并有 unit/PostgreSQL
       回放断言；detached worker wait timeout 也会通过当前 attempt 的 `SpecialistResultStore` 写入 TaskResult、
-      RunEvent 和 checkpoint，结算竞态继续由 attempt fence 拒绝旧结果。模型/Schema、synthesis、Kafka 和
-      并发预算矩阵仍待补齐。
+      RunEvent 和 checkpoint；worker 尚未 claim 时由宿主原子创建 attempt 1 后结算，已 claim 时继续由
+      attempt fence 拒绝旧结果。模型/Schema、synthesis、Kafka 和并发预算矩阵仍待补齐。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
 - [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与

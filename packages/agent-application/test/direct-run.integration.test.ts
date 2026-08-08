@@ -3202,17 +3202,6 @@ describeWithDatabase('Direct Run application flow', () => {
       if (!taskId) await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
     expect(taskId).toBeDefined();
-    const claimed = await connection.db.transaction((transaction) =>
-      claimAgentTask(transaction, {
-        taskId: taskId ?? '',
-        workerId: 'detached-timeout-worker',
-        leaseId: randomUUID(),
-        leaseToken: randomUUID(),
-        leaseMs: 10_000,
-        now: new Date(),
-      }),
-    );
-    expect(claimed?.attempt).toBe(1);
     await expect(execution).resolves.toMatchObject({ status: 'completed_with_degradation' });
 
     const resultRows = await connection.db

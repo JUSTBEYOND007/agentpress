@@ -2,7 +2,6 @@ import type {
   RuntimeCurrentTurn,
   RuntimeTool,
   RuntimeTranscriptMessage,
-  RuntimeUsage,
 } from '@agentpress/agent-runtime';
 import {
   agentTasks,
@@ -32,12 +31,8 @@ import {
   type SettledTask,
   type StructuredArtifact,
 } from './planned-run-protocol.js';
-import {
-  decodePersistedArtifacts,
-  findAssistant,
-  staleTaskSettlement,
-  taskResultFailure,
-} from './planned-run-results.js';
+import { findAssistant, staleTaskSettlement } from './planned-run-results.js';
+import { settledTaskFromFact } from './planned-task-result-projection.js';
 import { toDurableEvent } from './run-projection-service.js';
 import { parseSpecialistTaskRequest, type SpecialistRole } from './specialist-task-contract.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
@@ -223,7 +218,10 @@ export class PlannedTaskExecutor {
       .where(and(eq(agentTasks.id, task.id), eq(agentTasks.runId, runId)))
       .limit(1);
     const active = current[0];
-    if (active?.status === 'running' && active.attempt > 0) {
+    const canPersistTimeout =
+      (active?.status === 'running' && active.attempt > 0) ||
+      ((active?.status === 'pending' || active?.status === 'ready') && active.attempt === 0);
+    if (canPersistTimeout) {
       if (await this.options.results.persistTaskResult(runId, timedOut, active.attempt)) {
         return timedOut;
       }
@@ -467,22 +465,6 @@ export class PlannedTaskExecutor {
     if (!toolResult) return undefined;
     return [message, toolResult];
   }
-}
-
-function settledTaskFromFact(
-  task: PlannedTaskSpec,
-  result: Awaited<ReturnType<AgentTaskWaitService['waitForAny']>>['settled'][number],
-): SettledTask {
-  const failure = taskResultFailure(result.failure);
-  return {
-    ...task,
-    status: result.status,
-    ...('summary' in result ? { summary: result.summary } : {}),
-    artifacts: decodePersistedArtifacts(result.artifacts),
-    ...('summary' in result ? { usage: result.usage as RuntimeUsage } : {}),
-    warnings: result.warnings,
-    ...(failure ? { failure } : {}),
-  };
 }
 
 function taskExecutionSignal(parent: AbortSignal | undefined, timeoutMs: number) {
