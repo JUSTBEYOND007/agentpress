@@ -71,6 +71,7 @@ import {
   DirectRunService,
   PersistentToolBridge,
   RunContextService,
+  RunProjectionService,
   SkillSelectionError,
   SpecialistResultStore,
   runtimeToolName,
@@ -2157,6 +2158,14 @@ describeWithDatabase('Direct Run application flow', () => {
     );
     expect(projection?.agents.slice(1).every(({ status }) => status === 'succeeded')).toBe(true);
     expect(events.some(({ eventType }) => eventType === 'synthesis.failed')).toBe(false);
+    const liveEvents = published
+      .filter(
+        (entry): entry is Extract<LiveRunEvent, { readonly durable: true }> =>
+          entry.durable && entry.event.runId === run.runId,
+      )
+      .map(({ event }) => event);
+    const replayEvents = await new RunProjectionService(connection.db).listEvents(run.runId);
+    expect(projectRunParts(liveEvents)).toEqual(projectRunParts(replayEvents));
     await expect(
       connection.db
         .select({
