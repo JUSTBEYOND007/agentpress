@@ -182,6 +182,23 @@ describe('run projection', () => {
     ]);
   });
 
+  it('projects Specialist timeout from the persisted failure fact', () => {
+    const [part] = projectRunParts([
+      event(1, 'task.started', { taskId: 'task-timeout', attempt: 1 }),
+      event(2, 'task.failed', { taskId: 'task-timeout', attempt: 1, failure: 'task_timeout' }),
+    ]);
+    expect(part).toMatchObject({
+      status: 'task.failed',
+      outcome: 'timed_out',
+      payload: {
+        lifecycleStages: [
+          { status: 'task.started' },
+          { status: 'task.failed', outcome: 'timed_out', labelKey: 'execution.timed_out' },
+        ],
+      },
+    });
+  });
+
   it('keeps an unknown ToolCall outcome distinct from an ordinary failure', () => {
     const parts = projectRunParts([
       event(1, 'tool.failed', { toolCallId: 'tool-failed', failure: { code: 'provider_failed' } }),

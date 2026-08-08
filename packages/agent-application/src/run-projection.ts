@@ -192,7 +192,9 @@ function toRunParts(
   const proposalStatus = proposalId ? proposalStatuses.get(proposalId) : undefined;
   const lifecycle = lifecycleKey(event);
   const outcome =
-    partType === 'activity' || type === 'tool.outcome_unknown' ? activityOutcome(type) : undefined;
+    partType === 'activity' || type === 'tool.outcome_unknown'
+      ? activityOutcome(type, event.payload)
+      : undefined;
   return [
     {
       id: lifecycle ? `${event.runId}:${lifecycle}` : event.id,
@@ -213,9 +215,17 @@ function toRunParts(
   ];
 }
 
-function activityOutcome(status: string): ActivityOutcome | undefined {
+function activityOutcome(
+  status: string,
+  payload: Readonly<Record<string, unknown>> = {},
+): ActivityOutcome | undefined {
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return 'succeeded';
   if (status.endsWith('.degraded') || status === 'completed_with_degradation') return 'degraded';
+  if (
+    status.startsWith('task.') &&
+    (payload.failure === 'task_timeout' || payload.failure === 'detached_task_timeout')
+  )
+    return 'timed_out';
   if (status.endsWith('.timed_out') || status.endsWith('.timeout') || status === 'task_timeout')
     return 'timed_out';
   if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return 'cancelled';

@@ -466,6 +466,9 @@ TODO：
       cancel/recover race 和 private-thinking isolation。
 - [ ] 补齐 Specialist runtime timeout、模型/输出 Schema 失败、非法 TaskResult/Evidence、synthesis 失败、
       Kafka 重复/乱序、并发分支同时耗尽预算、上游 degraded/failed 与 Main 部分成功终态的故障矩阵。
+      现有数据库事实保持 `task.failed`，但 `task_timeout`/`detached_task_timeout` failure code 已由
+      RunPart projector typed 映射为 `outcome: timed_out` 和 `execution.timed_out`，并有 unit/PostgreSQL
+      回放断言；模型/Schema、synthesis、Kafka 和并发预算矩阵仍待补齐。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
 - [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与

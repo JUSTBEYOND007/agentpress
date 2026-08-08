@@ -1836,6 +1836,11 @@ describeWithDatabase('Direct Run application flow', () => {
         failure: { code: 'task_timeout', message: 'task_timeout' },
       },
     ]);
+    const projection = await timeoutService.getProjection(run.runId);
+    expect(projection?.parts.find(({ status }) => status === 'task.failed')).toMatchObject({
+      outcome: 'timed_out',
+      payload: { failure: 'task_timeout' },
+    });
   });
 
   it('rejects an invalid Specialist timeout instead of falling back to the default', () => {
