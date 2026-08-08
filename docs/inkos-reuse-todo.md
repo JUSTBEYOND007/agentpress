@@ -263,8 +263,10 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       `@agentpress/domain` 的 `package.json` 无 dependencies，全部源码 import 只指向自身 `models/shared`；
       `dependency-cruiser@18.1.1` 的 `domain-only-internal-imports` 规则在根 `check:architecture` 和 CI 中
       fail closed，当前 5839 个模块、835 条依赖巡检无违规。
-- [ ] Web renderer 按 `plan/activity/approval/evidence/artifact/article-change/recovery/usage` 分 owner，
-      不把所有 RunPart 分支重新集中到单个消息组件。
+- [x] Web renderer 按 `plan/activity/approval/evidence/artifact/article-change/recovery/usage` 分 owner，
+      不把所有 RunPart 分支重新集中到单个消息组件。`agent-run-parts.tsx` 现在只负责 assistant-ui
+      typed dispatch；Article Proposal、Tool Approval、Ask User、Evidence、Activity 分别由独立组件拥有，
+      既有 Plan/Artifact/Article Change/Recovery/Usage owner 保持不变。Web `116` 个测试和文件长度门禁通过。
 - [ ] 将 InkOS 的大文件组织只当反例：固定 commit 下 `agent-tools.ts` 约 2933 行、
       `pipeline/runner.ts` 约 3703 行、`studio/api/server.ts` 约 6539 行、`ToolExecutionSteps.tsx`
       约 942 行，chat action/stream-events 也同时拥有多种状态转换；不得复制这种 owner 划分。

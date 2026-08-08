@@ -214,6 +214,12 @@ Skill paths receive no alternate executor. Oh My Pi reconnect and pi-mcp-adapter
 behavior remain pinned in their existing tests. Consumer projection shows typed goal/result facts
 and keeps JSON-RPC, transport and raw guarded payloads in diagnostic detail.
 
+The consumer follows the same owner boundary in React: `agent-run-parts.tsx` is an assistant-ui entry
+and typed dispatcher only. Plan, activity, approval, evidence, artifact, article change, recovery,
+and usage renderers live in separate components; proposal, approval, and user-question actions each
+keep their own local pending/decision state. This avoids reproducing InkOS's large chat execution
+component while preserving the Notion-like result-first workbench layout.
+
 Review/revision behavior was audited at the same fixed InkOS commit in
 `packages/core/src/pipeline/chapter-review-cycle.ts` and
 `packages/core/src/__tests__/chapter-review-cycle.test.ts`. The reusable contract is the order
