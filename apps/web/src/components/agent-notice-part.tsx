@@ -67,6 +67,9 @@ export function noticeMessage(
     return '本次运行未完成，但正文修改草稿仍已保留，可以继续审阅。';
   if (part.status === 'run.cancelled') return '本次运行已停止。';
   if (part.status === 'run.completed_with_degradation') return '已完成，但部分步骤出现警告。';
+  if (part.payload.failureStage === 'synthesis') {
+    return '各步骤已完成，但最终结果未能通过综合校验。请重新生成。';
+  }
   if (code === 'stale_revision' || code === 'proposal_expired') {
     return '正文已经更新，这次修改未覆盖现有内容。请基于最新正文重新修改。';
   }

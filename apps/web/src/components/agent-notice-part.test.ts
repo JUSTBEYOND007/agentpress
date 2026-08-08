@@ -19,6 +19,13 @@ describe('noticeMessage', () => {
     expect(noticeMessage(part('run.failed'), 'protocol_error', {})).toContain('完整性');
     expect(
       noticeMessage(
+        { ...part('run.failed'), payload: { failureStage: 'synthesis' } },
+        'protocol_error',
+        {},
+      ),
+    ).toContain('最终结果');
+    expect(
+      noticeMessage(
         { ...part('run.failed'), payload: { pendingDraft: true } },
         'runtime_error',
         {},

@@ -2076,6 +2076,67 @@ describeWithDatabase('Direct Run application flow', () => {
       new Set(['main', 'researcher', 'writer', 'editor', 'fact_checker', 'illustrator']),
     );
     expect(projection?.agents.slice(1).every(({ status }) => status === 'succeeded')).toBe(true);
+    expect(events.some(({ eventType }) => eventType === 'synthesis.failed')).toBe(false);
+  });
+
+  it('persists a typed synthesis failure without exposing provider details in its public fact', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Produce an article',
+          tasks: [plannedTask('write', 'writer')],
+        }),
+        taskCompleteResponse('Draft completed'),
+        'ordinary response one',
+        'ordinary response two',
+        'ordinary response three',
+      ],
+    });
+    const synthesisService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await synthesisService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '写一篇文章并给出最终结果',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(synthesisService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'failed',
+    });
+    const events = await connection.db
+      .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, run.runId))
+      .orderBy(asc(runEvents.sequence));
+    const synthesisFailure = events.find(({ eventType }) => eventType === 'synthesis.failed');
+    expect(synthesisFailure?.payload).toEqual({
+      code: 'synthesis_failed',
+      causeCode: 'protocol_error',
+      messageKey: 'synthesis.failed',
+      retryable: true,
+    });
+    expect(JSON.stringify(synthesisFailure?.payload)).not.toContain('Main Agent did not call');
+    expect(events.at(-1)).toMatchObject({
+      eventType: 'run.failed',
+      payload: { failureStage: 'synthesis' },
+    });
+    const projection = await synthesisService.getProjection(run.runId);
+    expect(
+      projection?.parts.filter(({ type, status }) => type === 'warning' && status === 'run.failed'),
+    ).toHaveLength(1);
+    expect(projection?.parts.some(({ status }) => status === 'synthesis.failed')).toBe(false);
   });
 
   it('projects only a Specialist public result to Main while keeping private thinking isolated', async () => {

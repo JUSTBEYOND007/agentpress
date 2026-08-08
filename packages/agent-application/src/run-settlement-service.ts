@@ -52,6 +52,7 @@ export class RunSettlementService {
     runId: string,
     result: RuntimeResult,
     completedWithDegradation = false,
+    failureStage?: 'synthesis',
   ): Promise<ExecuteDirectRunResult> {
     const terminalOutcome = classifyTerminalOutcome(result);
     const durableEvents = await this.options.database.transaction(async (transaction) => {
@@ -231,11 +232,28 @@ export class RunSettlementService {
         reason: 'run_settled',
         state: { status: 'failed', error: result.error },
       });
+      if (failureStage === 'synthesis') {
+        const synthesisEvent = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'synthesis.failed',
+          payload: {
+            code: 'synthesis_failed',
+            causeCode: result.error.code,
+            messageKey: 'synthesis.failed',
+            retryable: result.error.retryable,
+          },
+        });
+        events.push(toDurableEvent(synthesisEvent));
+      }
       const event = await appendRunEvent(transaction, {
         id: this.options.createId(),
         runId,
         eventType: 'run.failed',
-        payload: { error: result.error },
+        payload: {
+          error: result.error,
+          ...(failureStage ? { failureStage } : {}),
+        },
       });
       events.push(toDurableEvent(event));
       return events;

@@ -61,6 +61,7 @@ export type { PlannedTaskSpec } from './planned-run-protocol.js';
 export type PlannedExecutionOutcome = {
   readonly result: RuntimeResult;
   readonly degraded: boolean;
+  readonly failureStage?: 'synthesis';
 };
 
 type PlannedRunExecutorOptions = {
@@ -349,12 +350,14 @@ export class PlannedRunExecutor {
       return { result: terminalProductionResult(settled[0], this.now()), degraded: false };
     }
     const completion = await this.runCompletionMain(runId, prompt, settled, signal);
+    const result = withArticleOutcomeReceipt(
+      completion,
+      settled.flatMap(({ artifacts }) => artifacts),
+    );
     return {
-      result: withArticleOutcomeReceipt(
-        completion,
-        settled.flatMap(({ artifacts }) => artifacts),
-      ),
+      result,
       degraded: settled.some(({ status }) => status !== 'succeeded'),
+      ...(result.status === 'failed' ? { failureStage: 'synthesis' as const } : {}),
     };
   }
 

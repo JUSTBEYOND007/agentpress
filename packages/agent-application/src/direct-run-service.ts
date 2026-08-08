@@ -188,7 +188,7 @@ export class DirectRunService {
       throw new AgentApplicationError('run_not_found', `Agent Run ${runId} does not exist`);
     }
     if (context.status === 'cancelling') {
-      return this.settleRun(context.branchId, runId, {
+      return this.settlements.settle(context.branchId, runId, {
         status: 'cancelled',
         messages: context.history,
       });
@@ -213,7 +213,13 @@ export class DirectRunService {
     if (signal?.aborted && outcome.result.status === 'failed') {
       throw new Error(outcome.result.error.message);
     }
-    return this.settleRun(context.branchId, runId, outcome.result, outcome.degraded);
+    return this.settlements.settle(
+      context.branchId,
+      runId,
+      outcome.result,
+      outcome.degraded,
+      outcome.failureStage,
+    );
   }
 
   private async settleUnexpectedFailure(
@@ -236,7 +242,7 @@ export class DirectRunService {
     if (signal?.aborted && run.status !== 'cancelling') {
       throw error;
     }
-    return this.settleRun(run.branchId, runId, {
+    return this.settlements.settle(run.branchId, runId, {
       status: 'failed',
       messages: [],
       error: {
@@ -456,15 +462,6 @@ export class DirectRunService {
     ) {
       await this.options.publisher.publish({ durable: false, runId, event });
     }
-  }
-
-  private settleRun(
-    branchId: string,
-    runId: string,
-    result: RuntimeResult,
-    completedWithDegradation = false,
-  ): Promise<ExecuteDirectRunResult> {
-    return this.settlements.settle(branchId, runId, result, completedWithDegradation);
   }
 
   private async activateNextFollowUp(branchId: string): Promise<void> {

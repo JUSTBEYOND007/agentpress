@@ -217,6 +217,28 @@ describe('run projection', () => {
     ]);
   });
 
+  it('projects one terminal warning for a typed synthesis failure', () => {
+    const parts = projectRunParts([
+      event(1, 'synthesis.failed', {
+        code: 'synthesis_failed',
+        causeCode: 'protocol_error',
+        messageKey: 'synthesis.failed',
+        retryable: true,
+      }),
+      event(2, 'run.failed', {
+        error: { code: 'protocol_error', message: 'private provider detail', retryable: true },
+        failureStage: 'synthesis',
+      }),
+    ]);
+
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      type: 'warning',
+      status: 'run.failed',
+      payload: { failureStage: 'synthesis' },
+    });
+  });
+
   it('keeps task attempts isolated when an old attempt settles late', () => {
     const parts = projectRunParts([
       event(1, 'task.started', { taskId: 'task-retry', attempt: 1 }),
