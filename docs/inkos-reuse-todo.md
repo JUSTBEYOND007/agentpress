@@ -57,12 +57,14 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
 写作、审阅和恢复的行为证据分别位于 `packages/core/src/pipeline/runner.ts`、
 `chapter-review-cycle.ts` 和 `chapter-state-recovery.ts`。按这些源码和测试执行：
 
-- [ ] 为 Plan/Task/Attempt/ToolCall/Artifact/Evidence/Proposal/Settlement 建立一个 PostgreSQL
-      event-chain fixture；同一 fixture 的 live SSE 和 replay 必须输出深相等的 `RunPart[]`。当前已用真实
-      ToolCall settlement publisher 与 `RunProjectionService` PostgreSQL replay 证明 activity RunPart 深相等，
-      并另有 `task.timed_out` PostgreSQL replay fixture；Plan/Attempt/Artifact/Evidence/Proposal/Settlement
-      的完整单链 fixture 仍待补齐，因此总项不勾选。五 Specialist DAG 现在额外断言并行 Task terminal
-      事件的 live publisher 与 PostgreSQL replay `projectRunParts` 深相等。
+- [x] 为 Plan/Task/Attempt/ToolCall/Artifact/Evidence/Proposal/Settlement 建立一个 PostgreSQL
+      event-chain fixture；同一 fixture 的 live SSE 和 replay 必须输出深相等的 `RunPart[]`。
+      `packages/agent-application/test/multi-agent-event-chain.integration.test.ts` 现在通过真实
+      `DirectRunService`、Task attempt/lease、`ToolCallService`、Evidence projector、Artifact Version、
+      `ProposalService` 和 Run settlement 建立单条闭合事实链，并精确验证 durable live publisher 与
+      `RunProjectionService` PostgreSQL replay 的 `projectRunParts` 深相等。夹具显式区分 Agent Run ID 与
+      Pi session ID，不把 runtime session identity 误用为领域关联键。五 Specialist DAG 仍另外断言并行
+      Task terminal event 的 live/replay 等价；worker restart、late settlement 等故障链由后续独立项验收。
 - [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown`；
       projector 不得把 degraded 映射为 completed 或普通 error。当前 Web consumer status 已保留
       `degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown` 并有 102 个 Web 测试，但还需把完整
