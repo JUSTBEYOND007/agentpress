@@ -1407,6 +1407,53 @@ describeWithDatabase('Direct Run application flow', () => {
     ).resolves.toHaveLength(0);
   });
 
+  it('keeps explicit Skill precedence when a model selector returns another revision', async () => {
+    const skillId = `explicit-precedence-${randomUUID()}`;
+    await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${skillId}\nversion: 1.0.0\ndescription: Explicit revision\n---\nEXPLICIT_REVISION_ONE`,
+    );
+    await governance.createSkill(
+      ids.workspace,
+      `---\nid: ${skillId}\nversion: 2.0.0\ndescription: Catalog revision\n---\nMODEL_REVISION_TWO`,
+    );
+    const selectingService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+      skillPreselector: {
+        select: () => Promise.resolve([{ skillId, version: '2.0.0' }]),
+      },
+    });
+    const run = await selectingService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Explicitly use revision one.',
+      idempotencyKey: randomUUID(),
+      skills: [{ skillId, version: '1.0.0' }],
+    });
+    const [bindings, events] = await Promise.all([
+      connection.db.select().from(runSkillBindings).where(eq(runSkillBindings.runId, run.runId)),
+      connection.db
+        .select({ eventType: runEvents.eventType, payload: runEvents.payload })
+        .from(runEvents)
+        .where(eq(runEvents.runId, run.runId)),
+    ]);
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]?.allowedTools).toEqual([]);
+    expect(
+      events.find(({ eventType }) => eventType === 'skill.selection.completed')?.payload,
+    ).toMatchObject({
+      explicit: [{ skillId, version: '1.0.0' }],
+      model: [{ skillId, version: '2.0.0' }],
+      selected: [{ skillId, version: '1.0.0' }],
+    });
+    await selectingService.requestCancellation(run.runId);
+    await selectingService.execute(run.runId);
+  });
+
   it('keeps disabled, malformed, and historical Skills visible as catalog diagnostics', async () => {
     const disabledId = `explicit-only-${randomUUID()}`;
     await governance.createSkill(
@@ -1882,7 +1929,14 @@ describeWithDatabase('Direct Run application flow', () => {
     const skillId = `recovery-skill-${randomUUID()}`;
     const revisionOne = await governance.createSkill(
       ids.workspace,
-      `---\nid: ${skillId}\nversion: 1.0.0\ndescription: Recovery revision one\nallowedTools:\n  - article.read_current\n---\nRECOVERY_SKILL_REVISION_ONE`,
+      `---\nid: ${skillId}\nversion: 1.0.0\ndescription: Recovery revision one\nallowedTools:\n  - article.read_current\nresources:\n  - references/recovery.md\n---\nRECOVERY_SKILL_REVISION_ONE`,
+      [
+        {
+          path: 'references/recovery.md',
+          content: 'RECOVERY_RESOURCE_REVISION_ONE',
+          fileType: 'file',
+        },
+      ],
     );
     const interruptedService = new DirectRunService({
       database: connection.db,
@@ -1925,6 +1979,10 @@ describeWithDatabase('Direct Run application flow', () => {
       ids.workspace,
       `---\nid: ${skillId}\nversion: 2.0.0\ndescription: Recovery revision two\nallowedTools:\n  - web_research.search\n---\nRECOVERY_SKILL_REVISION_TWO`,
     );
+    await connection.db
+      .update(skillRevisionResources)
+      .set({ content: 'RECOVERY_RESOURCE_CORRUPTED_AFTER_BINDING' })
+      .where(eq(skillRevisionResources.skillRevisionId, revisionOne.id));
 
     const runtimeRequests: RuntimeRequest[] = [];
     const recoveryDelegate = PiRuntimeAdapter.forTests({
@@ -1959,7 +2017,9 @@ describeWithDatabase('Direct Run application flow', () => {
     const recoveredContext = runtimeRequests[0]?.currentTurn.context;
     expect(recoveredContext).toBeDefined();
     expect(recoveredContext?.content).toContain('RECOVERY_SKILL_REVISION_ONE');
+    expect(recoveredContext?.content).toContain('RECOVERY_RESOURCE_REVISION_ONE');
     expect(recoveredContext?.content).not.toContain('RECOVERY_SKILL_REVISION_TWO');
+    expect(recoveredContext?.content).not.toContain('RECOVERY_RESOURCE_CORRUPTED_AFTER_BINDING');
     const [packAfter, bindingsAfter] = await Promise.all([
       connection.db
         .select({ content: runContextPacks.content, contentHash: runContextPacks.contentHash })

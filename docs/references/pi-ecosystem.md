@@ -148,6 +148,15 @@ is not called, v2 is absent, and the Context Pack plus `run_skill_bindings` revi
 remain byte-for-byte unchanged. This is intentionally a contract test around the existing narrow
 owners, not a new Skill recovery manager or a second state machine.
 
+The failure matrix also treats the persisted pack as the recovery boundary: a PostgreSQL fixture
+mutates a bound resource row after interruption and the recovered real-Pi request still contains the
+original resource bytes, proving resource loading is not repeated. Normal PostgreSQL foreign-key
+policy prevents deleting a revision referenced by `run_skill_bindings` (`ON DELETE RESTRICT`). Explicit
+Skill selection wins when an untrusted selector returns a newer revision for the same Skill ID; the
+durable `skill.selection.completed` payload retains `explicit`, `model`, and final `selected` values.
+The remaining negative case is an explicitly injected missing-revision fact and its fail-closed public
+projection, which is still tracked in the local TODO.
+
 Web Research retains the existing SSRF/DNS/redirect/media/size guards and built-in `web_research`
 MCP route. `packages/web-research` now owns product enums, the typed ResearchBrief schema,
 claim-to-Evidence validation, provider-neutral search/fetch/synthesis Ports, depth-specific query,
