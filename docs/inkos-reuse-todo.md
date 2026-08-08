@@ -58,14 +58,17 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
 `chapter-review-cycle.ts` 和 `chapter-state-recovery.ts`。按这些源码和测试执行：
 
 - [ ] 为 Plan/Task/Attempt/ToolCall/Artifact/Evidence/Proposal/Settlement 建立一个 PostgreSQL
-      event-chain fixture；同一 fixture 的 live SSE 和 replay 必须输出深相等的 `RunPart[]`。
+      event-chain fixture；同一 fixture 的 live SSE 和 replay 必须输出深相等的 `RunPart[]`。当前已用真实
+      ToolCall settlement publisher 与 `RunProjectionService` PostgreSQL replay 证明 activity RunPart 深相等，
+      并另有 `task.timed_out` PostgreSQL replay fixture；Plan/Attempt/Artifact/Evidence/Proposal/Settlement
+      的完整单链 fixture 仍待补齐，因此总项不勾选。
 - [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale`；
       projector 不得把 degraded 映射为 completed 或普通 error。当前 Web consumer status 已保留
       `degraded|failed|cancelled|timed_out|interrupted|stale` 并有 92 个投影测试，但还需把该 outcome
       作为 host-owned RunPart fact 接入 PostgreSQL/live-SSE 同构链后才能勾选。当前
       `packages/agent-application/src/run-projection.ts` 已为 activity RunPart 写入不可变 `outcome`，并将
       outcome 复制到 lifecycle stage；96 个 Agent Application projection tests 与 92 个 Web tests 通过，
-      但 PostgreSQL/live SSE 深相等 fixture 仍待补齐。
+      ToolCall live/replay 深相等集成已通过，但其余完整事件链仍待补齐。
 - [ ] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
       本地化只发生在 projector/consumer；React 不得匹配日志或阶段文案来推断状态。
 - [ ] 为 execution/task/attempt 统一 correlation id；所有 progress/log/result 必须带归属，缺 id 时

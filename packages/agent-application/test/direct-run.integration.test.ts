@@ -12,6 +12,7 @@ import {
   agentTasks,
   agentRuns,
   appendConversationCompaction,
+  appendRunEvent,
   approvals,
   appUsers,
   artifactEvidence,
@@ -70,6 +71,7 @@ import {
   type LiveRunEvent,
   type RunEventPublisher,
 } from '../src/index.js';
+import { projectRunParts } from '../src/run-projection.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -378,6 +380,39 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(typeof selections[0]?.selectedModel).toBe('string');
     expect(selections[0]?.selectedModel).not.toBe('main');
     expect(published.some((event) => !event.durable)).toBe(true);
+  });
+
+  it('keeps PostgreSQL replay RunParts identical to the persisted event projection', async () => {
+    const run = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: '回放 typed outcome',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db.transaction(async (transaction) => {
+      await appendRunEvent(transaction, {
+        id: randomUUID(),
+        runId: run.runId,
+        eventType: 'task.timed_out',
+        payload: { taskId: randomUUID(), reason: 'worker_deadline' },
+      });
+      await transaction
+        .update(agentRuns)
+        .set({ status: 'completed_with_degradation' })
+        .where(eq(agentRuns.id, run.runId));
+    });
+
+    const events = await service.listEvents(run.runId);
+    const replayParts = projectRunParts(events).filter(({ type }) => type !== 'usage');
+    const projection = await service.getProjection(run.runId);
+    expect(projection).toBeDefined();
+    const projectedById = new Map(projection?.parts.map((part) => [part.id, part]));
+    expect(replayParts.map((part) => projectedById.get(part.id))).toEqual(replayParts);
+    expect(replayParts.find(({ status }) => status === 'task.timed_out')).toMatchObject({
+      type: 'activity',
+      outcome: 'timed_out',
+    });
   });
 
   it('preserves a provider failure instead of relabeling it as a protocol failure', async () => {

@@ -33,10 +33,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   DirectRunService,
   PersistentToolBridge,
+  RunProjectionService,
   ToolEvidenceStore,
   ToolCallService,
   type LiveRunEvent,
 } from '../src/index.js';
+import { projectRunParts } from '../src/run-projection.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -338,6 +340,34 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(toolCalls)
       .where(eq(toolCalls.runId, runId));
     expect(rows).toEqual([{ status: 'succeeded' }]);
+  });
+
+  it('projects live durable ToolCall events identically to PostgreSQL replay', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    });
+    const search = (await bridge.createForRun(runId, ['workspace.read'])).find(
+      (tool) => tool.label === 'workspace.search',
+    );
+    await search?.execute(
+      { query: 'live replay equality' },
+      { runId, providerToolCallId: randomUUID() },
+    );
+
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const liveParts = projectRunParts(liveEvents).filter(({ type }) => type === 'activity');
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const replayById = new Map(replay?.parts.map((part) => [part.id, part]));
+    expect(liveParts.map((part) => replayById.get(part.id))).toEqual(liveParts);
+    expect(liveParts).toEqual([
+      expect.objectContaining({ status: 'tool.succeeded', outcome: 'succeeded' }),
+    ]);
   });
 
   it('links the result URL Evidence to its exact Specialist Tool Call attempt', async () => {
