@@ -138,6 +138,13 @@ proves byte-equivalent live/replay projection with exact Task attempt or ToolCal
 late success after a timed-out attempt remains an audit fact but cannot replace the immutable
 terminal consumer outcome.
 
+Task correlation uses `taskId+attempt` across lifecycle RunParts, results, and active progress;
+Tool activity uses the persisted ToolCall ID. `projectRunProgress` rejects missing identity, keeps
+the highest attempt, and only advances equal attempts by durable sequence, so an old callback cannot
+become the current step. A PostgreSQL fixture reconstructs projection through a fresh
+`DirectRunService` and proves restart/refresh equality. Raw provider logs are not a public RunPart
+protocol; consumer-visible progress and results must originate from these typed durable facts.
+
 Skill behavior reuses the existing AgentPress `validateSkillConformance`, deterministic discovery
 precedence, `loadStaticSkillResources`, `pinSkills`, `Run Skill Binding`, and `PiSkillPreselector`
 paths. These were compared with InkOS registry/loader/`use_skill` source and tests at the fixed

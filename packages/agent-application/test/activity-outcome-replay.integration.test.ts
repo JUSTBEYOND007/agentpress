@@ -143,6 +143,71 @@ describeWithDatabase('Activity outcome PostgreSQL replay', () => {
       liveParts.find(({ correlationId }) => correlationId?.includes('timed-out')),
     ).toMatchObject({ status: 'task.timed_out', outcome: 'timed_out' });
   });
+
+  it('rebuilds active progress from the highest complete Task attempt after service restart', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const run = await creation.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: 'Project attempt-owned progress.',
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db.transaction(async (transaction) => {
+      for (const fact of [
+        {
+          eventType: 'task.started',
+          payload: {
+            taskId: 'task-progress',
+            attempt: 2,
+            objective: 'Continue the current attempt',
+            owner: 'writer',
+          },
+        },
+        {
+          eventType: 'task.succeeded',
+          payload: { taskId: 'task-progress', attempt: 1 },
+        },
+        {
+          eventType: 'task.started',
+          payload: { taskId: 'missing-attempt', objective: 'Must not become active' },
+        },
+      ]) {
+        await appendRunEvent(transaction, {
+          id: randomUUID(),
+          runId: run.runId,
+          eventType: fact.eventType,
+          payload: fact.payload,
+        });
+      }
+    });
+    const restarted = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => PiRuntimeAdapter.forTests({ responses: [] }) },
+      systemPrompt: 'You are AgentPress.',
+      dispatchCommands: false,
+    });
+
+    const beforeRestart = await creation.getProjection(run.runId);
+    const afterRestart = await restarted.getProjection(run.runId);
+    expect(afterRestart).toEqual(beforeRestart);
+    expect(afterRestart?.parts.find(({ type }) => type === 'progress')).toMatchObject({
+      payload: {
+        completedSteps: 0,
+        activeStep: {
+          taskId: 'task-progress',
+          attempt: 2,
+          correlationId: 'task:task-progress:attempt:2',
+          objective: 'Continue the current attempt',
+        },
+      },
+    });
+  });
 });
 
 function taskFact(status: string, taskId: string) {

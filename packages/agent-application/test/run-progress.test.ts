@@ -11,8 +11,17 @@ describe('Run progress projection', () => {
       status: 'waiting_for_user',
       events: [
         event(1, 'plan.revised', { tasks: [{ id: 'task-1' }, { id: 'task-2' }] }),
-        event(2, 'task.succeeded', { taskId: 'task-1', objective: '完成资料收集' }),
-        event(3, 'task.started', { taskId: 'task-2', objective: '撰写正文', owner: 'writer' }),
+        event(2, 'task.succeeded', {
+          taskId: 'task-1',
+          attempt: 1,
+          objective: '完成资料收集',
+        }),
+        event(3, 'task.started', {
+          taskId: 'task-2',
+          attempt: 1,
+          objective: '撰写正文',
+          owner: 'writer',
+        }),
       ],
       pendingInteraction: { type: 'ask-user', id: 'question-1' },
       recoveryPoint: {
@@ -28,7 +37,13 @@ describe('Run progress projection', () => {
         phase: 'waiting_for_user',
         completedSteps: 1,
         totalSteps: 2,
-        activeStep: { objective: '撰写正文', owner: 'writer' },
+        activeStep: {
+          taskId: 'task-2',
+          attempt: 1,
+          correlationId: 'task:task-2:attempt:1',
+          objective: '撰写正文',
+          owner: 'writer',
+        },
         outstandingInteraction: 'ask-user',
         recoveryPoint: { sequence: 7, reason: 'task_settled' },
       },
@@ -44,6 +59,50 @@ describe('Run progress projection', () => {
         events: [],
       }),
     ).toBeUndefined();
+  });
+
+  it('keeps the highest Task attempt active when an old result arrives late', () => {
+    const part = projectRunProgress({
+      runId: 'run-1',
+      mode: 'planned',
+      status: 'running',
+      events: [
+        event(1, 'plan.revised', { tasks: [{ id: 'task-1' }] }),
+        event(2, 'task.started', {
+          taskId: 'task-1',
+          attempt: 2,
+          objective: '当前重试',
+          owner: 'writer',
+        }),
+        event(3, 'task.succeeded', { taskId: 'task-1', attempt: 1 }),
+      ],
+    });
+
+    expect(part?.payload).toMatchObject({
+      completedSteps: 0,
+      activeStep: {
+        taskId: 'task-1',
+        attempt: 2,
+        correlationId: 'task:task-1:attempt:2',
+        objective: '当前重试',
+      },
+    });
+  });
+
+  it('ignores Task progress facts without complete identity', () => {
+    const part = projectRunProgress({
+      runId: 'run-1',
+      mode: 'planned',
+      status: 'running',
+      events: [
+        event(1, 'plan.revised', { tasks: [{ id: 'task-1' }] }),
+        event(2, 'task.succeeded', { taskId: 'task-1' }),
+        event(3, 'task.started', { attempt: 1, objective: '无 Task ID' }),
+      ],
+    });
+
+    expect(part?.payload).toMatchObject({ completedSteps: 0, totalSteps: 1 });
+    expect(part?.payload.activeStep).toBeUndefined();
   });
 });
 

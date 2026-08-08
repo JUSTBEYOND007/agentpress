@@ -39,6 +39,9 @@ export function projectRunProgress(input: {
       ...(activeTask
         ? {
             activeStep: {
+              taskId: stringValue(activeTask.payload.taskId),
+              attempt: positiveIntegerValue(activeTask.payload.attempt),
+              correlationId: taskCorrelation(activeTask),
               objective: stringValue(activeTask.payload.objective),
               owner: stringValue(activeTask.payload.owner),
             },
@@ -74,9 +77,25 @@ function latestTaskStates(events: readonly DurableRunEvent[]) {
   for (const event of events) {
     if (!event.eventType.startsWith('task.')) continue;
     const taskId = stringValue(event.payload.taskId);
-    if (taskId) states.set(taskId, event);
+    const attempt = positiveIntegerValue(event.payload.attempt);
+    if (!taskId || attempt === undefined) continue;
+    const current = states.get(taskId);
+    const currentAttempt = current ? positiveIntegerValue(current.payload.attempt) : undefined;
+    if (
+      currentAttempt === undefined ||
+      attempt > currentAttempt ||
+      (current !== undefined && attempt === currentAttempt && event.sequence > current.sequence)
+    ) {
+      states.set(taskId, event);
+    }
   }
   return states;
+}
+
+function taskCorrelation(event: DurableRunEvent): string {
+  return `task:${stringValue(event.payload.taskId)}:attempt:${String(
+    positiveIntegerValue(event.payload.attempt),
+  )}`;
 }
 
 function progressPhase(
@@ -91,4 +110,8 @@ function progressPhase(
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function positiveIntegerValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
