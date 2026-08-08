@@ -62,8 +62,8 @@ type DirectRunServiceOptions = {
   readonly now?: () => Date;
   readonly createId?: () => string;
   readonly maxSpecialistConcurrency?: number;
-  /** Specialist runtime deadline. Primarily overridden by deterministic timeout tests. */
   readonly taskTimeoutMs?: number;
+  readonly detachedTaskWaitTimeoutMs?: number;
   /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
   readonly dispatchCommands?: boolean;
   /** Optional Pi-backed chooser. The host validates its result before pinning context. */

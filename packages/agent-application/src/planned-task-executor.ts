@@ -43,6 +43,7 @@ import { parseSpecialistTaskRequest, type SpecialistRole } from './specialist-ta
 import { SpecialistResultStore } from './specialist-result-store.js';
 
 const INLINE_TASK_TIMEOUT_MS = 120_000;
+const DETACHED_TASK_WAIT_TIMEOUT_MS = 10 * 60_000;
 const TASK_LEASE_GRACE_MS = 30_000;
 const RESEARCH_TASK_POLICY = researchExecutionPolicy('deep');
 
@@ -56,12 +57,18 @@ type PlannedTaskExecutorOptions = {
   readonly createId: () => string;
   readonly now: () => Date;
   readonly inlineTaskTimeoutMs?: number;
+  readonly detachedTaskWaitTimeoutMs?: number;
   readonly runtimeToolFactory?: RuntimeToolFactory;
 };
 
 export class PlannedTaskExecutor {
+  private readonly detachedTaskWaitTimeoutMs: number;
+
   public constructor(private readonly options: PlannedTaskExecutorOptions) {
     assertTaskTimeout(options.inlineTaskTimeoutMs ?? INLINE_TASK_TIMEOUT_MS);
+    this.detachedTaskWaitTimeoutMs =
+      options.detachedTaskWaitTimeoutMs ?? DETACHED_TASK_WAIT_TIMEOUT_MS;
+    assertTaskTimeout(this.detachedTaskWaitTimeoutMs);
   }
 
   public async executeDetached(
@@ -186,7 +193,7 @@ export class PlannedTaskExecutor {
       waited = await this.options.taskWaits.waitForAny({
         runId,
         taskIds: [task.id],
-        timeoutMs: 10 * 60_000,
+        timeoutMs: this.detachedTaskWaitTimeoutMs,
         pollIntervalMs: 250,
         ...(signal ? { signal } : {}),
       });
@@ -201,25 +208,33 @@ export class PlannedTaskExecutor {
       };
     }
     const result = waited.settled[0];
-    if (!result || waited.timedOut) {
-      return {
-        ...task,
-        status: 'failed',
-        artifacts: [],
-        warnings: [],
-        failure: 'detached_task_timeout',
-      };
-    }
-    const failure = taskResultFailure(result.failure);
-    return {
+    if (result && !waited.timedOut) return settledTaskFromFact(task, result);
+
+    const timedOut: SettledTask = {
       ...task,
-      status: result.status,
-      ...('summary' in result ? { summary: result.summary } : {}),
-      artifacts: decodePersistedArtifacts(result.artifacts),
-      ...('summary' in result ? { usage: result.usage as RuntimeUsage } : {}),
-      warnings: result.warnings,
-      ...(failure ? { failure } : {}),
+      status: 'failed',
+      artifacts: [],
+      warnings: [],
+      failure: 'detached_task_timeout',
     };
+    const current = await this.options.database
+      .select({ attempt: agentTasks.attempt, status: agentTasks.status })
+      .from(agentTasks)
+      .where(and(eq(agentTasks.id, task.id), eq(agentTasks.runId, runId)))
+      .limit(1);
+    const active = current[0];
+    if (active?.status === 'running' && active.attempt > 0) {
+      if (await this.options.results.persistTaskResult(runId, timedOut, active.attempt)) {
+        return timedOut;
+      }
+      const raced = await this.options.taskWaits.waitForAny({
+        runId,
+        taskIds: [task.id],
+        timeoutMs: 0,
+      });
+      if (raced.settled[0]) return settledTaskFromFact(task, raced.settled[0]);
+    }
+    return timedOut;
   }
 
   private async execute(
@@ -452,6 +467,22 @@ export class PlannedTaskExecutor {
     if (!toolResult) return undefined;
     return [message, toolResult];
   }
+}
+
+function settledTaskFromFact(
+  task: PlannedTaskSpec,
+  result: Awaited<ReturnType<AgentTaskWaitService['waitForAny']>>['settled'][number],
+): SettledTask {
+  const failure = taskResultFailure(result.failure);
+  return {
+    ...task,
+    status: result.status,
+    ...('summary' in result ? { summary: result.summary } : {}),
+    artifacts: decodePersistedArtifacts(result.artifacts),
+    ...('summary' in result ? { usage: result.usage as RuntimeUsage } : {}),
+    warnings: result.warnings,
+    ...(failure ? { failure } : {}),
+  };
 }
 
 function taskExecutionSignal(parent: AbortSignal | undefined, timeoutMs: number) {

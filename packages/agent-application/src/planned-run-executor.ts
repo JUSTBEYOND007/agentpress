@@ -73,6 +73,7 @@ type PlannedRunExecutorOptions = {
   readonly createId?: () => string;
   readonly maxSpecialistConcurrency?: number;
   readonly taskTimeoutMs?: number;
+  readonly detachedTaskWaitTimeoutMs?: number;
   /** Global provider ceiling applied in addition to the Specialist wave limit. */
   readonly maxProviderConcurrency?: number;
 };
@@ -132,6 +133,9 @@ export class PlannedRunExecutor {
       now: this.now,
       ...(options.taskTimeoutMs !== undefined
         ? { inlineTaskTimeoutMs: options.taskTimeoutMs }
+        : {}),
+      ...(options.detachedTaskWaitTimeoutMs !== undefined
+        ? { detachedTaskWaitTimeoutMs: options.detachedTaskWaitTimeoutMs }
         : {}),
       ...(options.runtimeToolFactory ? { runtimeToolFactory: options.runtimeToolFactory } : {}),
     });

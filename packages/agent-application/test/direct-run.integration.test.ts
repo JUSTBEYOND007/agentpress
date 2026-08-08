@@ -3157,6 +3157,87 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(synthesisTurn).toContain('image_provider_unavailable');
   });
 
+  it('persists a detached wait timeout through the current Task attempt', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', {
+          goal: 'Bound detached wait',
+          tasks: [
+            {
+              ...plannedTask('detached-timeout', 'illustrator', [], 'optional'),
+              detached: true,
+            },
+          ],
+        }),
+        runCompleteResponse('Detached worker timed out; deliver without it.'),
+      ],
+    });
+    const timeoutService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      systemPrompt: 'You are AgentPress.',
+      detachedTaskWaitTimeoutMs: 200,
+    });
+    const run = await timeoutService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: 'Try an optional detached illustration.',
+      idempotencyKey: randomUUID(),
+    });
+    const execution = timeoutService.execute(run.runId);
+    let taskId: string | undefined;
+    for (let attempt = 0; attempt < 100 && !taskId; attempt += 1) {
+      const rows = await connection.db
+        .select({ id: agentTasks.id })
+        .from(agentTasks)
+        .where(eq(agentTasks.runId, run.runId));
+      taskId = rows[0]?.id;
+      if (!taskId) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    expect(taskId).toBeDefined();
+    const claimed = await connection.db.transaction((transaction) =>
+      claimAgentTask(transaction, {
+        taskId: taskId ?? '',
+        workerId: 'detached-timeout-worker',
+        leaseId: randomUUID(),
+        leaseToken: randomUUID(),
+        leaseMs: 10_000,
+        now: new Date(),
+      }),
+    );
+    expect(claimed?.attempt).toBe(1);
+    await expect(execution).resolves.toMatchObject({ status: 'completed_with_degradation' });
+
+    const resultRows = await connection.db
+      .select({
+        status: taskResults.status,
+        attempt: taskResults.attempt,
+        failure: taskResults.failure,
+      })
+      .from(taskResults)
+      .where(eq(taskResults.taskId, taskId ?? ''));
+    expect(resultRows).toEqual([
+      {
+        status: 'failed',
+        attempt: 1,
+        failure: { code: 'detached_task_timeout', message: 'detached_task_timeout' },
+      },
+    ]);
+    const projection = await timeoutService.getProjection(run.runId);
+    expect(
+      projection?.parts.some(
+        (part) => part.status === 'task.failed' && part.outcome === 'timed_out',
+      ),
+    ).toBe(true);
+  });
+
   it('promotes Follow-ups in FIFO order across chained Runs', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
