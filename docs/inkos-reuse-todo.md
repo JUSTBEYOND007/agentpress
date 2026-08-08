@@ -69,8 +69,11 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       `packages/agent-application/src/run-projection.ts` 已为 activity RunPart 写入不可变 `outcome`，并将
       outcome 复制到 lifecycle stage；96 个 Agent Application projection tests 与 92 个 Web tests 通过，
       ToolCall live/replay 深相等集成已通过，但其余完整事件链仍待补齐。
-- [ ] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
+- [x] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
       本地化只发生在 projector/consumer；React 不得匹配日志或阶段文案来推断状态。
+      `run-projection.ts` 现在从 durable event 确定性生成 stage identity、label key、时间、outcome 和可选
+      progress；Web consumer 只本地化受控 `labelKey`，未知旧事件才使用兼容 fallback。Agent Application
+      96 个测试和 Web 92 个测试覆盖 opaque status + typed label/outcome 场景。
 - [ ] 为 execution/task/attempt 统一 correlation id；所有 progress/log/result 必须带归属，缺 id 时
       fail closed，不回退到“最近运行项”；补齐乱序、重复、旧 attempt 晚到、断线、刷新和 worker 重启回归。
 - [ ] 将 planner、DAG scheduler、task executor、lease store、Specialist runtime、result/evidence

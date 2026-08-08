@@ -76,11 +76,30 @@ export function projectRunParts(
 }
 
 function lifecycleStage(part: RunPart): Readonly<Record<string, unknown>> {
+  const eventAt = part.payload.eventAt;
+  const settled = part.outcome !== undefined;
+  const progress = recordProperty(part.payload, 'progress');
   return {
+    stageId: `${part.id}:${String(part.sequence)}`,
+    labelKey: stageLabelKey(part.status, part.outcome),
     status: part.status,
     ...(part.outcome ? { outcome: part.outcome } : {}),
-    eventAt: part.payload.eventAt,
+    ...(settled ? { completedAt: eventAt } : { startedAt: eventAt }),
+    ...(Object.keys(progress).length > 0 ? { progress } : {}),
+    eventAt,
   };
+}
+
+function stageLabelKey(status: string, outcome?: ActivityOutcome): string {
+  if (outcome === 'succeeded') return 'execution.succeeded';
+  if (outcome === 'degraded') return 'execution.degraded';
+  if (outcome === 'failed') return 'execution.failed';
+  if (outcome === 'cancelled') return 'execution.cancelled';
+  if (outcome === 'timed_out') return 'execution.timed_out';
+  if (outcome === 'interrupted') return 'execution.interrupted';
+  if (outcome === 'stale') return 'execution.stale';
+  if (status.endsWith('.executing')) return 'execution.executing';
+  return 'execution.started';
 }
 
 function lifecycleStages(

@@ -277,10 +277,11 @@ function lifecycleStagesForPart(part: RunPart, label: string): readonly Consumer
     if (!status) return [];
     const outcome = activityOutcome(record.outcome);
     const explicitLabel = stringProperty(record, 'label');
+    const labelKey = stringProperty(record, 'labelKey');
     return [
       {
         id: `${part.id}:${String(index)}`,
-        label: explicitLabel ?? stageLabel(label, status),
+        label: explicitLabel ?? localizedStageLabel(labelKey) ?? stageLabel(label, status),
         status: executionStatus(status, outcome),
       },
     ];
@@ -291,6 +292,22 @@ function lifecycleStagesForPart(part: RunPart, label: string): readonly Consumer
   return meaningful.filter(
     (stage, index) => index === 0 || stage.label !== meaningful[index - 1]?.label,
   );
+}
+
+const localizedStageLabels: Readonly<Record<string, string>> = {
+  'execution.started': '已开始',
+  'execution.executing': '正在执行',
+  'execution.succeeded': '结果已生成',
+  'execution.degraded': '部分完成',
+  'execution.failed': '未完成',
+  'execution.cancelled': '已取消',
+  'execution.timed_out': '已超时',
+  'execution.interrupted': '已中断',
+  'execution.stale': '已过期',
+};
+
+function localizedStageLabel(labelKey: string | undefined): string | undefined {
+  return labelKey ? localizedStageLabels[labelKey] : undefined;
 }
 
 function activityOutcome(value: unknown): ActivityOutcome | undefined {

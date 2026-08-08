@@ -258,11 +258,11 @@ describe('run presentation projection', () => {
       ...part('activity', 'task.succeeded', 1, {
         taskId: 'task-typed-outcomes',
         lifecycleStages: [
-          { status: 'task.timed_out' },
-          { status: 'task.cancelled' },
-          { status: 'task.interrupted' },
-          { status: 'task.stale' },
-          { status: 'task.degraded' },
+          { status: 'opaque-1', outcome: 'timed_out', labelKey: 'execution.timed_out' },
+          { status: 'opaque-2', outcome: 'cancelled', labelKey: 'execution.cancelled' },
+          { status: 'opaque-3', outcome: 'interrupted', labelKey: 'execution.interrupted' },
+          { status: 'opaque-4', outcome: 'stale', labelKey: 'execution.stale' },
+          { status: 'opaque-5', outcome: 'degraded', labelKey: 'execution.degraded' },
         ],
       }),
       outcome: 'degraded' as const,

@@ -15,7 +15,10 @@ describe('run projection', () => {
   it('folds tool and task lifecycle events into their latest durable state', () => {
     const parts = projectRunParts([
       event(1, 'task.started', { taskId: 'task-1' }),
-      event(2, 'tool.executing', { toolCallId: 'tool-1' }),
+      event(2, 'tool.executing', {
+        toolCallId: 'tool-1',
+        progress: { completed: 1, total: 2 },
+      }),
       event(3, 'tool.succeeded', { toolCallId: 'tool-1' }),
       event(4, 'task.succeeded', { taskId: 'task-1' }),
     ]);
@@ -27,8 +30,22 @@ describe('run projection', () => {
     expect(parts[0]?.payload).toMatchObject({ durationMs: 3 });
     expect(parts[1]?.payload).toMatchObject({ durationMs: 1 });
     expect(parts[1]?.payload.lifecycleStages).toEqual([
-      { status: 'tool.executing', eventAt: new Date(2).toISOString() },
-      { status: 'tool.succeeded', outcome: 'succeeded', eventAt: new Date(3).toISOString() },
+      {
+        stageId: 'run-1:tool:tool-1:2',
+        labelKey: 'execution.executing',
+        status: 'tool.executing',
+        startedAt: new Date(2).toISOString(),
+        progress: { completed: 1, total: 2 },
+        eventAt: new Date(2).toISOString(),
+      },
+      {
+        stageId: 'run-1:tool:tool-1:3',
+        labelKey: 'execution.succeeded',
+        status: 'tool.succeeded',
+        outcome: 'succeeded',
+        completedAt: new Date(3).toISOString(),
+        eventAt: new Date(3).toISOString(),
+      },
     ]);
   });
 
