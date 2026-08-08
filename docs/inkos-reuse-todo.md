@@ -717,7 +717,11 @@ Node connection code 或 failed-rollback 进入 reconciliation，从事务前 Ru
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
-- [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
+- [x] settlement 重试与生成重试分离；`recoverSettlement` 只接受初次校验失败的候选，最多执行一次
+      `replaySafe` 结算并重新校验，绝不重新生成；不可重放、重试失败、重试后仍非法和
+      `SettlementOutcomeUnknownError` 分别返回 typed degradation/outcome_unknown。`recovery-policy.test.ts`
+      覆盖 settlement/validation 调用次数、冻结事实、重试上限和相反语义，`recovery-fact-validation.integration.test.ts`
+      使用 PostgreSQL 验证恢复候选的 stale revision/missing Evidence 不会伪造成功。
 - [x] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分；通过
       `task_result_invalidations` 隔离损坏 succeeded TaskResult，不删除旧结果或旧 Artifact Version，
       并以 Task/attempt fence 只重跑损坏分支。

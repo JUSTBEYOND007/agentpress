@@ -157,6 +157,13 @@ durable `skill.selection.completed` payload retains `explicit`, `model`, and fin
 The remaining negative case is an explicitly injected missing-revision fact and its fail-closed public
 projection, which is still tracked in the local TODO.
 
+InkOS chapter recovery's retry boundary is represented by the existing `recoverSettlement` policy,
+not by another generation loop. It permits at most one replay-safe settlement, validates the settled
+candidate again, preserves previously valid facts on degradation, and maps an unknown commit outcome
+to `outcome_unknown`. Unit tests assert that generation is never called; the PostgreSQL recovery-fact
+integration covers stale article revision and missing Evidence as degraded, regeneration-required
+facts rather than successful output.
+
 Web Research retains the existing SSRF/DNS/redirect/media/size guards and built-in `web_research`
 MCP route. `packages/web-research` now owns product enums, the typed ResearchBrief schema,
 claim-to-Evidence validation, provider-neutral search/fetch/synthesis Ports, depth-specific query,
