@@ -654,6 +654,7 @@ describeWithDatabase('Tool Call application flow', () => {
   });
 
   it('replays a settled provider Tool Call without executing its side effect twice', async () => {
+    const publishedFrom = published.length;
     const runId = await createRunningRun();
     const bridge = new PersistentToolBridge({
       database: connection.db,
@@ -672,6 +673,19 @@ describeWithDatabase('Tool Call application flow', () => {
       search?.execute({ query: 'replay-safe' }, { runId, providerToolCallId }),
     ).resolves.toEqual({ result: 'replay-safe' });
     expect(searchExecutions - before).toBe(1);
+    const duplicateEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) =>
+        event.durable && event.event.eventType === 'tool.duplicate_result_ignored'
+          ? [event.event]
+          : [],
+      );
+    expect(duplicateEvents).toHaveLength(1);
+    expect(duplicateEvents[0]?.payload).toMatchObject({ reason: 'idempotency_replay' });
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    expect(replay?.parts.some(({ status }) => status === 'tool.duplicate_result_ignored')).toBe(
+      false,
+    );
   });
 
   it('narrows runtime tools to the intersection of pinned Skill permissions', async () => {

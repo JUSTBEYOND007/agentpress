@@ -156,6 +156,7 @@ function toRunParts(
   proposalStatuses: ReadonlyMap<string, ProposalProjectionStatus>,
 ): readonly RunPart[] {
   const type = event.eventType;
+  if (type === 'tool.duplicate_result_ignored') return [];
   const partType =
     type === 'message.completed'
       ? 'text'

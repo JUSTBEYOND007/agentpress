@@ -206,12 +206,19 @@ export class ToolCallExecutionService {
         );
       }
       if (call.idempotencyKey && call.status === 'succeeded') {
+        const event = await appendRunEvent(transaction, {
+          id: this.createId(),
+          runId: call.runId,
+          eventType: 'tool.duplicate_result_ignored',
+          payload: { toolCallId: call.id, reason: 'idempotency_replay' },
+        });
         return {
           replay: {
             toolCallId: call.id,
             status: call.status,
             output: call.output,
           },
+          event: toDurableEvent(event),
         };
       }
       const allowed =
@@ -241,7 +248,10 @@ export class ToolCallExecutionService {
       });
       return { call, definition, event: toDurableEvent(event) };
     });
-    if ('replay' in claimed) return claimed.replay;
+    if ('replay' in claimed) {
+      await this.options.publisher.publish({ durable: true, event: claimed.event });
+      return claimed.replay;
+    }
     await this.options.publisher.publish({ durable: true, event: claimed.event });
 
     let output: unknown;

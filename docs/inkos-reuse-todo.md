@@ -133,6 +133,8 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       stale late result、duplicate end 和 Playwright 场景仍待补齐。
 - [ ] approval/denied/cancel/degraded/duplicate-result/recovered 各有 typed event；权限只来自宿主 capability、
       Approval 和 Settlement 事实，远端 Server、Skill、网页内容和工具名称不能授予权限。
+      replay-safe ToolCall 重复执行现在追加脱敏 `tool.duplicate_result_ignored` durable fact；消费者 projector
+      忽略该审计事件，保留原成功 lifecycle，不重复展示或执行副作用。其余 typed event 仍待补齐。
 - [ ] 复用现有 RunPart projector 增加 MCP 审计投影：消费者只显示业务 label；server/tool/revision、attempt、
       retry、duration、schema-aware 参数摘要、output refs 和脱敏错误只进入按需详情。
 - [ ] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
