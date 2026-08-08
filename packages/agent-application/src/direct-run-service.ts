@@ -5,7 +5,6 @@ import { RUNTIME_CURRENT_TURN_VERSION } from '@agentpress/agent-runtime';
 import { parseActionEnvelope, type ActionEnvelopeV1 } from '@agentpress/contracts';
 import {
   agentRuns,
-  type AgentPressDatabase,
   conversationBranches,
   conversationMessages,
   conversations,
@@ -18,7 +17,6 @@ import { and, asc, desc, eq, gte, lt } from 'drizzle-orm';
 
 import {
   AgentApplicationError,
-  type AgentRuntimeFactory,
   type CreateDirectRunInput,
   type CreateDirectRunResult,
   type DurableRunEvent,
@@ -26,9 +24,6 @@ import {
   type EnqueueRunDirectiveResult,
   type RequestRunCancellationResult,
   type RunProjection,
-  type RunEventPublisher,
-  type RuntimeToolFactory,
-  type SkillPreselector,
 } from './contracts.js';
 import { PlannedRunExecutor } from './planned-run-executor.js';
 import {
@@ -50,26 +45,10 @@ import { RunRecoveryService } from './run-recovery-service.js';
 import { RunSettlementService } from './run-settlement-service.js';
 import { DirectRunCreationService } from './direct-run-creation-service.js';
 import { currentTurnSourceForRunStatus } from './run-current-turn.js';
+import { RecoveryFactValidationService } from './recovery-fact-validation-service.js';
+import type { DirectRunServiceOptions } from './direct-run-options.js';
 
 export { isTerminalRunStatus } from './run-projection-service.js';
-
-type DirectRunServiceOptions = {
-  readonly database: AgentPressDatabase;
-  readonly runtimeFactory: AgentRuntimeFactory;
-  readonly publisher: RunEventPublisher;
-  readonly systemPrompt: string;
-  readonly runtimeToolFactory?: RuntimeToolFactory;
-  readonly now?: () => Date;
-  readonly createId?: () => string;
-  readonly maxSpecialistConcurrency?: number;
-  readonly taskTimeoutMs?: number;
-  readonly detachedTaskWaitTimeoutMs?: number;
-  readonly maxSpecialistTokens?: number;
-  /** Disable outbox dispatch only for isolated evaluation harnesses. Production defaults to true. */
-  readonly dispatchCommands?: boolean;
-  /** Optional Pi-backed chooser. The host validates its result before pinning context. */
-  readonly skillPreselector?: SkillPreselector;
-};
 
 export class DirectRunService {
   private readonly now: () => Date;
@@ -84,6 +63,7 @@ export class DirectRunService {
   private readonly interactions: RunInteractionService;
   private readonly recovery: RunRecoveryService;
   private readonly settlements: RunSettlementService;
+  private readonly recoveryFacts: RecoveryFactValidationService;
   private readonly creation: DirectRunCreationService;
 
   public constructor(private readonly options: DirectRunServiceOptions) {
@@ -106,6 +86,11 @@ export class DirectRunService {
       publisher: options.publisher,
       createId: this.createId,
       now: this.now,
+    });
+    this.recoveryFacts = new RecoveryFactValidationService({
+      database: options.database,
+      publisher: options.publisher,
+      createId: this.createId,
     });
     this.compactions = new ConversationCompactionService({
       database: options.database,
@@ -214,11 +199,15 @@ export class DirectRunService {
     if (signal?.aborted && outcome.result.status === 'failed') {
       throw new Error(outcome.result.error.message);
     }
+    const recoveryValidation =
+      context.status === 'recovering' && outcome.result.status === 'completed'
+        ? await this.recoveryFacts.validateAndProject(runId)
+        : undefined;
     return this.settlements.settle(
       context.branchId,
       runId,
       outcome.result,
-      outcome.degraded,
+      outcome.degraded || recoveryValidation?.status === 'completed_with_degradation',
       outcome.failureStage,
     );
   }

@@ -586,8 +586,17 @@ TODO：
 应用契约进度：`recovery-policy.ts` 已限制 settlement 最多重试一次，只允许显式 replay-safe 操作，
 重试后重新执行 validator；失败结果携带 preserved/missing/unverified/nextActions，已验证事实不会被
 重试结果覆盖。提交后断线可由 typed `SettlementOutcomeUnknownError` 保持为独立
-`outcome_unknown`，不降格为普通失败或 degraded。5 个纯策略测试已通过；接入 PostgreSQL store、
-Article/Evidence/Artifact validator 和故障注入矩阵前，本节其余集成项仍保持未完成。
+`outcome_unknown`，不降格为普通失败或 degraded。5 个纯策略测试已通过。
+
+实际恢复验证现由独立 `RecoveryFactValidationService` 接通，不扩张 `RunRecoveryService`：恢复执行完成、
+Run settlement 前，它从 PostgreSQL 读取当前 ArticleDraft Artifact Version、Article current revision、
+Artifact-Evidence link 和同 Run Evidence，复用 `reviewArticleDeterministically` 检查 Artifact schema、stale
+revision 和 Evidence 闭包。非法候选通过 `recoverSettlement(replaySafe=false)` 生成结构化
+preservedFacts/missingFacts/unverified/nextActions 并写 `run.recovery.degraded`；合法候选写
+`run.recovery.validated`。同一 Run 由锁和既有 event 幂等 fence，不能重复投影。两条 PostgreSQL 正反用例
+证明陈旧 Revision + 缺失 Evidence 会令最终 Run `completed_with_degradation`，而当前 Revision + 无缺失引用
+正常完成；RunPart 分别带 host-owned `degraded`/`succeeded` outcome。完整 capability 校验和只重新计算损坏
+Artifact 的执行策略仍未接入，因此对应总项不提前勾选。
 
 MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连接丢失不会在新连接自动重放，退役 client
 的晚到结果由 identity fence 拒绝，只有调用前连接 probe 可安全重连；真实 Streamable HTTP 重启测试
@@ -654,7 +663,7 @@ OpenAI-compatible HTTP transport 向本地 Server 发出请求，Server 在首�
 连接。PostgreSQL 只为未完成的 optional Writer 写入 attempt 2 `task_timeout`，此前成功 Researcher 的
 ResearchBrief Artifact ID、Version 和内容保持不变，Run 以 `completed_with_degradation` 结算，live/replay
 投影为 `timed_out`。已取消 signal 还会在 provider dispatch 前 fail closed，不再遗留无人接管的 rejection。
-该证据仍不替代数据库提交前/后断线和 Article/Evidence/Artifact validator 的完整接入，因此总项不勾选。
+该证据不替代 Article/Evidence/Artifact validator；该接入及其边界见下述恢复事实验证。
 已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
 增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
 恢复准备现在还会为同事务内从 `running` 转为 `interrupted` 的每个 Task Attempt 写入
@@ -698,7 +707,7 @@ Node connection code 或 failed-rollback 进入 reconciliation，从事务前 Ru
 - [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
 - [ ] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分。
 - [ ] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
-- [ ] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
+- [x] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
 - [x] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。
 - [x] 测试覆盖 provider timeout、worker crash、数据库提交前后断线、重复恢复、部分 Artifact、失效引用、
       stale worker 和恢复期间用户取消。

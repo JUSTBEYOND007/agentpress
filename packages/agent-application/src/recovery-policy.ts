@@ -9,8 +9,27 @@ export type RecoveryValidation = {
 };
 
 export type RecoveryPreservedFacts = {
+  readonly kind:
+    | 'article_revision'
+    | 'artifact_version'
+    | 'evidence'
+    | 'task_result'
+    | 'checkpoint';
+  readonly id: string;
   readonly description: string;
   readonly revision: string;
+};
+
+export type RecoveryGap = {
+  readonly code: string;
+  readonly description: string;
+  readonly reference?: string;
+};
+
+export type RecoveryNextAction = {
+  readonly kind: 'repair_settlement' | 'regenerate_artifact' | 'review_manually';
+  readonly labelKey: string;
+  readonly targetId?: string;
 };
 
 export type SettlementRecoveryResult<TCandidate, TSettled> =
@@ -28,9 +47,9 @@ export type SettlementRecoveryResult<TCandidate, TSettled> =
       readonly validation: RecoveryValidation;
       readonly settlementAttempts: number;
       readonly preservedFacts: readonly RecoveryPreservedFacts[];
-      readonly missingFacts: readonly string[];
-      readonly unverified: readonly string[];
-      readonly nextActions: readonly string[];
+      readonly missingFacts: readonly RecoveryGap[];
+      readonly unverified: readonly RecoveryGap[];
+      readonly nextActions: readonly RecoveryNextAction[];
     }
   | {
       readonly status: 'outcome_unknown';
@@ -49,7 +68,8 @@ export type SettlementRecoveryInput<TCandidate, TSettled> = {
   readonly initialValidation: RecoveryValidation;
   readonly replaySafe: boolean;
   readonly preservedFacts: readonly RecoveryPreservedFacts[];
-  readonly missingFacts: readonly string[];
+  readonly missingFacts: readonly RecoveryGap[];
+  readonly nextActions?: readonly RecoveryNextAction[];
   readonly validate: (settled: TSettled) => Promise<RecoveryValidation>;
   readonly settle: (input: {
     readonly candidate: TCandidate;
@@ -153,8 +173,16 @@ function degraded<TCandidate, TSettled>(
     settlementAttempts,
     preservedFacts: input.preservedFacts,
     missingFacts: input.missingFacts,
-    unverified: validation.issues.map(({ message }) => message),
-    nextActions: ['Review the preserved facts and repair the failed settlement before continuing.'],
+    unverified: validation.issues.map(({ code, message }) => ({
+      code,
+      description: message,
+    })),
+    nextActions: input.nextActions ?? [
+      {
+        kind: 'repair_settlement',
+        labelKey: 'recovery.action.repair_settlement',
+      },
+    ],
   };
 }
 

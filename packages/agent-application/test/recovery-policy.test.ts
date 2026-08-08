@@ -10,7 +10,15 @@ const invalid: RecoveryValidation = {
   valid: false,
   issues: [{ code: 'state_conflict', message: 'State does not match the article body' }],
 };
-const preserved = [{ description: 'Article revision 3', revision: 'revision-3' }];
+const preserved = [
+  {
+    kind: 'article_revision' as const,
+    id: 'revision-3',
+    description: 'Article revision 3',
+    revision: 'revision-3',
+  },
+];
+const missing = [{ code: 'chapter_summary_missing', description: 'Chapter summary is missing' }];
 
 describe('settlement recovery policy', () => {
   it('retries settlement only and revalidates the retry', async () => {
@@ -26,7 +34,7 @@ describe('settlement recovery policy', () => {
         initialValidation: invalid,
         replaySafe: true,
         preservedFacts: preserved,
-        missingFacts: ['chapter summary'],
+        missingFacts: missing,
         settle,
         validate,
       }),
@@ -41,7 +49,7 @@ describe('settlement recovery policy', () => {
       initialValidation: invalid,
       replaySafe: true,
       preservedFacts: preserved,
-      missingFacts: ['chapter summary'],
+      missingFacts: missing,
       settle: vi.fn(() => Promise.resolve({ state: 'still-broken' })),
       validate: vi.fn(() =>
         Promise.resolve({
@@ -53,8 +61,8 @@ describe('settlement recovery policy', () => {
     expect(result).toMatchObject({
       status: 'completed_with_degradation',
       preservedFacts: preserved,
-      missingFacts: ['chapter summary'],
-      unverified: ['Still inconsistent'],
+      missingFacts: missing,
+      unverified: [{ code: 'state_conflict', description: 'Still inconsistent' }],
     });
   });
 

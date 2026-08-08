@@ -511,6 +511,14 @@ then drops the client acknowledgement. A bounded classifier accepts SQLSTATE cla
 system connection codes, plus Drizzle's structurally failed `rollback`, but never provider text. The
 service reads terminal facts after the pre-transaction RunEvent watermark and adopts only a matching
 committed terminal event, preventing duplicate messages and settlement events.
+Recovery fact validation is now connected to the PostgreSQL Artifact, Article Revision, and Evidence
+stores after recovered execution and before Run settlement. The dedicated service reuses the existing
+deterministic article reviewer for document shape, stale revision, and Evidence closure. Invalid facts
+pass through the non-replay-safe recovery policy and persist typed `preservedFacts`, `missingFacts`,
+`unverified`, and `nextActions` in `run.recovery.degraded`; valid facts persist
+`run.recovery.validated`. PostgreSQL opposite-path fixtures prove stale/missing facts force
+`completed_with_degradation`, while a current valid immutable Artifact remains successful. The RunPart
+projector exposes host-owned degraded/succeeded recovery outcomes without consumer text inference.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 

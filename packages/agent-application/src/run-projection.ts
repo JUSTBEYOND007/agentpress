@@ -193,7 +193,7 @@ function toRunParts(
   const proposalStatus = proposalId ? proposalStatuses.get(proposalId) : undefined;
   const lifecycle = lifecycleKey(event);
   const outcome =
-    partType === 'activity' || type === 'tool.outcome_unknown'
+    partType === 'activity' || partType === 'recovery' || type === 'tool.outcome_unknown'
       ? activityOutcome(type, event.payload)
       : undefined;
   return [
@@ -220,6 +220,7 @@ function activityOutcome(
   status: string,
   payload: Readonly<Record<string, unknown>> = {},
 ): ActivityOutcome | undefined {
+  if (status === 'run.recovery.validated') return 'succeeded';
   if (status.endsWith('.succeeded') || status.endsWith('.completed')) return 'succeeded';
   if (status.endsWith('.degraded') || status === 'completed_with_degradation') return 'degraded';
   if (

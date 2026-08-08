@@ -182,6 +182,17 @@ describe('run projection', () => {
     ]);
   });
 
+  it('projects recovery validation and degradation as typed recovery outcomes', () => {
+    const parts = projectRunParts([
+      event(1, 'run.recovery.validated', { preservedFacts: [] }),
+      event(2, 'run.recovery.degraded', { unverified: [{ code: 'stale_revision' }] }),
+    ]);
+    expect(parts.map(({ type, status, outcome }) => ({ type, status, outcome }))).toEqual([
+      { type: 'recovery', status: 'run.recovery.validated', outcome: 'succeeded' },
+      { type: 'recovery', status: 'run.recovery.degraded', outcome: 'degraded' },
+    ]);
+  });
+
   it('projects Specialist timeout from the persisted failure fact', () => {
     const [part] = projectRunParts([
       event(1, 'task.started', { taskId: 'task-timeout', attempt: 1 }),
