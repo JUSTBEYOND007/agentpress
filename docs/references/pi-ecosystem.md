@@ -140,8 +140,9 @@ host allowlist. Resource documents must be declared regular UTF-8 files under bo
 total-size limits; symlink/duplicate/unsafe paths fail closed. Run bindings pin revision/hash and
 historical instructions are expired by transcript projection. The Composer projection already shows
 the compact Skill identity while revision/hash/resource diagnostics remain persisted details. The
-online `pnpm eval:skill` target-model gate remains intentionally unchecked until credentials and a
-provider/model manifest are supplied.
+online `pnpm eval:skill` target-model gate now requires complete fixed-dataset coverage and records
+exact match, none precision/recall, forbidden selection, malicious-description bypass, Schema error,
+typed runtime failure, and total error metrics independently.
 
 The production responsibilities are now fixed as independent owners rather than a central Skill
 manager: `packages/agent-context/src/skill.ts` owns discovery, conformance, and resource-byte safety;
@@ -399,9 +400,13 @@ call-rate remain external evaluation gates.
 
 The target-model Skill gate is exposed as `packages/agent-evals/src/skill-selection-online-cli.ts`
 (`pnpm eval:skill`). It reuses the host-owned `PiSkillPreselector`, pins the five-case dataset
-version, records exact-match and forbidden-selection metrics, and never treats a model-selected
-identity as a permission grant. The command is intentionally separate from `eval:pr`; it requires
-explicit online-model execution and a cost budget before its result can satisfy the real-model gate.
+version, and never treats a model-selected identity as a permission grant. Report Schema v2 records
+exact-match, none precision/recall, forbidden selection, malicious-description bypass, Schema error,
+typed timeout/provider failure, total error rate, and dataset coverage independently. Partial runs
+cannot pass because `datasetComplete` is mandatory. A first 2026-08-09 target-model run retained its
+single timeout as a failed report; the complete rerun at
+`.agentpress/evals/2026-08-08T18-48-17-177Z-gpt-5.6-terra-skill-selection.json` passed with 5/5 exact
+match, none precision/recall 1, and zero forbidden, bypass, Schema, or runtime errors.
 
 ### MetaHarness behavior reference and independent adaptation
 

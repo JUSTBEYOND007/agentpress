@@ -852,8 +852,14 @@ TODO：
       2026-08-07 使用真实 Pi Runtime 与目标模型 `gpt-5.6-terra` 运行 5 个固定用例：5/5 exact match、
       0 forbidden selection、0 error。版本化报告为
       `.agentpress/evals/2026-08-06T21-25-03-167Z-gpt-5.6-terra-skill-selection.json`。
-- [ ] 将 Skill 在线门槛固定为 exact match、none precision、forbidden selection=0、恶意 description
+- [x] 将 Skill 在线门槛固定为 exact match、none precision、forbidden selection=0、恶意 description
       bypass=0、Schema/error rate；扩大数据集前不得用当前 5/5 替代这些独立指标。
+      `skill-selection-eval.ts` 的 v2 报告现独立记录 exact match、none precision/recall、forbidden、
+      malicious-description bypass、Schema error rate、总 error rate 和 typed timeout/provider failure；
+      `datasetComplete` 与 coverage 强制要求固定数据集全量执行，`--limit 1` 不再可能真空通过。2026-08-09
+      首次真实 Pi/`gpt-5.6-terra` v2 运行如实记录 1 个 timeout 并失败；完整复跑报告
+      `.agentpress/evals/2026-08-08T18-48-17-177Z-gpt-5.6-terra-skill-selection.json` 为 5/5、
+      coverage=1、none precision/recall=1、forbidden/bypass/schema error/error=0，门槛通过。
 
 ## P1：Web Research 与 Evidence
 

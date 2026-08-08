@@ -188,4 +188,15 @@ describe('PiSkillPreselector', () => {
       selector.select({ prompt: 'Provider failure', explicitSkills: [], candidates }),
     ).rejects.toMatchObject({ name: 'SkillSelectionError', code: 'provider_failure' });
   });
+
+  it('classifies completion without structured output as invalid output', async () => {
+    const runtime: AgentRuntime = {
+      execute: () => Promise.resolve({ status: 'completed', messages: [] }),
+    };
+    const selector = new PiSkillPreselector({ create: () => runtime }, 100);
+
+    await expect(
+      selector.select({ prompt: 'No tool call', explicitSkills: [], candidates }),
+    ).rejects.toMatchObject({ name: 'SkillSelectionError', code: 'invalid_output' });
+  });
 });

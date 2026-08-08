@@ -133,7 +133,12 @@ export class PiSkillPreselector {
         result.error.message,
       );
     }
-    if (!selected) throw new Error('Skill selection completed without structured output');
+    if (!selected) {
+      throw new SkillSelectionError(
+        'invalid_output',
+        'Skill selection completed without structured output',
+      );
+    }
 
     const byId = new Map(candidates.map((candidate) => [candidate.skillId, candidate]));
     return selected.map((skillId) => {
