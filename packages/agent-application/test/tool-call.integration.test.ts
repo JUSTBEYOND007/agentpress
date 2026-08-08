@@ -1136,6 +1136,7 @@ describeWithDatabase('Tool Call application flow', () => {
   });
 
   it('links the result URL Evidence to its exact Specialist Tool Call attempt', async () => {
+    const publishedFrom = published.length;
     const runId = await createRunningRun();
     const taskId = await createRunningTask(runId, 1);
     const bridge = new PersistentToolBridge({
@@ -1153,6 +1154,7 @@ describeWithDatabase('Tool Call application flow', () => {
 
     const rows = await connection.db
       .select({
+        evidenceId: evidenceRecords.id,
         sourceUri: evidenceRecords.sourceUri,
         sourceToolCallId: evidenceRecords.sourceToolCallId,
         providerRevision: toolCalls.evidenceProviderRevision,
@@ -1170,6 +1172,32 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(rows[0]?.sourceToolCallId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
     );
+    const settled = published
+      .slice(publishedFrom)
+      .flatMap((event) =>
+        event.durable && event.event.runId === runId && event.event.eventType === 'tool.succeeded'
+          ? [event.event]
+          : [],
+      );
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.payload).toMatchObject({
+      taskId,
+      taskAttempt: 1,
+      evidenceReferences: [
+        {
+          evidenceId: rows[0]?.evidenceId,
+          title: 'Primary source',
+          source: 'https://example.com/source',
+          sourceRevision: expect.any(String),
+        },
+      ],
+    });
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    expect(replay?.parts.find(({ status }) => status === 'tool.succeeded')?.payload).toMatchObject({
+      taskId,
+      taskAttempt: 1,
+      evidenceReferences: settled[0]?.payload.evidenceReferences,
+    });
   });
 
   it('recovers Evidence from an oversized ToolOutput Artifact idempotently', async () => {

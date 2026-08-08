@@ -182,7 +182,8 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 - [ ] PostgreSQL 集成验证 ToolCall ledger、RunEvent、Evidence/Artifact ref 同构恢复且重复/晚到不改已结算事实；
       Playwright 验证业务标签、详情披露、手动折叠、长名称/错误脱敏和桌面/移动端无溢出。
       `f3298a4` 的 projector fixture 已证明 proposed/executing/succeeded/duplicate/stale 的 live/replay
-      深相等，终态不会被迟到事件覆盖；本轮事件事实扩展保留 Evidence 引用和 attempt。完整 ledger +
+      深相等，终态不会被迟到事件覆盖；真实 PostgreSQL ToolCall fixture 进一步证明同一 Specialist attempt
+      的 ledger、`tool.succeeded` RunEvent、Evidence ID/source revision 和 replay RunPart 保持一致。完整
       Artifact 回放链与浏览器矩阵仍待完成。
 
 #### Skill
