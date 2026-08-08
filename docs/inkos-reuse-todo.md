@@ -139,8 +139,11 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       idempotency replay 都校验当前定义和持久化来源完全一致，revision drift 会在 provider 调用前以
       `approval_mismatch` fail closed。Tool Registry、三个内置 MCP 工具和 23 个 ToolCall PostgreSQL
       集成场景已通过；retry/reconnect 已由独立 audit owner 固化为 durable 计数和事件，并通过真实 HTTP
-      reconnect fixture；attempt、authoritative timestamps 和完整 output reference 仍未补齐，redacted
-      failure 已完成，因此总项保持未勾选。
+      reconnect fixture。ToolCall 生命周期事件现在复制持久化 `taskId/taskAttempt`，以 RunEvent `createdAt`
+      作为权威事件时间；成功 settlement 通过既有 `ToolEvidenceStore` 写入最多 32 条有界 Evidence 引用，
+      不把原始输出作为消费者事实。完整浏览器/真实 Server 矩阵仍未补齐，redacted failure 已完成，因此
+      总项保持未勾选（证据：`packages/agent-application/src/tool-call-execution-service.ts`、
+      `packages/agent-application/test/run-projection.test.ts`）。
 - [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影有界 typed reason；
       before-dispatch 必须是可重试的 `known_failed`，只有 after-dispatch/stale result 是独立
       `outcome_unknown`，不得压成普通 error/completed，也不自动重放可能有副作用的调用。
@@ -162,6 +165,8 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       已验证 degraded/recovered 的独立 label/outcome；剩余未完成的是更大范围的真实浏览器矩阵。
 - [ ] 复用现有 RunPart projector 增加 MCP 审计投影：消费者只显示业务 label；server/tool/revision、attempt、
       retry、duration、schema-aware 参数摘要、output refs 和脱敏错误只进入按需详情。
+      现有 projector 已消费有界 `ToolActivityAudit`；本轮补齐 durable settlement 的 `taskAttempt` 与
+      Evidence output references，Web 仍只在 audit 详情读取，普通 activity label 不变。
 - [ ] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
       超大输出只以 Evidence/Artifact/reference 展示。
       当前 consumer boundary 已覆盖 MCP `arguments`、`transportProvenance` 和 Artifact output reference，
@@ -174,6 +179,9 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       断线后的真实 stale late result、revision drift 和 Playwright 未完成。
 - [ ] PostgreSQL 集成验证 ToolCall ledger、RunEvent、Evidence/Artifact ref 同构恢复且重复/晚到不改已结算事实；
       Playwright 验证业务标签、详情披露、手动折叠、长名称/错误脱敏和桌面/移动端无溢出。
+      `f3298a4` 的 projector fixture 已证明 proposed/executing/succeeded/duplicate/stale 的 live/replay
+      深相等，终态不会被迟到事件覆盖；本轮事件事实扩展保留 Evidence 引用和 attempt。完整 ledger +
+      Artifact 回放链与浏览器矩阵仍待完成。
 
 #### Skill
 
