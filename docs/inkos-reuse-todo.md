@@ -786,7 +786,9 @@ TODO：
       `skill.selection.completed.catalogFailures` 保留 `load_failed|identity_mismatch` typed 事实，
       不再因单个损坏 Skill 阻塞整个 Run 创建；`protocol_error` 预选结果映射为
       `SkillSelectionError(code=invalid_output)`，provider error 保持 `provider_failure`；显式绑定仍由
-      Context/Binding 校验 fail closed。
+      Context/Binding 校验 fail closed。模型返回类型合法但不在 host catalog 的 Skill ID 也统一映射为
+      `invalid_output`，不会以普通异常绕过 `skill.selection.completed` 的失败记录；单元测试覆盖隐藏 Skill
+      被模型伪选的相反场景。恢复时 revision 缺失、资源读取中断和显式/模型冲突的 PostgreSQL 矩阵仍待补齐。
 - [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，

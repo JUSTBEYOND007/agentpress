@@ -138,7 +138,12 @@ export class PiSkillPreselector {
     const byId = new Map(candidates.map((candidate) => [candidate.skillId, candidate]));
     return selected.map((skillId) => {
       const candidate = byId.get(skillId);
-      if (!candidate) throw new Error(`Model selected unavailable Skill ${skillId}`);
+      if (!candidate) {
+        throw new SkillSelectionError(
+          'invalid_output',
+          `Model selected unavailable Skill ${skillId}`,
+        );
+      }
       return { skillId: candidate.skillId, version: candidate.version };
     });
   }

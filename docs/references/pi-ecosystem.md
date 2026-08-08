@@ -535,6 +535,12 @@ failure or exposing secret values. The lifecycle opposite-path coverage is in
 `packages/mcp-runtime/test/server-manager.test.ts`; credentials remain configuration input rather than a
 Domain fact or consumer event.
 
+Skill model selection now classifies a schema-valid but host-unavailable Skill ID as
+`SkillSelectionError(code=invalid_output)`, matching malformed structured output instead of leaking a generic
+exception past the selection fact boundary. The host catalog remains authoritative; hidden, disabled, explicit,
+or absent Skills cannot become permissions through model output. The opposite-path contract is covered by
+`packages/agent-application/test/skill-preselection.test.ts`.
+
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
 ### Implemented InkOS behavior baseline
