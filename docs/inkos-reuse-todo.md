@@ -648,7 +648,7 @@ Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用�
 用户取消误报为超时。真实 PostgreSQL 用例证明悬挂 Specialist 会在 deadline 后终止，Run 进入
 `completed_with_degradation`，并且非法 timeout 配置 fail closed。该用例只证明 Specialist deadline 的
 确定性状态转换，不替代真实 provider timeout；provider timeout、提交前后断线、重复恢复、
-部分 Artifact、失效 Evidence、stale worker 和恢复期间取消尚未形成完整矩阵，因此总项不勾选。
+部分 Artifact、失效 Evidence 和 stale worker 尚未形成完整矩阵，因此总项不勾选。
 已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
 增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
 恢复准备现在还会为同事务内从 `running` 转为 `interrupted` 的每个 Task Attempt 写入
@@ -662,8 +662,9 @@ worker crash 后的 ToolCall 风险投影也已补齐：恢复准备遇到已 di
 写入 protected `outcome_unknown(worker_lease_lost_after_dispatch)`，durable event 只包含 public failure，
 live/replay 使用同一 RunPart，Web 显示“执行进程中断，结果无法确认”；read-only 调用仍进入
 `tool.recovery_ready`，不会被该失败分支吞掉。Application/Web 各 116 个单元测试和 29 个 PostgreSQL
-ToolCall 场景通过。该证据覆盖 worker lease loss，不替代数据库提交前后断线、stale worker settlement 或
-恢复期间取消。
+ToolCall 场景通过。恢复期间取消也已由第 30 个 PostgreSQL 场景覆盖：replay-ready 的 read-only 调用在
+dispatch 前结算为 `tool.cancelled`，后续 prepare/execute 都不能复活它，provider 执行次数为 0，live/replay
+保持同一 cancelled activity。该证据不替代数据库提交前后断线或 stale worker settlement。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。

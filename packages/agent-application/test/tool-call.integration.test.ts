@@ -1867,6 +1867,81 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(events.map(({ eventType }) => eventType)).toContain('tool.recovery_ready');
   });
 
+  it('cancels a recovery-ready ToolCall without dispatching or reviving it', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const toolCallId = randomUUID();
+    const argumentsValue = { query: 'cancel recovery' };
+    await connection.db.insert(toolCalls).values({
+      id: toolCallId,
+      runId,
+      toolId: 'workspace.search',
+      toolVersion: '1.0.0',
+      arguments: argumentsValue,
+      argumentsHash: hashToolArguments(argumentsValue),
+      risk: 'read_only',
+      sideEffect: 'No side effect',
+      idempotencyKey: `search:${randomUUID()}`,
+      status: 'executing',
+    });
+    const runs = new DirectRunService({
+      database: connection.db,
+      publisher: {
+        publish(event) {
+          published.push(event);
+          return Promise.resolve();
+        },
+      },
+      runtimeFactory: {
+        create() {
+          throw new Error('Recovery cancellation must not invoke the runtime');
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const before = searchExecutions;
+
+    await expect(runs.prepareRecovery(runId)).resolves.toBe(true);
+    await expect(runs.requestCancellation(runId)).resolves.toMatchObject({
+      outcome: 'accepted',
+      status: 'cancelling',
+    });
+    await expect(runs.prepareRecovery(runId)).resolves.toBe(false);
+    await expect(service.execute(toolCallId)).rejects.toMatchObject({
+      code: 'invalid_tool_state',
+    });
+    expect(searchExecutions).toBe(before);
+
+    await expect(
+      connection.db
+        .select({ runStatus: agentRuns.status, toolStatus: toolCalls.status })
+        .from(toolCalls)
+        .innerJoin(agentRuns, eq(agentRuns.id, toolCalls.runId))
+        .where(eq(toolCalls.id, toolCallId)),
+    ).resolves.toEqual([{ runStatus: 'cancelling', toolStatus: 'cancelled' }]);
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    expect(liveEvents.map(({ eventType }) => eventType)).toEqual([
+      'tool.recovery_ready',
+      'run.recovering',
+      'tool.cancelled',
+      'run.cancelling',
+    ]);
+    const liveParts = projectRunParts(liveEvents);
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    expect(replay?.parts).toEqual(liveParts);
+    expect(liveParts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'tool.cancelled',
+          outcome: 'cancelled',
+          payload: expect.objectContaining({ toolCallId }) as unknown,
+        }),
+      ]),
+    );
+  });
+
   async function proposePublish(runId: string) {
     return service.propose({
       runId,

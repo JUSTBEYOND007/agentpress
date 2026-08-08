@@ -483,6 +483,10 @@ execution. `RunRecoveryService` settles an already-dispatched external write as
 `outcome_unknown(worker_lease_lost_after_dispatch)`, persists protected diagnostics, and publishes
 only the bounded public failure; PostgreSQL replay and Web localization consume that same reason.
 Read-only calls remain independently replay-ready, so this projection change does not broaden replay.
+If the user cancels while the Run is recovering, the same aggregate lock path moves a replay-ready
+read-only call to `tool.cancelled` before dispatch. PostgreSQL evidence fixes the event order, proves
+zero provider calls, and rejects both later recovery preparation and execution; live and replay merge
+to the same cancelled activity.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
