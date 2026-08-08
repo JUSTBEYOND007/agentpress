@@ -2,7 +2,8 @@ export type ToolExecutionOutcomeReason =
   | 'connection_unavailable_before_dispatch'
   | 'connection_lost_after_dispatch'
   | 'run_cancelled_after_dispatch'
-  | 'stale_client_result';
+  | 'stale_client_result'
+  | 'timeout_after_dispatch';
 
 export class ToolRuntimeError extends Error {
   public constructor(

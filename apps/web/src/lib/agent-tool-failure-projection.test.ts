@@ -62,6 +62,13 @@ describe('public ToolCall failure projection', () => {
       false,
       '取消发生在工具发出后，结果无法确认，请先核对。',
     ],
+    [
+      'timeout_after_dispatch',
+      'outcome_unknown',
+      'tool.failure.outcome_unknown',
+      false,
+      '工具发出后执行超时，结果无法确认，请先核对。',
+    ],
   ] as const)(
     'projects the %s transport reason without diagnostic fields',
     (outcomeReason, code, messageKey, retryable, summary) => {

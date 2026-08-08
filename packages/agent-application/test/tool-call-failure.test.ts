@@ -65,6 +65,26 @@ describe('Tool Call failure projection', () => {
     });
   });
 
+  it('keeps an after-dispatch timeout unknown and non-retryable', () => {
+    expect(
+      projectToolFailure(
+        new ToolExecutionError(
+          'provider timed out after dispatch',
+          'unknown',
+          'timeout_after_dispatch',
+        ),
+        true,
+      ),
+    ).toMatchObject({
+      status: 'outcome_unknown',
+      publicFailure: {
+        code: 'outcome_unknown',
+        retryable: false,
+        outcomeReason: 'timeout_after_dispatch',
+      },
+    });
+  });
+
   it('uses side-effect risk instead of message text for untyped errors', () => {
     expect(projectToolFailure(new Error('same provider error'), false).status).toBe('failed');
     expect(projectToolFailure(new Error('same provider error'), true).status).toBe(

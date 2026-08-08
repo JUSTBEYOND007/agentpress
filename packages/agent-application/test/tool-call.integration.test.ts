@@ -52,8 +52,10 @@ describeWithDatabase('Tool Call application flow', () => {
   const published: LiveRunEvent[] = [];
   const registry = new ToolRegistry();
   let searchExecutions = 0;
+  let hangingReadExecutions = 0;
   let webSearchExecutions = 0;
   let externalExecutions = 0;
+  let hangingExternalExecutions = 0;
   let delayedExternalExecutions = 0;
   let successfulExternalExecutions = 0;
   let finishDelayedPublish: ((output: { readonly publicationId: string }) => void) | undefined;
@@ -95,6 +97,24 @@ describeWithDatabase('Tool Call application flow', () => {
         'unknown',
         'connection_lost_after_dispatch',
       );
+    },
+  });
+  registry.register({
+    toolId: 'workspace.hanging_search',
+    version: '1.0.0',
+    owner: 'workspace',
+    description: 'Search through a provider that ignores cancellation',
+    capabilities: ['workspace.read'],
+    inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ result: Type.String() }, { additionalProperties: false }),
+    risk: 'read_only',
+    sideEffect: 'No side effect',
+    idempotency: 'none',
+    timeoutMs: 20,
+    estimateCost: () => ({}),
+    execute: () => {
+      hangingReadExecutions += 1;
+      return new Promise<{ readonly result: string }>(() => undefined);
     },
   });
   registry.register({
@@ -166,6 +186,24 @@ describeWithDatabase('Tool Call application flow', () => {
       return new Promise<{ readonly publicationId: string }>((resolve) => {
         finishDelayedPublish = resolve;
       });
+    },
+  });
+  registry.register({
+    toolId: 'publication.hanging_publish',
+    version: '1.0.0',
+    owner: 'publication',
+    description: 'Publish through a provider that ignores cancellation',
+    capabilities: ['publication.write'],
+    inputSchema: Type.Object({ editionId: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ publicationId: Type.String() }, { additionalProperties: false }),
+    risk: 'external_write',
+    sideEffect: 'Publish the selected immutable edition',
+    idempotency: 'provider_key',
+    timeoutMs: 20,
+    estimateCost: () => ({ credits: 1 }),
+    execute: () => {
+      hangingExternalExecutions += 1;
+      return new Promise<{ readonly publicationId: string }>(() => undefined);
     },
   });
   registry.register({
@@ -621,6 +659,101 @@ describeWithDatabase('Tool Call application flow', () => {
         },
       },
     });
+  });
+
+  it('enforces hard deadlines with risk-aware ToolCall settlement', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const readBefore = hangingReadExecutions;
+    const read = await service.propose({
+      runId,
+      toolId: 'workspace.hanging_search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'hard deadline' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['workspace.read']),
+    });
+    await expect(service.execute(read.toolCallId)).resolves.toMatchObject({ status: 'failed' });
+    expect(hangingReadExecutions - readBefore).toBe(1);
+
+    const externalBefore = hangingExternalExecutions;
+    const publish = await service.propose({
+      runId,
+      toolId: 'publication.hanging_publish',
+      toolVersion: '1.0.0',
+      arguments: { editionId: randomUUID() },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['publication.write']),
+      idempotencyKey: `publish:${randomUUID()}`,
+    });
+    await service.decideApproval({
+      toolCallId: publish.toolCallId,
+      decision: 'approved',
+      userId,
+    });
+    await expect(service.execute(publish.toolCallId)).resolves.toMatchObject({
+      status: 'outcome_unknown',
+    });
+    expect(hangingExternalExecutions - externalBefore).toBe(1);
+
+    const rows = await connection.db
+      .select({ id: toolCalls.id, status: toolCalls.status, failure: toolCalls.failure })
+      .from(toolCalls)
+      .where(eq(toolCalls.runId, runId));
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: read.toolCallId,
+          status: 'failed',
+          failure: expect.objectContaining({
+            code: 'tool_timeout',
+            messageKey: 'tool.failure.timeout',
+            retryable: true,
+            visibility: 'protected',
+          }) as unknown,
+        }),
+        expect.objectContaining({
+          id: publish.toolCallId,
+          status: 'outcome_unknown',
+          failure: expect.objectContaining({
+            code: 'outcome_unknown',
+            messageKey: 'tool.failure.outcome_unknown',
+            retryable: false,
+            outcomeReason: 'timeout_after_dispatch',
+            visibility: 'protected',
+          }) as unknown,
+        }),
+      ]),
+    );
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    expect(replay?.parts).toEqual(projectRunParts(liveEvents));
+    expect(
+      replay?.parts.find(
+        ({ status, payload }) => status === 'tool.failed' && payload.toolCallId === read.toolCallId,
+      ),
+    ).toMatchObject({
+      outcome: 'failed',
+      payload: { failure: { code: 'tool_timeout', retryable: true } },
+    });
+    expect(
+      replay?.parts.find(
+        ({ status, payload }) =>
+          status === 'tool.outcome_unknown' && payload.toolCallId === publish.toolCallId,
+      ),
+    ).toMatchObject({
+      outcome: 'outcome_unknown',
+      payload: {
+        failure: {
+          code: 'outcome_unknown',
+          retryable: false,
+          outcomeReason: 'timeout_after_dispatch',
+        },
+      },
+    });
+    expect(JSON.stringify(liveEvents)).not.toContain('Tool publication.hanging_publish');
   });
 
   it('keeps provider diagnostics protected while live and replay expose one public failure', async () => {

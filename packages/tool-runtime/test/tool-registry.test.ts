@@ -7,6 +7,7 @@ import {
   hashToolArguments,
   summarizeToolArguments,
   ToolRegistry,
+  ToolExecutionError,
   ToolRuntimeError,
 } from '../src/index.js';
 
@@ -61,6 +62,106 @@ describe('ToolRegistry', () => {
       details: { errors: [expect.objectContaining({ path: '/result' })] },
     });
     expect(invalidOutput).toEqual({ result: 7 });
+  });
+
+  it('enforces the deadline when a read-only handler ignores its AbortSignal', async () => {
+    const registry = new ToolRegistry();
+    const definition = tool('workspace.hanging-search', 'workspace.read');
+    registry.register({
+      ...definition,
+      timeoutMs: 10,
+      execute: () => new Promise<{ result: string }>(() => undefined),
+    });
+
+    await expect(
+      registry.execute(
+        registry.get(definition.toolId, definition.version),
+        { query: 'deadline' },
+        { runId: 'run', toolCallId: 'call' },
+      ),
+    ).rejects.toMatchObject({
+      name: 'ToolRuntimeError',
+      code: 'tool_timeout',
+      details: { timeoutMs: 10 },
+    });
+  });
+
+  it('keeps an external-write timeout outcome unknown and ignores a late result', async () => {
+    const registry = new ToolRegistry();
+    const definition = tool('publication.hanging-publish', 'publication.write');
+    let finish: ((value: { result: string }) => void) | undefined;
+    const execute = new Promise<{ result: string }>((resolve) => {
+      finish = resolve;
+    });
+    registry.register({
+      ...definition,
+      risk: 'external_write',
+      timeoutMs: 10,
+      execute: () => execute,
+    });
+
+    const pending = registry.execute(
+      registry.get(definition.toolId, definition.version),
+      { query: 'publish' },
+      { runId: 'run', toolCallId: 'call', idempotencyKey: 'publish:1' },
+    );
+    await expect(pending).rejects.toMatchObject({
+      name: 'ToolExecutionError',
+      outcome: 'unknown',
+      outcomeReason: 'timeout_after_dispatch',
+    });
+    finish?.({ result: 'late-success' });
+    await expect(pending).rejects.toBeInstanceOf(ToolExecutionError);
+  });
+
+  it('does not dispatch an already-cancelled invocation', async () => {
+    const registry = new ToolRegistry();
+    const definition = tool('workspace.cancelled-search', 'workspace.read');
+    let executionCount = 0;
+    registry.register({
+      ...definition,
+      execute: ({ query }) => {
+        executionCount += 1;
+        return Promise.resolve({ result: query });
+      },
+    });
+    const cancellation = new Error('cancelled before dispatch');
+
+    await expect(
+      registry.execute(
+        registry.get(definition.toolId, definition.version),
+        { query: 'cancelled' },
+        { runId: 'run', toolCallId: 'call', signal: AbortSignal.abort(cancellation) },
+      ),
+    ).rejects.toBe(cancellation);
+    expect(executionCount).toBe(0);
+  });
+
+  it('returns parent cancellation even when the dispatched handler ignores it', async () => {
+    const registry = new ToolRegistry();
+    const definition = tool('workspace.cancelled-after-dispatch', 'workspace.read');
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    registry.register({
+      ...definition,
+      execute: () => {
+        markStarted?.();
+        return new Promise<{ result: string }>(() => undefined);
+      },
+    });
+    const controller = new AbortController();
+    const cancellation = new Error('cancelled after dispatch');
+    const pending = registry.execute(
+      registry.get(definition.toolId, definition.version),
+      { query: 'cancelled' },
+      { runId: 'run', toolCallId: 'call', signal: controller.signal },
+    );
+    await started;
+    controller.abort(cancellation);
+
+    await expect(pending).rejects.toBe(cancellation);
   });
 
   it('selects only the policy intersection and caps tool definitions', () => {

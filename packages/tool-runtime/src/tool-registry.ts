@@ -8,7 +8,7 @@ import type {
   ToolDefinition,
   ToolExecutionContext,
 } from './contracts.js';
-import { ToolRuntimeError } from './tool-errors.js';
+import { ToolExecutionError, ToolRuntimeError } from './tool-errors.js';
 
 export class ToolRegistry {
   private readonly definitions = new Map<string, RegisteredTool>();
@@ -54,14 +54,23 @@ export class ToolRegistry {
     context: Omit<ToolExecutionContext, 'signal'> & { readonly signal?: AbortSignal },
   ): Promise<unknown> {
     this.validateInput(definition, input);
+    throwIfAborted(context.signal);
     const timeout = AbortSignal.timeout(definition.timeoutMs);
     const signal = context.signal ? AbortSignal.any([context.signal, timeout]) : timeout;
     try {
-      const output: unknown = await definition.execute(input, { ...context, signal });
+      const execution = definition.execute(input, { ...context, signal });
+      const output: unknown = await settleWithSignal(execution, signal);
       this.validateOutput(definition, output);
       return output;
     } catch (error) {
       if (timeout.aborted && !context.signal?.aborted) {
+        if (definition.risk === 'external_write' || definition.risk === 'destructive') {
+          throw new ToolExecutionError(
+            `Tool ${definition.toolId} outcome is unknown after timeout`,
+            'unknown',
+            'timeout_after_dispatch',
+          );
+        }
         throw new ToolRuntimeError('tool_timeout', `Tool ${definition.toolId} timed out`, {
           timeoutMs: definition.timeoutMs,
         });
@@ -69,6 +78,49 @@ export class ToolRegistry {
       throw error;
     }
   }
+}
+
+function settleWithSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      settle();
+    };
+    const onAbort = () => {
+      finish(() => {
+        reject(abortReason(signal));
+      });
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(
+      (value) => {
+        finish(() => {
+          resolve(value);
+        });
+      },
+      (error: unknown) => {
+        finish(() => {
+          reject(
+            error instanceof Error ? error : new Error('Tool execution failed', { cause: error }),
+          );
+        });
+      },
+    );
+  });
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error('Tool execution aborted', { cause: signal.reason });
 }
 
 export class CapabilityCatalog {

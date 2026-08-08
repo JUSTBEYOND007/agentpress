@@ -120,6 +120,10 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       `ToolExecutionError` 和 side-effect 风险生成 `code/messageKey/retryable`；ledger 只在 protected
       failure 中保留截断后的诊断，RunEvent/live/replay 只携带公共结构，Web 对旧的非结构化 failure
       fail closed。未知副作用仍保持 `outcome_unknown`，不会被转成普通失败或自动重试。
+      Tool timeout 也已补齐宿主硬 deadline：即使 MCP/provider handler 忽略 `AbortSignal`，ToolRegistry
+      仍会按不可变 `timeoutMs` 终止等待；read-only 调用结算为可重试 `tool_timeout`，已 dispatch 的
+      external/destructive 调用结算为不可自动重试的 `outcome_unknown(timeout_after_dispatch)`。迟到结果
+      由 Promise/ToolCall settlement fence 忽略，公共 RunEvent 不包含诊断正文。
 - [ ] Server/tool revision 变化、断线重连、调用中断线、重复结果、`outcome_unknown` 和旧连接晚到结果必须
       有独立 projection fixture 与 Playwright 场景。
 
@@ -163,6 +167,8 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       并有成功、失败、审批三种投影回归；JSON-RPC/header/stack/private thinking 的全事件矩阵仍待验证。
 - [ ] projector fixture 覆盖正常、审批拒绝、Schema 非法、超大输出、timeout/rate limit、断线前后、重连、
       duplicate end、stale late result、cancel/retry/revision drift，并验证 live/replay 等价。
+      timeout 已有 ToolRuntime 相反风险契约、PostgreSQL ToolCall settlement 和 Web fail-closed 文案测试；
+      rate limit、真实 transport cancel、duplicate end、stale late result、revision drift 和 Playwright 未完成。
 - [ ] PostgreSQL 集成验证 ToolCall ledger、RunEvent、Evidence/Artifact ref 同构恢复且重复/晚到不改已结算事实；
       Playwright 验证业务标签、详情披露、手动折叠、长名称/错误脱敏和桌面/移动端无溢出。
 
@@ -586,6 +592,12 @@ MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连�
 证明中断逻辑调用执行 0 次，下一次新逻辑调用执行 1 次。其余凭据、握手、Schema、timeout/cancel、
 重复结果、恶意输出、审批拒绝和审计投影矩阵仍未完成。
 
+Tool/MCP provider timeout 不再依赖 handler 主动响应取消：`ToolRegistry` 在 provider Promise 外设置硬
+deadline，并在父 signal 已取消时拒绝 dispatch。read-only timeout 保持 typed `tool_timeout`；外部写入
+timeout 以 `timeout_after_dispatch` 进入 `outcome_unknown`，避免误导性自动重试。PostgreSQL fixture
+证明两类非协作 handler 各执行一次、ledger 与 durable event 风险分流正确、live/replay 等价；Web 仅消费
+有界公共 failure 并显示不同核对文案。真实 MCP Server 的 timeout/cancel wire contract 仍待补齐。
+
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
 由 status fence 忽略。Run、ToolCall、Approval 和 transport audit 入口统一使用 `Run -> ToolCall` 锁顺序，
@@ -771,6 +783,7 @@ MCP manager。
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
       已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 34 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放和旧 client result identity fence；
+      ToolRegistry 19 个测试及 PostgreSQL ToolCall fixture 已覆盖非协作 handler 的硬 timeout 与风险分流；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置
