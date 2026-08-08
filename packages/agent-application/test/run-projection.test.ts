@@ -83,6 +83,61 @@ describe('run projection', () => {
     });
   });
 
+  it('keeps MCP attempt and bounded output references in the replay projection', () => {
+    const evidenceReferences = [
+      {
+        evidenceId: 'evidence-1',
+        title: 'Source one',
+        source: 'https://example.test/one',
+        sourceRevision: 'sha256:one',
+      },
+    ];
+    const parts = projectRunParts([
+      event(1, 'tool.proposed', {
+        toolCallId: 'tool-mcp',
+        taskId: 'task-1',
+        taskAttempt: 2,
+        transportProvenance: {
+          kind: 'mcp',
+          serverId: 'web_research',
+          serverRevision: '1.0.0',
+          toolName: 'search',
+          toolRevision: '1.0.0',
+          adapterRevision: 'adapter-v1',
+        },
+      }),
+      event(2, 'tool.executing', {
+        toolCallId: 'tool-mcp',
+        taskId: 'task-1',
+        taskAttempt: 2,
+      }),
+      event(3, 'tool.succeeded', {
+        toolCallId: 'tool-mcp',
+        taskId: 'task-1',
+        taskAttempt: 2,
+        evidenceReferences,
+      }),
+      event(4, 'tool.duplicate_result_ignored', {
+        toolCallId: 'tool-mcp',
+        taskId: 'task-1',
+        taskAttempt: 2,
+        reason: 'stale_client_result',
+      }),
+    ]);
+
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      status: 'tool.succeeded',
+      correlationId: 'tool:tool-mcp',
+      payload: { taskId: 'task-1', taskAttempt: 2, evidenceReferences },
+    });
+    expect(parts[0]?.payload.lifecycleStages).toMatchObject([
+      { status: 'tool.proposed' },
+      { status: 'tool.executing' },
+      { status: 'tool.succeeded', outcome: 'succeeded' },
+    ]);
+  });
+
   it('projects a bounded reasoning summary from durable planning lifecycle events', () => {
     const parts = projectRunParts([
       event(1, 'run.planning', { recovered: false }),
@@ -321,7 +376,10 @@ describe('run projection', () => {
     });
     expect(part?.payload.output).toBeUndefined();
     expect(part?.payload.lifecycleStages).toHaveLength(3);
-    expect(part?.payload.lifecycleStages?.at(-1)).toMatchObject({
+    const lifecycleStages = part?.payload.lifecycleStages;
+    expect(
+      Array.isArray(lifecycleStages) ? lifecycleStages[lifecycleStages.length - 1] : undefined,
+    ).toMatchObject({
       status: 'tool.outcome_unknown',
       outcome: 'outcome_unknown',
     });

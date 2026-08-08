@@ -19,7 +19,7 @@ import {
   type DecideToolCallApprovalInput,
   type ToolCallServiceOptions,
 } from './tool-call-contracts.js';
-import { ToolEvidenceStore } from './tool-evidence-store.js';
+import { ToolEvidenceStore, type PersistedToolEvidence } from './tool-evidence-store.js';
 import { projectToolFailure } from './tool-call-failure.js';
 import { lockToolCallAggregate } from './tool-call-aggregate-lock.js';
 
@@ -38,7 +38,7 @@ export class ToolCallExecutionService {
     this.projectEvidence =
       options.evidenceProjector ??
       (async (transaction, input) => {
-        await this.evidence.persistInTransaction(transaction, input);
+        return this.evidence.persistInTransaction(transaction, input);
       });
   }
 
@@ -56,6 +56,7 @@ export class ToolCallExecutionService {
           toolVersion: toolCalls.toolVersion,
           arguments: toolCalls.arguments,
           argumentsHash: toolCalls.argumentsHash,
+          taskAttempt: toolCalls.taskAttempt,
           approvalId: approvals.id,
           requestedFromUserId: approvals.requestedFromUserId,
           decision: approvals.decision,
@@ -103,7 +104,11 @@ export class ToolCallExecutionService {
           id: this.createId(),
           runId: call.runId,
           eventType: 'tool.expired',
-          payload: { toolCallId: input.toolCallId, approvalId: call.approvalId },
+          payload: {
+            toolCallId: input.toolCallId,
+            approvalId: call.approvalId,
+            ...(call.taskAttempt ? { taskAttempt: call.taskAttempt } : {}),
+          },
         });
         return { expired: true as const, event: toDurableEvent(event) };
       }
@@ -139,7 +144,11 @@ export class ToolCallExecutionService {
         id: this.createId(),
         runId: call.runId,
         eventType: input.decision === 'approved' ? 'tool.approved' : 'tool.denied',
-        payload: { toolCallId: input.toolCallId, approvalId: call.approvalId },
+        payload: {
+          toolCallId: input.toolCallId,
+          approvalId: call.approvalId,
+          ...(call.taskAttempt ? { taskAttempt: call.taskAttempt } : {}),
+        },
       });
       const resumeMessageId = this.createId();
       await enqueueOutboxMessage(transaction, {
@@ -207,7 +216,12 @@ export class ToolCallExecutionService {
           id: this.createId(),
           runId: call.runId,
           eventType: 'tool.duplicate_result_ignored',
-          payload: { toolCallId: call.id, reason: 'idempotency_replay' },
+          payload: {
+            toolCallId: call.id,
+            reason: 'idempotency_replay',
+            ...(call.taskId ? { taskId: call.taskId } : {}),
+            ...(call.taskAttempt ? { taskAttempt: call.taskAttempt } : {}),
+          },
         });
         return {
           replay: {
@@ -241,7 +255,13 @@ export class ToolCallExecutionService {
         id: this.createId(),
         runId: call.runId,
         eventType: 'tool.executing',
-        payload: { toolCallId, toolId: call.toolId, argumentsHash: call.argumentsHash },
+        payload: {
+          toolCallId,
+          toolId: call.toolId,
+          argumentsHash: call.argumentsHash,
+          ...(call.taskId ? { taskId: call.taskId } : {}),
+          ...(call.taskAttempt ? { taskAttempt: call.taskAttempt } : {}),
+        },
       });
       return { call, definition, event: toDurableEvent(event) };
     });
@@ -312,15 +332,17 @@ export class ToolCallExecutionService {
           },
         };
       }
+      let evidenceReferences: readonly PersistedToolEvidence[] = [];
       if (status === 'succeeded') {
-        await this.projectEvidence(transaction, {
-          runId: claimed.call.runId,
-          ...(claimed.call.taskId ? { taskId: claimed.call.taskId } : {}),
-          toolCallId,
-          toolId: claimed.call.toolId,
-          toolVersion: claimed.call.toolVersion,
-          output,
-        });
+        evidenceReferences =
+          (await this.projectEvidence(transaction, {
+            runId: claimed.call.runId,
+            ...(claimed.call.taskId ? { taskId: claimed.call.taskId } : {}),
+            toolCallId,
+            toolId: claimed.call.toolId,
+            toolVersion: claimed.call.toolVersion,
+            output,
+          })) ?? [];
       }
       await appendCheckpoint(transaction, {
         id: this.createId(),
@@ -334,6 +356,11 @@ export class ToolCallExecutionService {
         eventType: `tool.${status}`,
         payload: {
           toolCallId,
+          ...(claimed.call.taskId ? { taskId: claimed.call.taskId } : {}),
+          ...(claimed.call.taskAttempt ? { taskAttempt: claimed.call.taskAttempt } : {}),
+          ...(evidenceReferences.length > 0
+            ? { evidenceReferences: boundedEvidenceReferences(evidenceReferences) }
+            : {}),
           ...(status === 'succeeded' ? { output } : { failure: failure?.publicFailure }),
         },
       });
@@ -400,7 +427,12 @@ export class ToolCallExecutionService {
     const persisted = await this.options.database.transaction(async (transaction) => {
       await lockToolCallAggregate(transaction, toolCallId);
       const rows = await transaction
-        .select({ runId: toolCalls.runId, status: toolCalls.status, approvalId: approvals.id })
+        .select({
+          runId: toolCalls.runId,
+          status: toolCalls.status,
+          approvalId: approvals.id,
+          taskAttempt: toolCalls.taskAttempt,
+        })
         .from(toolCalls)
         .innerJoin(approvals, eq(approvals.toolCallId, toolCalls.id))
         .where(eq(toolCalls.id, toolCallId))
@@ -429,7 +461,11 @@ export class ToolCallExecutionService {
         id: this.createId(),
         runId: call.runId,
         eventType: 'tool.expired',
-        payload: { toolCallId, approvalId: call.approvalId },
+        payload: {
+          toolCallId,
+          approvalId: call.approvalId,
+          ...(call.taskAttempt ? { taskAttempt: call.taskAttempt } : {}),
+        },
       });
       return toDurableEvent(event);
     });
@@ -443,6 +479,17 @@ function articleEditProposalOutput(value: unknown): Readonly<Record<string, unkn
   return output.kind === 'article_edit_proposal' && typeof output.proposalId === 'string'
     ? output
     : undefined;
+}
+
+function boundedEvidenceReferences(
+  references: readonly PersistedToolEvidence[],
+): readonly Readonly<Record<string, string>>[] {
+  return references.slice(0, 32).map((reference) => ({
+    evidenceId: reference.evidenceId.slice(0, 240),
+    title: reference.title.slice(0, 240),
+    source: reference.source.slice(0, 240),
+    sourceRevision: reference.sourceRevision.slice(0, 240),
+  }));
 }
 
 function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {

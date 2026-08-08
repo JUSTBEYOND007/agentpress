@@ -208,6 +208,8 @@ export class ToolCallService {
                     reason: 'specialist_attempt_recovery',
                     previousTaskAttempt: existing.taskAttempt,
                     recoveryTaskAttempt: input.taskAttempt,
+                    ...(existing.taskId ? { taskId: existing.taskId } : {}),
+                    ...(existing.taskAttempt ? { taskAttempt: existing.taskAttempt } : {}),
                   },
                 }),
               );
@@ -303,6 +305,8 @@ export class ToolCallService {
           toolCallId,
           toolId: definition.toolId,
           toolVersion: definition.version,
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          ...(input.taskAttempt ? { taskAttempt: input.taskAttempt } : {}),
           ...(definition.transport ? { transportProvenance: definition.transport } : {}),
           ...(definition.evidence
             ? { evidenceProviderRevision: definition.evidence.providerRevision }
