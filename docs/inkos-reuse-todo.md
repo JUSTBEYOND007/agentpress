@@ -551,7 +551,9 @@ MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连�
 恢复准备现在还会为同事务内从 `running` 转为 `interrupted` 的每个 Task Attempt 写入
 `task.interrupted(reason=worker_lease_lost)`；RunPart 由宿主投影为 `outcome: interrupted`，不再出现
 PostgreSQL Task 状态已中断但消息流仍显示运行中的分裂状态；同一事务释放旧 active lease，恢复 attempt
-不必等待旧 worker 的剩余 lease 时间。
+不必等待旧 worker 的剩余 lease 时间。PostgreSQL 全链路回归进一步证明 attempt 1 被中断后复用原
+Plan Revision claim attempt 2、只写入 attempt 2 TaskResult，并完成 synthesis；没有创建替代 Task 或
+Plan Revision。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。

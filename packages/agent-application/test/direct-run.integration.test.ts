@@ -2655,14 +2655,16 @@ describeWithDatabase('Direct Run application flow', () => {
       id: branchId,
       conversationId: ids.conversation,
     });
+    const recoveryRuntime = PiRuntimeAdapter.forTests({
+      responses: [
+        taskCompleteResponse('Recovered research completed'),
+        runCompleteResponse('Recovered plan completed.'),
+      ],
+    });
     const recoveryService = new DirectRunService({
       database: connection.db,
       publisher,
-      runtimeFactory: {
-        create: () => {
-          throw new Error('Preparing recovery must not invoke Pi');
-        },
-      },
+      runtimeFactory: { create: () => recoveryRuntime },
       systemPrompt: 'You are AgentPress.',
     });
     const run = await recoveryService.create({
@@ -2684,7 +2686,7 @@ describeWithDatabase('Direct Run application flow', () => {
     });
     await connection.db
       .update(agentRuns)
-      .set({ status: 'running', activePlanRevisionId: revisionId })
+      .set({ mode: 'planned', status: 'running', activePlanRevisionId: revisionId })
       .where(eq(agentRuns.id, run.runId));
     const interruptedTaskId = randomUUID();
     await connection.db.insert(agentTasks).values({
@@ -2789,6 +2791,27 @@ describeWithDatabase('Direct Run application flow', () => {
     await expect(
       choices.settle({ id: choiceId, claimToken: staleClaimToken, status: 'resolved' }),
     ).resolves.toBe(false);
+    await expect(recoveryService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    await expect(
+      connection.db
+        .select({ status: agentTasks.status, attempt: agentTasks.attempt })
+        .from(agentTasks)
+        .where(eq(agentTasks.id, interruptedTaskId)),
+    ).resolves.toEqual([{ status: 'succeeded', attempt: 2 }]);
+    await expect(
+      connection.db
+        .select({ attempt: taskResults.attempt })
+        .from(taskResults)
+        .where(eq(taskResults.taskId, interruptedTaskId)),
+    ).resolves.toEqual([{ attempt: 2 }]);
+    await expect(
+      connection.db
+        .select({ revisionNumber: planRevisions.revisionNumber })
+        .from(planRevisions)
+        .where(eq(planRevisions.planId, planId)),
+    ).resolves.toEqual([{ revisionNumber: 1 }]);
   });
 
   it('reuses a persisted logical Main Session and appends transcript sequences', async () => {
