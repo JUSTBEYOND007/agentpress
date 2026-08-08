@@ -209,6 +209,7 @@ describe('run presentation projection', () => {
           toolId: 'web.search',
           toolCallId: 'search-audit',
           taskAttempt: 2,
+          durationMs: 1_250,
           arguments: { query: 'top-secret-query', limit: 2 },
           transportProvenance: {
             kind: 'mcp',
@@ -244,6 +245,7 @@ describe('run presentation projection', () => {
               toolRevision: '1.0.0',
               adapterRevision: 'agentpress-mcp-adapter-v1',
               taskAttempt: 2,
+              durationMs: 1_250,
               argumentNames: ['limit', 'query'],
               argumentCount: 2,
               outputReference: {

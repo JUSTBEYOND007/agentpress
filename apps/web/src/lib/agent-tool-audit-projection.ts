@@ -39,6 +39,7 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
       : argumentKeys.length,
   );
   const taskAttempt = positiveInteger(existing.taskAttempt ?? part.payload.taskAttempt);
+  const durationMs = boundedDuration(existing.durationMs ?? part.payload.durationMs);
   const outputReference = outputArtifactReference(
     Object.keys(existing).length ? existing.outputReference : part.payload.output,
   );
@@ -50,10 +51,17 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
     toolRevision,
     adapterRevision,
     ...(taskAttempt ? { taskAttempt } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
     argumentNames,
     argumentCount,
     ...(outputReference ? { outputReference } : {}),
   };
+}
+
+function boundedDuration(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 86_400_000
+    ? Math.round(value)
+    : undefined;
 }
 
 function outputArtifactReference(value: unknown): ToolActivityAudit['outputReference'] | undefined {

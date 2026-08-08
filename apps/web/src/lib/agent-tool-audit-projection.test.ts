@@ -39,6 +39,29 @@ describe('MCP tool audit projection', () => {
     ).toBeUndefined();
     expect(toolActivityAudit(activity({ transportProvenance: { kind: 'mcp' } }))).toBeUndefined();
   });
+
+  it('keeps only bounded durable duration in the audit detail', () => {
+    const base = {
+      kind: 'mcp' as const,
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    expect(
+      toolActivityAudit(activity({ transportProvenance: base, durationMs: 12.6 })),
+    ).toMatchObject({
+      durationMs: 13,
+    });
+    expect(
+      toolActivityAudit(activity({ transportProvenance: base, durationMs: -1 }))?.durationMs,
+    ).toBeUndefined();
+    expect(
+      toolActivityAudit(activity({ transportProvenance: base, durationMs: 86_400_001 }))
+        ?.durationMs,
+    ).toBeUndefined();
+  });
 });
 
 function activity(payload: Readonly<Record<string, unknown>>): RunPart {
