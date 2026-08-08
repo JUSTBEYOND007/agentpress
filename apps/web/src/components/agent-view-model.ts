@@ -14,7 +14,7 @@ export type SkillView = {
   readonly skillId: string;
   readonly version: string;
   readonly description: string;
-  readonly status?: 'available' | 'policy_disabled' | 'load_failed';
+  readonly status?: 'available' | 'policy_disabled' | 'load_failed' | 'history_expired';
 };
 
 export type AttachmentView = { readonly id: string; readonly filename: string };

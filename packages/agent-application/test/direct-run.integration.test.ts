@@ -1401,7 +1401,7 @@ describeWithDatabase('Direct Run application flow', () => {
     ).resolves.toHaveLength(0);
   });
 
-  it('keeps disabled and malformed Skills visible as catalog diagnostics', async () => {
+  it('keeps disabled, malformed, and historical Skills visible as catalog diagnostics', async () => {
     const disabledId = `explicit-only-${randomUUID()}`;
     await governance.createSkill(
       ids.workspace,
@@ -1417,6 +1417,29 @@ describeWithDatabase('Direct Run application flow', () => {
       contentHash: 'malformed-fixture',
       allowedTools: [],
     });
+    const historicalId = `historical-${randomUUID()}`;
+    await connection.db.insert(skillRevisions).values([
+      {
+        id: randomUUID(),
+        workspaceId: ids.workspace,
+        skillId: historicalId,
+        version: '1.0.0',
+        content: `---\nid: ${historicalId}\nversion: 1.0.0\ndescription: Old revision\n---\nOld instructions.`,
+        contentHash: 'historical-v1',
+        allowedTools: [],
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+      {
+        id: randomUUID(),
+        workspaceId: ids.workspace,
+        skillId: historicalId,
+        version: '2.0.0',
+        content: `---\nid: ${historicalId}\nversion: 2.0.0\ndescription: Current revision\n---\nCurrent instructions.`,
+        contentHash: 'historical-v2',
+        allowedTools: [],
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      },
+    ]);
 
     const listed = await governance.listSkills(ids.workspace);
     expect(listed.find(({ skillId }) => skillId === disabledId)).toMatchObject({
@@ -1426,6 +1449,12 @@ describeWithDatabase('Direct Run application flow', () => {
       status: 'load_failed',
       description: '技能加载失败，无法绑定。',
     });
+    expect(
+      listed.find(({ skillId, version }) => skillId === historicalId && version === '2.0.0'),
+    ).toMatchObject({ status: 'available' });
+    expect(
+      listed.find(({ skillId, version }) => skillId === historicalId && version === '1.0.0'),
+    ).toMatchObject({ status: 'history_expired' });
   });
 
   it('keeps malformed catalog entries out of model selection without blocking Run creation', async () => {

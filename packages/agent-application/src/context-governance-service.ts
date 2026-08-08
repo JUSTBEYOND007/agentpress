@@ -92,14 +92,26 @@ export class ContextGovernanceService {
       .select()
       .from(skillRevisions)
       .where(eq(skillRevisions.workspaceId, workspaceId))
-      .orderBy(skillRevisions.skillId, desc(skillRevisions.createdAt));
+      .orderBy(skillRevisions.skillId, desc(skillRevisions.createdAt), desc(skillRevisions.id));
+    const latestRevisionIds = new Set<string>();
+    const seenSkillIds = new Set<string>();
+    for (const row of rows) {
+      if (!seenSkillIds.has(row.skillId)) {
+        seenSkillIds.add(row.skillId);
+        latestRevisionIds.add(row.id);
+      }
+    }
     return rows.map((row) => {
       try {
         const parsed = loadSkill(row.content);
         return toPublicSkill(
           row,
           parsed.description,
-          parsed.disableModelInvocation === true ? 'policy_disabled' : 'available',
+          latestRevisionIds.has(row.id)
+            ? parsed.disableModelInvocation === true
+              ? 'policy_disabled'
+              : 'available'
+            : 'history_expired',
         );
       } catch {
         return toPublicSkill(row, '技能加载失败，无法绑定。', 'load_failed');
@@ -361,7 +373,7 @@ export function registerContextTools(
 function toPublicSkill(
   row: typeof skillRevisions.$inferSelect,
   description: string,
-  status: 'available' | 'policy_disabled' | 'load_failed' = 'available',
+  status: 'available' | 'policy_disabled' | 'load_failed' | 'history_expired' = 'available',
 ) {
   return {
     id: row.id,

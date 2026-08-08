@@ -19,5 +19,8 @@ describe('Skill catalog presentation', () => {
     expect(skillCommandDescription({ ...skill, status: 'load_failed' }, false)).toBe(
       '加载失败，无法绑定',
     );
+    expect(skillCommandDescription({ ...skill, status: 'history_expired' }, false)).toBe(
+      '历史版本已过期，无法绑定',
+    );
   });
 });

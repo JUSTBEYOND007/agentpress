@@ -196,7 +196,11 @@ export function AgentComposer({
       icon: 'skill',
       execute: () => {
         const key = `${skill.skillId}@${skill.version}`;
-        if (skill.status !== 'load_failed' && !selectedSkillKeys.includes(key))
+        if (
+          skill.status !== 'load_failed' &&
+          skill.status !== 'history_expired' &&
+          !selectedSkillKeys.includes(key)
+        )
           onSkillChange([...selectedSkillKeys, key]);
       },
     })),
@@ -433,6 +437,7 @@ export function AgentComposer({
 
 export function skillCommandDescription(skill: SkillView, selected: boolean): string {
   if (skill.status === 'load_failed') return '加载失败，无法绑定';
+  if (skill.status === 'history_expired') return '历史版本已过期，无法绑定';
   if (selected) return '已启用';
   if (skill.status === 'policy_disabled') return `仅用户显式选择 · ${skill.description}`;
   return skill.description;

@@ -151,7 +151,10 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 - [x] Composer 以名称/用途列表选择 Skill，已选项显示为可移除 chip；普通用户不需要输入版本或 hash。
 - [x] 管理面展示来源、版本、诊断和禁用状态；损坏或冲突 Skill 不静默消失。
 - [x] 消息/运行详情展示实际绑定的 Skill，而不是只显示用户发送前的临时选择。
-- [ ] 明确展示“用户显式选择、模型自主选择、被策略禁用、加载失败、历史已过期”五种不同状态。
+- [x] 明确展示“用户显式选择、模型自主选择、被策略禁用、加载失败、历史已过期”五种不同状态。
+      Run context projection 显示显式/模型来源；Skill catalog 将当前 revision、`policy_disabled`、
+      `load_failed` 和旧 revision 的 `history_expired` 分开投影。历史版本仍可被 PostgreSQL replay
+      读取，但 Composer 不允许再次绑定过期 revision。
       `skill.selection.completed` 现在对普通显式选择和模型预选都持久化，并通过 Run projection 的
       `context.skillSelections` 在上下文来源中展示“用户选择”或“Agent 选择”；刷新/replay 不再从 Composer
       临时状态猜测来源。Skill catalog 现在保留 `policy_disabled` 与 `load_failed` 公共诊断，Composer
