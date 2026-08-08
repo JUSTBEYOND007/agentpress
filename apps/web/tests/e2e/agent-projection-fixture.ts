@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 
+import { mcpProjectionParts } from './mcp-projection-parts';
+
 export const fixtureConversationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 export const fixtureBranchId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 export const fixtureSiblingBranchId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -9,7 +11,7 @@ export const fixtureSiblingUserMessageId = '11111111-1111-4111-8111-111111111111
 export const fixtureArtifactId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
 type FixtureState = 'idle' | 'running' | 'completed';
-export type ProjectionFixtureScenario = 'streaming' | 'degraded';
+export type ProjectionFixtureScenario = 'streaming' | 'degraded' | 'mcp-matrix';
 
 export function installAgentProjectionFixture(
   page: Page,
@@ -130,9 +132,17 @@ export function installAgentProjectionFixture(
     await streamCompletion;
     state = 'completed';
     const firstDelta =
-      scenario === 'degraded' ? '# 部分完成\\n\\n已保留成功来源，' : '# 流式标题\\n\\n这是第一段。';
+      scenario === 'mcp-matrix'
+        ? '# MCP 失败矩阵已完成\\n\\n'
+        : scenario === 'degraded'
+          ? '# 部分完成\\n\\n已保留成功来源，'
+          : '# 流式标题\\n\\n这是第一段。';
     const secondDelta =
-      scenario === 'degraded' ? '失败查询待恢复。' : '\\n\\n- 增量项目\\n- 第二个项目';
+      scenario === 'mcp-matrix'
+        ? '已保留可确认的资料结果。'
+        : scenario === 'degraded'
+          ? '失败查询待恢复。'
+          : '\\n\\n- 增量项目\\n- 第二个项目';
     await route.fulfill({
       status: 200,
       headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
@@ -173,7 +183,7 @@ export function installAgentProjectionFixture(
 function scenarioStatus(
   scenario: ProjectionFixtureScenario,
 ): 'completed' | 'completed_with_degradation' {
-  return scenario === 'degraded' ? 'completed_with_degradation' : 'completed';
+  return scenario === 'streaming' ? 'completed' : 'completed_with_degradation';
 }
 
 function projection(
@@ -183,7 +193,8 @@ function projection(
 ) {
   const terminal = status !== 'running';
   const degraded = scenario === 'degraded';
-  return {
+  const mcpMatrix = scenario === 'mcp-matrix';
+  const projected = {
     runId: fixtureRunId,
     rootMessageId,
     status,
@@ -264,7 +275,10 @@ function projection(
               type: 'warning' as const,
               status: 'run.completed_with_degradation',
               payload: {
-                error: { code: 'provider_error', message: 'api_key=secret should never render' },
+                error: {
+                  code: 'provider_error',
+                  message: 'api_key=secret should never render',
+                },
               },
             },
           ]
@@ -312,6 +326,7 @@ function projection(
     createdAt: '2026-08-04T00:00:00.000Z',
     completedAt: terminal ? '2026-08-04T00:00:03.000Z' : undefined,
   };
+  return mcpMatrix ? { ...projected, parts: mcpProjectionParts(terminal) } : projected;
 }
 
 async function json(route: Route, value: unknown): Promise<void> {

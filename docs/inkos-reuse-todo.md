@@ -126,6 +126,10 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       由 Promise/ToolCall settlement fence 忽略，公共 RunEvent 不包含诊断正文。
 - [ ] Server/tool revision 变化、断线重连、调用中断线、重复结果、`outcome_unknown` 和旧连接晚到结果必须
       有独立 projection fixture 与 Playwright 场景。
+      已新增独立 `agent-mcp-audit.spec.ts`，覆盖长 server/tool/revision、Evidence 引用、retry/reconnect、
+      rate limit、审批拒绝、after-dispatch `outcome_unknown`、诊断脱敏和桌面/移动端宽度约束；fixture、
+      TypeScript 和静态发现通过。2026-08-09 本地实跑被过期 Logto storage state 阻断（页面明确返回
+      `Grant request is invalid`），因此在刷新真实认证状态并让 desktop/mobile 均通过前仍保持未勾选。
 
 InkOS `v1.7.2` 及 2026-08-03 的 `master` HEAD
 `a6e05d4d4567df0efd5825e9b0037146a16e4f3e` 都没有 MCP 业务源码、配置页、生命周期或测试；
