@@ -1746,6 +1746,7 @@ describeWithDatabase('Tool Call application flow', () => {
   });
 
   it('settles an executing external write as Unknown Outcome during recovery', async () => {
+    const publishedFrom = published.length;
     const runId = await createRunningRun();
     const toolCallId = randomUUID();
     await connection.db.insert(toolCalls).values({
@@ -1778,10 +1779,41 @@ describeWithDatabase('Tool Call application flow', () => {
 
     await expect(runs.prepareRecovery(runId)).resolves.toBe(true);
     const rows = await connection.db
-      .select({ status: toolCalls.status })
+      .select({ status: toolCalls.status, failure: toolCalls.failure })
       .from(toolCalls)
       .where(eq(toolCalls.id, toolCallId));
-    expect(rows[0]?.status).toBe('outcome_unknown');
+    expect(rows[0]).toMatchObject({
+      status: 'outcome_unknown',
+      failure: {
+        code: 'outcome_unknown',
+        messageKey: 'tool.failure.outcome_unknown',
+        retryable: false,
+        outcomeReason: 'worker_lease_lost_after_dispatch',
+        visibility: 'protected',
+      },
+    });
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const liveParts = projectRunParts(liveEvents);
+    expect(replay?.parts).toEqual(liveParts);
+    expect(liveParts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'tool.outcome_unknown',
+          outcome: 'outcome_unknown',
+          payload: expect.objectContaining({
+            failure: {
+              code: 'outcome_unknown',
+              messageKey: 'tool.failure.outcome_unknown',
+              retryable: false,
+              outcomeReason: 'worker_lease_lost_after_dispatch',
+            },
+          }) as unknown,
+        }),
+      ]),
+    );
   });
 
   it('requeues an interrupted read-only call for exactly-once recovery', async () => {

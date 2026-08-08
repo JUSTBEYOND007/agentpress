@@ -139,6 +139,26 @@ describe('Tool Call failure projection', () => {
     });
   });
 
+  it('keeps worker lease loss after dispatch unknown and non-retryable', () => {
+    expect(
+      projectToolFailure(
+        new ToolExecutionError(
+          'worker credential=secret',
+          'unknown',
+          'worker_lease_lost_after_dispatch',
+        ),
+        true,
+      ),
+    ).toMatchObject({
+      status: 'outcome_unknown',
+      publicFailure: {
+        code: 'outcome_unknown',
+        retryable: false,
+        outcomeReason: 'worker_lease_lost_after_dispatch',
+      },
+    });
+  });
+
   it('uses side-effect risk instead of message text for untyped errors', () => {
     expect(projectToolFailure(new Error('same provider error'), false).status).toBe('failed');
     expect(projectToolFailure(new Error('same provider error'), true).status).toBe(

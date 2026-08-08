@@ -478,6 +478,12 @@ This contract belongs in a small recovery policy/service behind existing stores 
 Evidence policy, Artifact persistence, or provider-specific retry logic. The existing independent
 `outcome_unknown` state remains human-review-only and must never be collapsed into an ordinary failure.
 
+The worker-crash boundary now uses the same public/protected ToolCall failure contract as live
+execution. `RunRecoveryService` settles an already-dispatched external write as
+`outcome_unknown(worker_lease_lost_after_dispatch)`, persists protected diagnostics, and publishes
+only the bounded public failure; PostgreSQL replay and Web localization consume that same reason.
+Read-only calls remain independently replay-ready, so this projection change does not broaden replay.
+
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
 ### Implemented InkOS behavior baseline

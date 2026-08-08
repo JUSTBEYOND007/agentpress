@@ -3,6 +3,7 @@ export type ToolExecutionOutcomeReason =
   | 'initialization_failed_before_dispatch'
   | 'connection_lost_after_dispatch'
   | 'run_cancelled_after_dispatch'
+  | 'worker_lease_lost_after_dispatch'
   | 'stale_client_result'
   | 'timeout_after_dispatch';
 

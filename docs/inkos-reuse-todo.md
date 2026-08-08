@@ -647,7 +647,7 @@ Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用�
 `AbortSignal.timeout`，并与父级取消通过 `AbortSignal.any` 组合；超时结果是 failed `task_timeout`，不会把
 用户取消误报为超时。真实 PostgreSQL 用例证明悬挂 Specialist 会在 deadline 后终止，Run 进入
 `completed_with_degradation`，并且非法 timeout 配置 fail closed。该用例只证明 Specialist deadline 的
-确定性状态转换，不替代真实 provider timeout；provider timeout、worker crash、提交前后断线、重复恢复、
+确定性状态转换，不替代真实 provider timeout；provider timeout、提交前后断线、重复恢复、
 部分 Artifact、失效 Evidence、stale worker 和恢复期间取消尚未形成完整矩阵，因此总项不勾选。
 已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
 增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
@@ -657,6 +657,13 @@ PostgreSQL Task 状态已中断但消息流仍显示运行中的分裂状态；�
 不必等待旧 worker 的剩余 lease 时间。PostgreSQL 全链路回归进一步证明 attempt 1 被中断后复用原
 Plan Revision claim attempt 2、只写入 attempt 2 TaskResult，并完成 synthesis；没有创建替代 Task 或
 Plan Revision。
+
+worker crash 后的 ToolCall 风险投影也已补齐：恢复准备遇到已 dispatch 的 external-write 调用时，ledger
+写入 protected `outcome_unknown(worker_lease_lost_after_dispatch)`，durable event 只包含 public failure，
+live/replay 使用同一 RunPart，Web 显示“执行进程中断，结果无法确认”；read-only 调用仍进入
+`tool.recovery_ready`，不会被该失败分支吞掉。Application/Web 各 116 个单元测试和 29 个 PostgreSQL
+ToolCall 场景通过。该证据覆盖 worker lease loss，不替代数据库提交前后断线、stale worker settlement 或
+恢复期间取消。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。

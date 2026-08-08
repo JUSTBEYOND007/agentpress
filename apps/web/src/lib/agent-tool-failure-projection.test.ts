@@ -111,6 +111,13 @@ describe('public ToolCall failure projection', () => {
       false,
       '工具发出后执行超时，结果无法确认，请先核对。',
     ],
+    [
+      'worker_lease_lost_after_dispatch',
+      'outcome_unknown',
+      'tool.failure.outcome_unknown',
+      false,
+      '工具发出后执行进程中断，结果无法确认，请先核对。',
+    ],
   ] as const)(
     'projects the %s transport reason without diagnostic fields',
     (outcomeReason, code, messageKey, retryable, summary) => {

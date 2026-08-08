@@ -253,11 +253,19 @@ export class RunRecoveryService {
           continue;
         }
         const status = 'outcome_unknown' as const;
+        const failure = projectToolFailure(
+          new ToolExecutionError(
+            'Worker lease was lost after tool dispatch',
+            'unknown',
+            'worker_lease_lost_after_dispatch',
+          ),
+          true,
+        );
         await transaction
           .update(toolCalls)
           .set({
             status,
-            failure: { message: 'Worker lease was lost during tool execution' },
+            failure: failure.diagnosticFailure,
             settledAt: now,
             updatedAt: now,
             version: sql`${toolCalls.version} + 1`,
@@ -267,7 +275,13 @@ export class RunRecoveryService {
           id: this.options.createId(),
           runId,
           eventType: `tool.${status}`,
-          payload: { toolCallId: call.id, reason: 'worker_lease_lost', action, safety },
+          payload: {
+            toolCallId: call.id,
+            reason: 'worker_lease_lost',
+            action,
+            safety,
+            failure: failure.publicFailure,
+          },
         });
         events.push(toDurableEvent(toolEvent));
       }
