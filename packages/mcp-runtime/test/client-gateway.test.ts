@@ -39,7 +39,7 @@ describe('MCP client gateway', () => {
       name: 'McpCallOutcomeUnknownError',
       serverId: 'web_research',
       toolName: 'search',
-      reason: 'connection_lost',
+      reason: 'connection_lost_after_dispatch',
       cause: error,
     });
     expect(firstCall).toHaveBeenCalledTimes(1);
@@ -120,6 +120,39 @@ describe('MCP client gateway', () => {
         retryOrdinal: 1,
         toolCallId: 'call',
       }),
+    ]);
+  });
+
+  it('proves a failed pre-dispatch connection never became an unknown tool outcome', async () => {
+    let connection = 0;
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => {
+        connection += 1;
+        return Promise.reject(Object.assign(new Error('fetch failed'), { code: 'ECONNRESET' }));
+      },
+    });
+    const transportEvents: unknown[] = [];
+    await expect(
+      new McpClientGateway(manager, {
+        onTransportEvent(event) {
+          transportEvents.push(event);
+          return Promise.resolve();
+        },
+      }).call(toolCallInput('before-dispatch-failed')),
+    ).rejects.toMatchObject({
+      name: 'McpCallBeforeDispatchError',
+      outcome: 'known_failed',
+      outcomeReason: 'connection_unavailable_before_dispatch',
+      serverId: 'web_research',
+      toolName: 'search',
+    });
+    expect(connection).toBe(2);
+    expect(transportEvents).toEqual([
+      expect.objectContaining({ event: 'retry_attempted', retryOrdinal: 1 }),
     ]);
   });
 
@@ -240,7 +273,7 @@ describe('MCP client gateway', () => {
     await firstCallStarted;
     await expect(gateway.call(toolCallInput('disconnecting-call'))).rejects.toMatchObject({
       name: 'McpCallOutcomeUnknownError',
-      reason: 'connection_lost',
+      reason: 'connection_lost_after_dispatch',
     });
     settleLateResult?.({ structuredContent: { value: 'stale' } });
     await expect(pendingLateResult).rejects.toMatchObject({

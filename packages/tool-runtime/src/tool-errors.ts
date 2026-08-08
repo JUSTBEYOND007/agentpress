@@ -1,3 +1,8 @@
+export type ToolExecutionOutcomeReason =
+  | 'connection_unavailable_before_dispatch'
+  | 'connection_lost_after_dispatch'
+  | 'stale_client_result';
+
 export class ToolRuntimeError extends Error {
   public constructor(
     public readonly code:
@@ -18,6 +23,7 @@ export class ToolExecutionError extends Error {
   public constructor(
     message: string,
     public readonly outcome: 'known_failed' | 'unknown',
+    public readonly outcomeReason?: ToolExecutionOutcomeReason,
   ) {
     super(message);
     this.name = 'ToolExecutionError';

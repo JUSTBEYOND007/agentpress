@@ -1,4 +1,8 @@
-import { ToolExecutionError, ToolRuntimeError } from '@agentpress/tool-runtime';
+import {
+  ToolExecutionError,
+  ToolRuntimeError,
+  type ToolExecutionOutcomeReason,
+} from '@agentpress/tool-runtime';
 
 export type PublicToolFailure = {
   readonly code:
@@ -16,6 +20,7 @@ export type PublicToolFailure = {
     | 'tool.failure.provider'
     | 'tool.failure.outcome_unknown';
   readonly retryable: boolean;
+  readonly outcomeReason?: ToolExecutionOutcomeReason;
 };
 
 export type ProtectedToolFailure = PublicToolFailure & {
@@ -58,8 +63,11 @@ function classifyPublicFailure(error: unknown, sideEffectRisk: boolean): PublicT
     }
     return failure('tool_unavailable', 'tool.failure.unavailable', true);
   }
-  if (error instanceof ToolExecutionError && error.outcome === 'unknown') {
-    return failure('outcome_unknown', 'tool.failure.outcome_unknown', false);
+  if (error instanceof ToolExecutionError) {
+    if (error.outcome === 'unknown') {
+      return failure('outcome_unknown', 'tool.failure.outcome_unknown', false, error.outcomeReason);
+    }
+    return failure('provider_failed', 'tool.failure.provider', true, error.outcomeReason);
   }
   if (sideEffectRisk) {
     return failure('outcome_unknown', 'tool.failure.outcome_unknown', false);
@@ -71,8 +79,9 @@ function failure(
   code: PublicToolFailure['code'],
   messageKey: PublicToolFailure['messageKey'],
   retryable: boolean,
+  outcomeReason?: ToolExecutionOutcomeReason,
 ): PublicToolFailure {
-  return { code, messageKey, retryable };
+  return { code, messageKey, retryable, ...(outcomeReason ? { outcomeReason } : {}) };
 }
 
 function diagnosticMessage(error: unknown): string {

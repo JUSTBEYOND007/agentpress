@@ -90,7 +90,11 @@ describeWithDatabase('Tool Call application flow', () => {
     timeoutMs: 1_000,
     estimateCost: () => ({}),
     execute: () => {
-      throw new ToolExecutionError('Connection was lost after dispatch', 'unknown');
+      throw new ToolExecutionError(
+        'Connection was lost after dispatch',
+        'unknown',
+        'connection_lost_after_dispatch',
+      );
     },
   });
   registry.register({
@@ -613,6 +617,7 @@ describeWithDatabase('Tool Call application flow', () => {
           code: 'outcome_unknown',
           messageKey: 'tool.failure.outcome_unknown',
           retryable: false,
+          outcomeReason: 'connection_lost_after_dispatch',
         },
       },
     });

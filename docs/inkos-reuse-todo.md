@@ -110,7 +110,11 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       ToolCall 回填不伪造字段类型的空 v1 摘要，Web 只消费有界结构并在按需详情展示，参数值不会进入
       transcript。retry/reconnect 审计已完成：MCP gateway 只审计 dispatch 前的连接探测，ToolTransportAuditService
       以 `tool.transport_retrying`/`tool.transport_reconnected` durable event 和 ledger 计数保证 ordinal
-      幂等；dispatch 后断线仍只结算 `outcome_unknown`，不会自动重放。完整断线/旧结果/浏览器矩阵仍未完成，
+      幂等；dispatch 前连续连接失败会以 `connection_unavailable_before_dispatch` 结算为可重试的
+      `known_failed`，dispatch 后断线与旧 client 晚到结果分别以
+      `connection_lost_after_dispatch`/`stale_client_result` 结算为 `outcome_unknown`，且不会自动重放。
+      三种 reason 均进入公共失败结构，Web fail closed 校验并显示对应业务文案。duplicate end、完整浏览器
+      矩阵仍未完成，
       因此总项保持未勾选；redacted failure 已单独完成。
       其中 redacted failure 已完成：ToolCall settlement 依据 typed `ToolRuntimeError`、
       `ToolExecutionError` 和 side-effect 风险生成 `code/messageKey/retryable`；ledger 只在 protected
@@ -133,13 +137,15 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       集成场景已通过；retry/reconnect 已由独立 audit owner 固化为 durable 计数和事件，并通过真实 HTTP
       reconnect fixture；attempt、authoritative timestamps 和完整 output reference 仍未补齐，redacted
       failure 已完成，因此总项保持未勾选。
-- [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影独立 `outcome_unknown`；
-      不压成普通 error/completed，也不自动重放可能有副作用的调用。
+- [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影有界 typed reason；
+      before-dispatch 必须是可重试的 `known_failed`，只有 after-dispatch/stale result 是独立
+      `outcome_unknown`，不得压成普通 error/completed，也不自动重放可能有副作用的调用。
       当前 `tool.outcome_unknown` 已由 Agent Application projector 投影为独立 warning part，并写入
       `outcome_unknown` 和 `execution.outcome_unknown` stage label；Web Notice 保持“结果待核对”，不会映射为
       failed 或 completed，也不提供自动重试；warning 复用 activity sanitizer，原始 arguments/transport 不进入
-      transcript。真实 PostgreSQL interrupted-call live/replay fixture 已通过。disconnect-before-dispatch、
-      stale late result、duplicate end 和 Playwright 场景仍待补齐。
+      transcript。gateway、application 和 Web unit fixture 已覆盖 before/after-dispatch 与 stale client
+      reason；真实 PostgreSQL interrupted-call fixture 保留 typed after-dispatch reason，并证明 live/replay
+      等价。真实 transport 的 stale late result、duplicate end 和 Playwright 场景仍待补齐，因此总项不勾选。
 - [ ] approval/denied/cancel/degraded/duplicate-result/recovered 各有 typed event；权限只来自宿主 capability、
       Approval 和 Settlement 事实，远端 Server、Skill、网页内容和工具名称不能授予权限。
       replay-safe ToolCall 重复执行现在追加脱敏 `tool.duplicate_result_ignored` durable fact；消费者 projector
@@ -752,7 +758,8 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，32 个 MCP Runtime 测试通过；
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 34 个 MCP Runtime 测试
+      覆盖调用前连接失败、调用后断线不重放和旧 client result identity fence；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置

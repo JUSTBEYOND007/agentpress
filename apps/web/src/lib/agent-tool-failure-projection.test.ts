@@ -32,6 +32,75 @@ describe('public ToolCall failure projection', () => {
       }),
     ).toBeUndefined();
   });
+
+  it.each([
+    [
+      'connection_unavailable_before_dispatch',
+      'provider_failed',
+      'tool.failure.provider',
+      true,
+      '连接建立失败，工具尚未执行，可以重试。',
+    ],
+    [
+      'connection_lost_after_dispatch',
+      'outcome_unknown',
+      'tool.failure.outcome_unknown',
+      false,
+      '工具发出后连接中断，结果无法确认，请先核对。',
+    ],
+    [
+      'stale_client_result',
+      'outcome_unknown',
+      'tool.failure.outcome_unknown',
+      false,
+      '旧连接返回了迟到结果，结果无法确认，请先核对。',
+    ],
+  ] as const)(
+    'projects the %s transport reason without diagnostic fields',
+    (outcomeReason, code, messageKey, retryable, summary) => {
+      const failure = {
+        code,
+        messageKey,
+        retryable,
+        outcomeReason,
+        message: 'credential=secret',
+      };
+      expect(projectPublicToolFailure(failure)).toEqual({
+        code,
+        messageKey,
+        retryable,
+        outcomeReason,
+      });
+      expect(toolFailureSummary(activity(failure))).toBe(summary);
+    },
+  );
+
+  it('fails closed for unknown or incompatible transport reasons', () => {
+    expect(
+      projectPublicToolFailure({
+        code: 'outcome_unknown',
+        messageKey: 'tool.failure.outcome_unknown',
+        retryable: false,
+        outcomeReason: 'made_up_reason',
+      }),
+    ).toBeUndefined();
+    expect(
+      projectPublicToolFailure({
+        code: 'tool_timeout',
+        messageKey: 'tool.failure.timeout',
+        retryable: true,
+        outcomeReason: 'connection_lost_after_dispatch',
+      }),
+    ).toBeUndefined();
+    expect(
+      projectPublicToolFailure({
+        code: 'provider_failed',
+        messageKey: 'tool.failure.provider',
+        retryable: true,
+        outcomeReason: 'stale_client_result',
+      }),
+    ).toBeUndefined();
+  });
 });
 
 function activity(failure: unknown): RunPart {

@@ -30,13 +30,37 @@ describe('Tool Call failure projection', () => {
 
   it('keeps unknown outcome distinct and non-retryable', () => {
     expect(
-      projectToolFailure(new ToolExecutionError('connection secret', 'unknown'), false),
+      projectToolFailure(
+        new ToolExecutionError('connection secret', 'unknown', 'stale_client_result'),
+        false,
+      ),
     ).toMatchObject({
       status: 'outcome_unknown',
       publicFailure: {
         code: 'outcome_unknown',
         messageKey: 'tool.failure.outcome_unknown',
         retryable: false,
+        outcomeReason: 'stale_client_result',
+      },
+    });
+  });
+
+  it('keeps a proven pre-dispatch failure retryable even for a side-effect risk', () => {
+    expect(
+      projectToolFailure(
+        new ToolExecutionError(
+          'connection failed before dispatch',
+          'known_failed',
+          'connection_unavailable_before_dispatch',
+        ),
+        true,
+      ),
+    ).toMatchObject({
+      status: 'failed',
+      publicFailure: {
+        code: 'provider_failed',
+        retryable: true,
+        outcomeReason: 'connection_unavailable_before_dispatch',
       },
     });
   });

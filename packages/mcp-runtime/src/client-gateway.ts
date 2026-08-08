@@ -20,7 +20,26 @@ import type { McpServerManager } from './server-manager.js';
 
 type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
 
-export type McpCallOutcomeUnknownReason = 'connection_lost' | 'stale_client_result';
+export type McpCallOutcomeUnknownReason = 'connection_lost_after_dispatch' | 'stale_client_result';
+
+export class McpCallBeforeDispatchError extends ToolExecutionError {
+  public override readonly name = 'McpCallBeforeDispatchError';
+
+  public constructor(
+    public readonly serverId: BuiltInMcpServerId,
+    public readonly toolName: string,
+    cause?: unknown,
+  ) {
+    super(
+      `MCP tool ${toolName} could not connect before dispatch`,
+      'known_failed',
+      'connection_unavailable_before_dispatch',
+    );
+    this.cause = cause;
+  }
+
+  public override readonly cause?: unknown;
+}
 
 export class McpCallOutcomeUnknownError extends ToolExecutionError {
   public override readonly name = 'McpCallOutcomeUnknownError';
@@ -35,6 +54,7 @@ export class McpCallOutcomeUnknownError extends ToolExecutionError {
     super(
       `MCP tool ${toolName} outcome is unknown after ${reason.replaceAll('_', ' ')}`,
       'unknown',
+      reason,
     );
     this.cause = cause;
   }
@@ -62,7 +82,7 @@ export class McpClientGateway implements BuiltInMcpGateway {
       throw new McpCallOutcomeUnknownError(
         input.serverId,
         input.toolName,
-        'connection_lost',
+        'connection_lost_after_dispatch',
         error,
       );
     }
@@ -187,9 +207,17 @@ export class McpClientGateway implements BuiltInMcpGateway {
       if (!isConnectionFailure(error)) throw error;
       retryOrdinal += 1;
       await this.emitTransportEvent(input, 'retry_attempted', 'connect_failure', retryOrdinal);
-      const client = await this.manager.getClient(input.serverId);
-      await this.emitTransportEvent(input, 'reconnected', 'connect_failure', retryOrdinal);
-      return client;
+      try {
+        const client = await this.manager.getClient(input.serverId);
+        await this.emitTransportEvent(input, 'reconnected', 'connect_failure', retryOrdinal);
+        return client;
+      } catch (retryError) {
+        throwIfAborted(input.context.signal);
+        if (isConnectionFailure(retryError)) {
+          throw new McpCallBeforeDispatchError(input.serverId, input.toolName, retryError);
+        }
+        throw retryError;
+      }
     }
   }
 

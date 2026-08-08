@@ -16,6 +16,10 @@ export type PublicToolFailure = {
     | 'tool.failure.provider'
     | 'tool.failure.outcome_unknown';
   readonly retryable: boolean;
+  readonly outcomeReason?:
+    | 'connection_unavailable_before_dispatch'
+    | 'connection_lost_after_dispatch'
+    | 'stale_client_result';
 };
 
 const contracts: Readonly<
@@ -66,20 +70,52 @@ export function projectPublicToolFailure(value: unknown): PublicToolFailure | un
   const code = stringValue(record.code);
   const messageKey = stringValue(record.messageKey);
   const retryable = typeof record.retryable === 'boolean' ? record.retryable : undefined;
+  const rawOutcomeReason = stringValue(record.outcomeReason);
   const contract = code ? contracts[code as PublicToolFailure['code']] : undefined;
   if (!contract || messageKey !== contract.messageKey || retryable !== contract.retryable) {
     return undefined;
   }
+  if (rawOutcomeReason && !isOutcomeReason(rawOutcomeReason)) return undefined;
+  const outcomeReason = rawOutcomeReason as PublicToolFailure['outcomeReason'];
+  if (outcomeReason && !isReasonCompatible(code, outcomeReason)) return undefined;
   return {
     code: code as PublicToolFailure['code'],
     messageKey: contract.messageKey,
     retryable,
+    ...(outcomeReason ? { outcomeReason } : {}),
   };
+}
+
+function isReasonCompatible(
+  code: string | undefined,
+  reason: NonNullable<PublicToolFailure['outcomeReason']>,
+): boolean {
+  return reason === 'connection_unavailable_before_dispatch'
+    ? code === 'provider_failed'
+    : code === 'outcome_unknown';
+}
+
+function isOutcomeReason(value: string): value is NonNullable<PublicToolFailure['outcomeReason']> {
+  return (
+    value === 'connection_unavailable_before_dispatch' ||
+    value === 'connection_lost_after_dispatch' ||
+    value === 'stale_client_result'
+  );
 }
 
 export function toolFailureSummary(part: RunPart): string | undefined {
   const failure = projectPublicToolFailure(part.payload.failure);
-  return failure ? contracts[failure.code].message : undefined;
+  if (!failure) return undefined;
+  if (failure.outcomeReason === 'connection_unavailable_before_dispatch') {
+    return '连接建立失败，工具尚未执行，可以重试。';
+  }
+  if (failure.outcomeReason === 'connection_lost_after_dispatch') {
+    return '工具发出后连接中断，结果无法确认，请先核对。';
+  }
+  if (failure.outcomeReason === 'stale_client_result') {
+    return '旧连接返回了迟到结果，结果无法确认，请先核对。';
+  }
+  return contracts[failure.code].message;
 }
 
 function stringValue(value: unknown): string | undefined {

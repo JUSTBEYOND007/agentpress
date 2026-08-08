@@ -204,7 +204,7 @@ describe('run projection', () => {
       event(1, 'tool.failed', { toolCallId: 'tool-failed', failure: { code: 'provider_failed' } }),
       event(2, 'tool.outcome_unknown', {
         toolCallId: 'tool-unknown',
-        reason: 'connection_lost',
+        reason: 'connection_lost_after_dispatch',
       }),
     ]);
     expect(parts.map(({ status, outcome }) => ({ status, outcome }))).toEqual([
