@@ -1221,6 +1221,34 @@ export const taskResults = pgTable(
   ],
 );
 
+/** Immutable invalidation fact for a TaskResult rejected during recovery validation. */
+export const taskResultInvalidations = pgTable(
+  'task_result_invalidations',
+  {
+    id: uuid('id').primaryKey(),
+    taskResultId: uuid('task_result_id')
+      .notNull()
+      .references(() => taskResults.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    reason: varchar('reason', { length: 48 }).notNull(),
+    issues: jsonb('issues').$type<readonly Readonly<Record<string, unknown>>[]>().notNull(),
+    createdAt,
+  },
+  (table) => [
+    unique('task_result_invalidations_result_unique').on(table.taskResultId),
+    index('task_result_invalidations_run_task_idx').on(table.runId, table.taskId),
+    check(
+      'task_result_invalidations_reason_check',
+      sql`${table.reason} in ('recovery_validation_failed')`,
+    ),
+  ],
+);
+
 export const reviewRounds = pgTable(
   'review_rounds',
   {
@@ -1283,9 +1311,7 @@ export const toolCalls = pgTable(
     argumentsHash: varchar('arguments_hash', { length: 80 }).notNull(),
     transportRetryCount: integer('transport_retry_count').notNull().default(0),
     transportReconnectCount: integer('transport_reconnect_count').notNull().default(0),
-    transportLastReconnectOrdinal: integer('transport_last_reconnect_ordinal')
-      .notNull()
-      .default(0),
+    transportLastReconnectOrdinal: integer('transport_last_reconnect_ordinal').notNull().default(0),
     risk: toolRiskEnum('risk').$type<ToolRisk>().notNull(),
     sideEffect: text('side_effect').notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 200 }),

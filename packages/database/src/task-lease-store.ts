@@ -6,7 +6,13 @@ import type { AgentPressDatabase, DatabaseTransaction } from './postgres.js';
 import { enqueueOutboxMessage } from './outbox.js';
 import { forfeitActiveTaskBudgets } from './run-specialist-budget-store.js';
 import { appendRunEvent } from './run-event-store.js';
-import { agentTaskLeases, agentTasks, runEvents, taskResults } from './schema.js';
+import {
+  agentTaskLeases,
+  agentTasks,
+  runEvents,
+  taskResultInvalidations,
+  taskResults,
+} from './schema.js';
 
 export type TaskLease = {
   readonly leaseId: string;
@@ -149,6 +155,10 @@ export async function claimAgentTask(
           select 1 from ${taskResults}
           where ${taskResults.taskId} = ${agentTasks.id}
             and ${taskResults.status} = 'succeeded'
+            and not exists (
+              select 1 from ${taskResultInvalidations}
+              where ${taskResultInvalidations.taskResultId} = ${taskResults.id}
+            )
         )`,
         sql`not exists (
           select 1 from ${agentTaskLeases}

@@ -330,6 +330,13 @@
       "when": 1786191592179,
       "tag": "0046_nice_wind_dancer",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786202285582,
+      "tag": "0047_bent_serpent_society",
+      "breakpoints": true
     }
   ]
 }

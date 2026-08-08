@@ -596,7 +596,14 @@ preservedFacts/missingFacts/unverified/nextActions 并写 `run.recovery.degraded
 `run.recovery.validated`。同一 Run 由锁和既有 event 幂等 fence，不能重复投影。两条 PostgreSQL 正反用例
 证明陈旧 Revision + 缺失 Evidence 会令最终 Run `completed_with_degradation`，而当前 Revision + 无缺失引用
 正常完成；RunPart 分别带 host-owned `degraded`/`succeeded` outcome。完整 capability 校验和只重新计算损坏
-Artifact 的执行策略仍未接入，因此对应总项不提前勾选。
+Artifact 的执行策略已接入：恢复前只读取每个 Task 最新且未失效的 succeeded TaskResult，引用的当前
+ArticleDraft 不通过既有 validator 时，在同一恢复事务中把对应 Task attempt 标为 `interrupted`，写入
+`task_result_invalidations` 和 `task.interrupted(reason=recovery_validation_failed)`；原 TaskResult 与旧
+Artifact Version 永不删除或覆盖。恢复执行只重新 claim 这些损坏分支，Researcher 等已验证分支保持原
+attempt/事实，新的结果继续通过同一 TaskResult/Artifact/Evidence 结算路径。`recovery-fact-validation.integration.test.ts`
+的正反场景证明 stale Writer attempt 1 只产生 Writer attempt 2，Researcher 不重跑，两个 Artifact Version
+均保留，最终 Run 为 `completed`；达到 `maxAttempts` 的损坏结果不自动失效。该项现已完成，完整 capability
+校验和真实目标模型验收仍由总门禁单独追踪。
 
 MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连接丢失不会在新连接自动重放，退役 client
 的晚到结果由 identity fence 拒绝，只有调用前连接 probe 可安全重连；真实 Streamable HTTP 重启测试
@@ -705,7 +712,9 @@ Node connection code 或 failed-rollback 进入 reconciliation，从事务前 Ru
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
 - [ ] settlement 重试与生成重试分离；只有确定 replay-safe 的结算步骤才允许自动重试。
-- [ ] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分。
+- [x] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分；通过
+      `task_result_invalidations` 隔离损坏 succeeded TaskResult，不删除旧结果或旧 Artifact Version，
+      并以 Task/attempt fence 只重跑损坏分支。
 - [ ] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
 - [x] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
 - [x] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。

@@ -91,6 +91,7 @@ export class DirectRunService {
       database: options.database,
       publisher: options.publisher,
       createId: this.createId,
+      now: this.now,
     });
     this.compactions = new ConversationCompactionService({
       database: options.database,
@@ -247,8 +248,10 @@ export class DirectRunService {
     return this.recovery.requestCancellation(runId);
   }
 
-  public prepareRecovery(runId: string): Promise<boolean> {
-    return this.recovery.prepare(runId);
+  public async prepareRecovery(runId: string): Promise<boolean> {
+    const prepared = await this.recovery.prepare(runId);
+    if (prepared) await this.recoveryFacts.invalidateDamagedTaskResults(runId);
+    return prepared;
   }
 
   /** Executes one persisted detached Specialist Task after a worker claims it. */

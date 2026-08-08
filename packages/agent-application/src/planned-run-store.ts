@@ -13,10 +13,11 @@ import {
   planRevisionTasks,
   runQuestions,
   taskBriefs,
+  taskResultInvalidations,
   taskResults,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { AGENT_TASK_COMMAND_TOPIC, type RunEventPublisher } from './contracts.js';
 import {
@@ -312,10 +313,14 @@ export class PlannedRunStore {
         failure: taskResults.failure,
       })
       .from(taskResults)
+      .leftJoin(taskResultInvalidations, eq(taskResultInvalidations.taskResultId, taskResults.id))
       .where(
-        inArray(
-          taskResults.taskId,
-          tasks.map(({ id }) => id),
+        and(
+          inArray(
+            taskResults.taskId,
+            tasks.map(({ id }) => id),
+          ),
+          isNull(taskResultInvalidations.id),
         ),
       )
       .orderBy(desc(taskResults.attempt));

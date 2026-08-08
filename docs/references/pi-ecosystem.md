@@ -519,6 +519,14 @@ pass through the non-replay-safe recovery policy and persist typed `preservedFac
 `run.recovery.validated`. PostgreSQL opposite-path fixtures prove stale/missing facts force
 `completed_with_degradation`, while a current valid immutable Artifact remains successful. The RunPart
 projector exposes host-owned degraded/succeeded recovery outcomes without consumer text inference.
+Recovery invalidation is now branch-scoped: `recovery-fact-inspector.ts` inspects only the latest
+non-invalidated succeeded `TaskResult` and the Artifact Versions it references. A stale Writer result is
+marked `interrupted` in the recovery transaction and recorded in `task_result_invalidations`; the original
+TaskResult and both old/new immutable Artifact Versions remain queryable. `recovery-fact-validation.integration.test.ts`
+proves that a valid Researcher attempt is not rerun, only the damaged Writer is claimed at attempt two, and
+the recovered Run completes without degradation. This is an AgentPress adaptation of InkOS's recovery
+boundary, not copied InkOS code; `packages/database/src/schema.ts` and migration `0047_bent_serpent_society.sql`
+own the durable invalidation fact.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 

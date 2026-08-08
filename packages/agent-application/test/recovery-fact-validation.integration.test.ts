@@ -1,9 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { PiRuntimeAdapter } from '@agentpress/agent-runtime';
+import {
+  PiRuntimeAdapter,
+  RUNTIME_CURRENT_TURN_VERSION,
+  type RuntimeCurrentTurn,
+} from '@agentpress/agent-runtime';
+import { fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import {
   agentRuns,
+  agentTasks,
   appUsers,
   artifacts,
   artifactVersions,
@@ -12,7 +18,11 @@ import {
   connectDatabase,
   conversationBranches,
   conversations,
+  executionPlans,
+  planRevisions,
   runEvents,
+  taskResultInvalidations,
+  taskResults,
   workspaceMembers,
   workspaces,
 } from '@agentpress/database';
@@ -20,7 +30,13 @@ import { and, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DirectRunService, type RunEventPublisher } from '../src/index.js';
+import {
+  DirectRunService,
+  PlannedRunStore,
+  SpecialistResultStore,
+  type PlannedTaskSpec,
+  type RunEventPublisher,
+} from '../src/index.js';
 
 const connectionString = process.env.DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -190,6 +206,185 @@ describeWithDatabase('Recovery fact validation', () => {
     expect(projection?.parts.some(({ status }) => status === 'run.recovery.degraded')).toBe(false);
   });
 
+  it('invalidates only the damaged writer result and reruns that branch', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const calls: string[] = [];
+    const researcher = task('researcher', 'researcher', 'required');
+    const writer = task('writer', 'writer', 'required', [researcher.id]);
+    const service = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: (purpose) => {
+          calls.push(purpose ?? 'unknown');
+          if (purpose !== 'writer' && purpose !== 'researcher') {
+            return PiRuntimeAdapter.forTests({
+              responses: [runCompleteResponse('Recovered writer branch.')],
+            });
+          }
+          if (purpose === 'researcher') {
+            return PiRuntimeAdapter.forTests({
+              responses: [taskCompleteResponse('Research remains valid')],
+            });
+          }
+          return PiRuntimeAdapter.forTests({
+            responses: [
+              taskCompleteResponse('Writer attempt two completed', {
+                baseRevisionId: ids.revision2,
+                document: articleDocument('writer-attempt-2', 'Valid recovered draft'),
+                claims: [],
+              }),
+            ],
+          });
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: 'Recover the damaged writer branch.',
+      idempotencyKey: randomUUID(),
+    });
+    const planId = randomUUID();
+    const revisionId = randomUUID();
+    const turn = currentTurn('Recover the damaged writer branch.');
+    const store = new PlannedRunStore({
+      database: connection.db,
+      publisher,
+      createId: randomUUID,
+      now: () => new Date(),
+    });
+    await connection.db.transaction(async (transaction) => {
+      await transaction.insert(executionPlans).values({ id: planId, runId: run.runId });
+      await transaction.insert(planRevisions).values({
+        id: revisionId,
+        planId,
+        revisionNumber: 1,
+        reason: 'initial_plan',
+        summary: 'Recover only the damaged writer branch',
+      });
+      await store.persistRevisionTasks(
+        transaction,
+        run.runId,
+        revisionId,
+        [researcher, writer],
+        turn,
+      );
+      await transaction
+        .update(agentRuns)
+        .set({ mode: 'planned', status: 'running', activePlanRevisionId: revisionId })
+        .where(eq(agentRuns.id, run.runId));
+      await transaction
+        .update(agentTasks)
+        .set({ status: 'running', attempt: 1 })
+        .where(eq(agentTasks.runId, run.runId));
+    });
+    const results = new SpecialistResultStore({
+      database: connection.db,
+      publisher,
+      createId: randomUUID,
+      now: () => new Date(),
+    });
+    await expect(
+      results.persistTaskResult(
+        run.runId,
+        {
+          ...researcher,
+          status: 'succeeded',
+          summary: 'Research remains valid',
+          artifacts: [],
+          warnings: [],
+        },
+        1,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      results.persistTaskResult(
+        run.runId,
+        {
+          ...writer,
+          status: 'succeeded',
+          summary: 'Stale writer result',
+          artifacts: [
+            {
+              type: 'ArticleDraft',
+              title: 'Stale draft',
+              summary: 'Must be invalidated',
+              content: {
+                baseRevisionId: ids.revision1,
+                document: articleDocument('writer-attempt-1', 'Stale draft'),
+                claims: [],
+              },
+              evidenceIds: [],
+            },
+          ],
+          warnings: [],
+        },
+        1,
+      ),
+    ).resolves.toBe(true);
+
+    await expect(service.prepareRecovery(run.runId)).resolves.toBe(true);
+    await expect(service.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'completed',
+    });
+
+    expect(calls.filter((call) => call === 'researcher')).toHaveLength(0);
+    expect(calls.filter((call) => call === 'writer')).toHaveLength(1);
+    expect(calls.filter((call) => call === 'synthesis')).toHaveLength(1);
+    await expect(
+      connection.db
+        .select({ owner: agentTasks.owner, attempt: agentTasks.attempt, status: agentTasks.status })
+        .from(agentTasks)
+        .where(eq(agentTasks.runId, run.runId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { owner: 'researcher', attempt: 1, status: 'succeeded' },
+        { owner: 'writer', attempt: 2, status: 'succeeded' },
+      ]),
+    );
+    const invalidations = await connection.db
+      .select({ taskId: taskResultInvalidations.taskId, reason: taskResultInvalidations.reason })
+      .from(taskResultInvalidations)
+      .where(eq(taskResultInvalidations.runId, run.runId));
+    expect(invalidations).toHaveLength(1);
+    expect(invalidations[0]).toMatchObject({
+      taskId: writer.id,
+      reason: 'recovery_validation_failed',
+    });
+    await expect(
+      connection.db
+        .select({ attempt: taskResults.attempt })
+        .from(taskResults)
+        .where(eq(taskResults.taskId, writer.id)),
+    ).resolves.toEqual(expect.arrayContaining([{ attempt: 1 }, { attempt: 2 }]));
+    await expect(
+      connection.db
+        .select({ version: artifactVersions.version })
+        .from(artifactVersions)
+        .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))
+        .where(eq(artifacts.taskId, writer.id)),
+    ).resolves.toHaveLength(2);
+    const projection = await service.getProjection(run.runId);
+    const interruptedPart = projection?.parts.find(({ status }) => status === 'task.interrupted');
+    expect(interruptedPart?.payload).toMatchObject({
+      taskId: writer.id,
+      reason: 'recovery_validation_failed',
+    });
+    expect(projection?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'run.recovery.validated', outcome: 'succeeded' }),
+      ]),
+    );
+  });
+
   async function createRecoveryFixture(input: {
     readonly baseRevisionId: string;
     readonly claims: readonly { readonly text: string; readonly evidenceIds: readonly string[] }[];
@@ -257,6 +452,74 @@ describeWithDatabase('Recovery fact validation', () => {
     return rows[0];
   }
 });
+
+function currentTurn(request: string): RuntimeCurrentTurn {
+  return {
+    type: 'agentpress_current_turn',
+    version: RUNTIME_CURRENT_TURN_VERSION,
+    source: 'recovery',
+    request,
+    actionEnvelope: { version: 1, source: 'free_text', grantedCapabilities: [] },
+    timestamp: Date.now(),
+  };
+}
+
+function task(
+  clientKey: string,
+  owner: PlannedTaskSpec['owner'],
+  criticality: PlannedTaskSpec['criticality'],
+  dependencyIds: readonly string[] = [],
+): PlannedTaskSpec {
+  return {
+    id: randomUUID(),
+    clientKey,
+    owner,
+    objective: `${owner} recovery objective`,
+    criticality,
+    acceptanceCriteria: [`${owner} recovery result is complete`],
+    dependencyIds,
+    capabilities: [],
+    detached: false,
+  };
+}
+
+function taskCompleteResponse(
+  summary: string,
+  articleDraft?: {
+    readonly baseRevisionId: string;
+    readonly document: unknown;
+    readonly claims: readonly unknown[];
+  },
+) {
+  return fauxAssistantMessage(
+    [
+      fauxToolCall('task_complete', {
+        status: 'succeeded',
+        summary,
+        artifacts: articleDraft
+          ? [
+              {
+                type: 'ArticleDraft',
+                title: 'Recovered draft',
+                summary,
+                content: articleDraft,
+                evidenceIds: [],
+              },
+            ]
+          : [],
+        warnings: [],
+      }),
+    ],
+    { stopReason: 'toolUse' },
+  );
+}
+
+function runCompleteResponse(answer: string) {
+  return fauxAssistantMessage(
+    [fauxToolCall('run_complete', { answer, artifactIds: [], evidenceIds: [] })],
+    { stopReason: 'toolUse' },
+  );
+}
 
 function articleDocument(blockId: string, text: string) {
   return {
