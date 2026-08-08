@@ -43,6 +43,68 @@ describe('MCP Streamable HTTP real fixture', () => {
     }
   });
 
+  it.each([
+    { status: 401, authorization: undefined },
+    { status: 403, authorization: 'Bearer expired' },
+  ] as const)(
+    'maps a real HTTP $status initialization rejection without retrying or exposing its body',
+    async ({ status, authorization }) => {
+      const fixture = await startInitializationFailureFixture({ status });
+      const manager = new McpServerManager();
+      manager.register({
+        serverId: 'web_research',
+        version: '1',
+        displayName: 'Web',
+        createClient: () =>
+          createStreamableHttpClient({
+            url: fixture.url,
+            ...(authorization ? { requestInit: { headers: { authorization } } } : {}),
+          }),
+      });
+      try {
+        const error = await new McpClientGateway(manager)
+          .call(toolCallInput(`authentication-${String(status)}`, 'ignored'))
+          .catch((caught: unknown) => caught);
+        expect(error).toMatchObject({
+          name: 'McpAuthenticationError',
+          code: 'tool_authentication_failed',
+        });
+        expect(String(error)).not.toMatch(/api_key|credential|authorization|generated|secret/u);
+        expect(fixture.requestCount()).toBe(1);
+        expect(fixture.toolCallCount()).toBe(0);
+        expect(fixture.authorization()).toBe(authorization);
+        expect(manager.state('web_research')).toBe('degraded');
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it('keeps an unsupported protocol handshake known failed before tool dispatch', async () => {
+    const fixture = await startInitializationFailureFixture({ protocolVersion: '1900-01-01' });
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: fixture.url }),
+    });
+    try {
+      await expect(
+        new McpClientGateway(manager).call(toolCallInput('unsupported-protocol', 'ignored')),
+      ).rejects.toMatchObject({
+        name: 'McpCallBeforeDispatchError',
+        outcome: 'known_failed',
+        outcomeReason: 'initialization_failed_before_dispatch',
+      });
+      expect(fixture.requestCount()).toBe(1);
+      expect(fixture.toolCallCount()).toBe(0);
+      expect(manager.state('web_research')).toBe('degraded');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('propagates client cancellation to an in-flight HTTP tool request', async () => {
     const fixture = await startFixture(false);
     try {
@@ -411,6 +473,70 @@ async function startFixture(
   };
 }
 
+async function startInitializationFailureFixture(
+  mode: { readonly status: 401 | 403 } | { readonly protocolVersion: string },
+): Promise<{
+  readonly url: string;
+  readonly requestCount: () => number;
+  readonly toolCallCount: () => number;
+  readonly authorization: () => string | undefined;
+  readonly close: () => Promise<void>;
+}> {
+  let requestCount = 0;
+  let toolCallCount = 0;
+  let authorization: string | undefined;
+  const server = createServer((request, response) => {
+    void (async () => {
+      requestCount += 1;
+      authorization = request.headers.authorization;
+      const body = request.method === 'POST' ? await readJsonBody(request) : undefined;
+      if (isToolCall(body)) toolCallCount += 1;
+      if ('status' in mode) {
+        response.writeHead(mode.status, { 'content-type': 'text/plain' });
+        response.end('provider api_key=generated authorization=secret credential=generated');
+        return;
+      }
+      const id =
+        typeof body === 'object' && body !== null && !Array.isArray(body)
+          ? (body as Record<string, unknown>).id
+          : null;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          result: {
+            protocolVersion: mode.protocolVersion,
+            capabilities: {},
+            serverInfo: { name: 'unsupported-protocol', version: '1' },
+          },
+        }),
+      );
+    })().catch(() => {
+      if (!response.headersSent) response.writeHead(500);
+      response.end();
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('fixture did not bind TCP');
+  return {
+    url: `http://127.0.0.1:${String(address.port)}/mcp`,
+    requestCount: () => requestCount,
+    toolCallCount: () => toolCallCount,
+    authorization: () => authorization,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      }),
+  };
+}
+
 function toolCallInput(toolCallId: string, value: string) {
   return {
     serverId: 'web_research' as const,
@@ -464,6 +590,15 @@ function isRateLimitedToolCall(value: unknown): boolean {
     return false;
   }
   return (request.params as Record<string, unknown>).name === 'rate_limited';
+}
+
+function isToolCall(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).method === 'tools/call'
+  );
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {

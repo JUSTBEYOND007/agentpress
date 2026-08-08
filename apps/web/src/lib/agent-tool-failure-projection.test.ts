@@ -52,7 +52,30 @@ describe('public ToolCall failure projection', () => {
     ).toBeUndefined();
   });
 
+  it('localizes credential failure and rejects retryability drift', () => {
+    const failure = {
+      code: 'tool_authentication_failed',
+      messageKey: 'tool.failure.authentication',
+      retryable: false,
+      message: 'authorization=secret',
+    };
+    expect(projectPublicToolFailure(failure)).toEqual({
+      code: 'tool_authentication_failed',
+      messageKey: 'tool.failure.authentication',
+      retryable: false,
+    });
+    expect(toolFailureSummary(activity(failure))).toBe('工具凭据不可用，请联系管理员更新配置。');
+    expect(projectPublicToolFailure({ ...failure, retryable: true })).toBeUndefined();
+  });
+
   it.each([
+    [
+      'initialization_failed_before_dispatch',
+      'provider_failed',
+      'tool.failure.provider',
+      true,
+      '工具初始化失败，尚未执行，可以重试。',
+    ],
     [
       'connection_unavailable_before_dispatch',
       'provider_failed',

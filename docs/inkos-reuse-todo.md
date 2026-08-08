@@ -608,6 +608,13 @@ tool name 或关键词推断。远端响应正文不会保留到公开错误或 
 session 仍可成功调用，PostgreSQL fixture 证明受保护 ledger 与脱敏 live/replay 的状态均为确定 `failed`，
 Web 对 code/messageKey/retryable 组合 fail closed。非 429 HTTP 状态的相反语义测试防止误分类。
 
+MCP 初始化失败也已按 dispatch 事实分流：官方 SDK 在 `Client.connect()` 收到 401/403 时，Gateway 生成
+不可重试的 `tool_authentication_failed`，不重试、不保留响应正文；非网络型握手失败生成可重试的
+`initialization_failed_before_dispatch`，绝不因工具是 external write 而变为 `outcome_unknown`。真实 HTTP
+fixture 分别覆盖无 Authorization 的 401、携带 `Bearer expired` 的 403 和不支持 protocol version，均只
+发出一次 initialize 且 `tools/call=0`；PostgreSQL ledger、live/replay 与 Web fail-closed 投影已覆盖。
+具体内置 Server 的“配置声明凭据必需但缺失”、连续认证失败后的 circuit 分类仍未完成。
+
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
 由 status fence 忽略。Run、ToolCall、Approval 和 transport audit 入口统一使用 `Run -> ToolCall` 锁顺序，
@@ -791,11 +798,11 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 38 个 MCP Runtime 测试
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 44 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放、旧 client result identity fence，以及结构化 HTTP 429
-      脱敏、拒绝后 session 健康和非 429 相反语义；ToolRegistry 19 个测试、27 个 PostgreSQL ToolCall
-      场景和官方 SDK 真实 HTTP Server 已覆盖非协作 handler 的硬 timeout、wire cancel、迟到完成、
-      风险分流及限流 live/replay；
+      脱敏、拒绝后 session 健康、非 429 相反语义、401/403 初始化认证失败和非法 protocol handshake；
+      ToolRegistry 19 个测试、28 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
+      handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流及初始化失败的 live/replay；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置

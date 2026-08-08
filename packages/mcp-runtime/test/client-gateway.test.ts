@@ -157,6 +157,60 @@ describe('MCP client gateway', () => {
     ]);
   });
 
+  it.each([401, 403])(
+    'maps HTTP %s during initialization to a redacted non-retryable credential failure',
+    async (status) => {
+      const create = vi.fn(() =>
+        Promise.reject(
+          new StreamableHTTPError(
+            status,
+            'provider api_key=generated credential=generated authorization=secret',
+          ),
+        ),
+      );
+      const manager = new McpServerManager();
+      manager.register({
+        serverId: 'web_research',
+        version: '1',
+        displayName: 'Web',
+        createClient: create,
+      });
+
+      const error = await new McpClientGateway(manager)
+        .call(toolCallInput('credential-failure'))
+        .catch((caught: unknown) => caught);
+      expect(error).toMatchObject({
+        name: 'McpAuthenticationError',
+        code: 'tool_authentication_failed',
+      });
+      expect(String(error)).not.toMatch(/api_key|credential|authorization|generated|secret/u);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(manager.state('web_research')).toBe('degraded');
+    },
+  );
+
+  it('wraps a non-network handshake failure as known failed before dispatch', async () => {
+    const handshake = new Error('unsupported protocol credential=generated');
+    const create = vi.fn(() => Promise.reject(handshake));
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: create,
+    });
+
+    await expect(
+      new McpClientGateway(manager).call(toolCallInput('handshake-failure')),
+    ).rejects.toMatchObject({
+      name: 'McpCallBeforeDispatchError',
+      outcome: 'known_failed',
+      outcomeReason: 'initialization_failed_before_dispatch',
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(manager.state('web_research')).toBe('degraded');
+  });
+
   it('audits a failed degraded reconnect before the connection probe succeeds', async () => {
     const callTool = vi.fn(() => Promise.resolve({ structuredContent: { value: 'ok' } }));
     const oldClient = { close: () => Promise.resolve() } as unknown as Client;

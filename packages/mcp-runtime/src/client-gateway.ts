@@ -8,7 +8,11 @@ import {
   ResourceUpdatedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ToolExecutionError, ToolRuntimeError } from '@agentpress/tool-runtime';
+import {
+  ToolExecutionError,
+  ToolRuntimeError,
+  type ToolExecutionOutcomeReason,
+} from '@agentpress/tool-runtime';
 
 import type { BuiltInMcpGateway } from './built-in-tools.js';
 import type {
@@ -30,16 +34,30 @@ export class McpCallBeforeDispatchError extends ToolExecutionError {
     public readonly serverId: BuiltInMcpServerId,
     public readonly toolName: string,
     cause?: unknown,
+    reason: Extract<
+      ToolExecutionOutcomeReason,
+      'connection_unavailable_before_dispatch' | 'initialization_failed_before_dispatch'
+    > = 'connection_unavailable_before_dispatch',
   ) {
-    super(
-      `MCP tool ${toolName} could not connect before dispatch`,
-      'known_failed',
-      'connection_unavailable_before_dispatch',
-    );
+    super(`MCP tool ${toolName} failed before dispatch`, 'known_failed', reason);
     this.cause = cause;
   }
 
   public override readonly cause?: unknown;
+}
+
+export class McpAuthenticationError extends ToolRuntimeError {
+  public override readonly name = 'McpAuthenticationError';
+
+  public constructor(
+    public readonly serverId: BuiltInMcpServerId,
+    public readonly toolName: string,
+  ) {
+    super('tool_authentication_failed', `MCP tool ${toolName} authentication failed`, {
+      serverId,
+      toolName,
+    });
+  }
 }
 
 export class McpCallOutcomeUnknownError extends ToolExecutionError {
@@ -222,7 +240,17 @@ export class McpClientGateway implements BuiltInMcpGateway {
       return client;
     } catch (error) {
       throwIfAborted(input.context.signal);
-      if (!isConnectionFailure(error)) throw error;
+      if (isAuthenticationFailure(error)) {
+        throw new McpAuthenticationError(input.serverId, input.toolName);
+      }
+      if (!isConnectionFailure(error)) {
+        throw new McpCallBeforeDispatchError(
+          input.serverId,
+          input.toolName,
+          undefined,
+          'initialization_failed_before_dispatch',
+        );
+      }
       retryOrdinal += 1;
       await this.emitTransportEvent(input, 'retry_attempted', 'connect_failure', retryOrdinal);
       try {
@@ -231,10 +259,18 @@ export class McpClientGateway implements BuiltInMcpGateway {
         return client;
       } catch (retryError) {
         throwIfAborted(input.context.signal);
+        if (isAuthenticationFailure(retryError)) {
+          throw new McpAuthenticationError(input.serverId, input.toolName);
+        }
         if (isConnectionFailure(retryError)) {
           throw new McpCallBeforeDispatchError(input.serverId, input.toolName, retryError);
         }
-        throw retryError;
+        throw new McpCallBeforeDispatchError(
+          input.serverId,
+          input.toolName,
+          undefined,
+          'initialization_failed_before_dispatch',
+        );
       }
     }
   }
@@ -256,6 +292,10 @@ export class McpClientGateway implements BuiltInMcpGateway {
       toolCallId: input.context.toolCallId,
     });
   }
+}
+
+function isAuthenticationFailure(error: unknown): boolean {
+  return error instanceof StreamableHTTPError && (error.code === 401 || error.code === 403);
 }
 
 function validateListedTools(tools: readonly ListedMcpTool[]): void {

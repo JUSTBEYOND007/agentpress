@@ -160,6 +160,47 @@ describeWithDatabase('Tool Call application flow', () => {
     },
   });
   registry.register({
+    toolId: 'publication.authentication_failure',
+    version: '1.0.0',
+    owner: 'publication',
+    description: 'Publish through a provider with rejected credentials',
+    capabilities: ['publication.write'],
+    inputSchema: Type.Object({ editionId: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ publicationId: Type.String() }, { additionalProperties: false }),
+    risk: 'external_write',
+    sideEffect: 'Publish the selected immutable edition',
+    idempotency: 'provider_key',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () => {
+      throw new ToolRuntimeError(
+        'tool_authentication_failed',
+        'provider authorization=super-secret',
+      );
+    },
+  });
+  registry.register({
+    toolId: 'publication.initialization_failure',
+    version: '1.0.0',
+    owner: 'publication',
+    description: 'Publish through a provider with an invalid handshake',
+    capabilities: ['publication.write'],
+    inputSchema: Type.Object({ editionId: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ publicationId: Type.String() }, { additionalProperties: false }),
+    risk: 'external_write',
+    sideEffect: 'Publish the selected immutable edition',
+    idempotency: 'provider_key',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () => {
+      throw new ToolExecutionError(
+        'provider protocol response=super-secret',
+        'known_failed',
+        'initialization_failed_before_dispatch',
+      );
+    },
+  });
+  registry.register({
     toolId: 'web.search',
     version: '1.0.0',
     owner: 'research',
@@ -875,6 +916,74 @@ describeWithDatabase('Tool Call application flow', () => {
         },
       },
     });
+    expect(JSON.stringify(liveEvents)).not.toContain('super-secret');
+    expect(JSON.stringify(replayParts)).not.toContain('super-secret');
+  });
+
+  it('keeps credential and handshake failures known before external dispatch', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const inputs = [
+      {
+        toolId: 'publication.authentication_failure',
+        expected: {
+          code: 'tool_authentication_failed',
+          messageKey: 'tool.failure.authentication',
+          retryable: false,
+        },
+      },
+      {
+        toolId: 'publication.initialization_failure',
+        expected: {
+          code: 'provider_failed',
+          messageKey: 'tool.failure.provider',
+          retryable: true,
+          outcomeReason: 'initialization_failed_before_dispatch',
+        },
+      },
+    ] as const;
+    const toolCallIds: string[] = [];
+    for (const input of inputs) {
+      const proposal = await service.propose({
+        runId,
+        toolId: input.toolId,
+        toolVersion: '1.0.0',
+        arguments: { editionId: randomUUID() },
+        requestedFromUserId: userId,
+        allowedCapabilities: new Set(['publication.write']),
+        idempotencyKey: `${input.toolId}:${randomUUID()}`,
+      });
+      await service.decideApproval({
+        toolCallId: proposal.toolCallId,
+        decision: 'approved',
+        userId,
+      });
+      await expect(service.execute(proposal.toolCallId)).resolves.toMatchObject({
+        status: 'failed',
+      });
+      toolCallIds.push(proposal.toolCallId);
+    }
+
+    const rows = await connection.db
+      .select({ id: toolCalls.id, status: toolCalls.status, failure: toolCalls.failure })
+      .from(toolCalls)
+      .where(eq(toolCalls.runId, runId));
+    for (const [index, input] of inputs.entries()) {
+      expect(rows.find(({ id }) => id === toolCallIds[index])).toMatchObject({
+        status: 'failed',
+        failure: { ...input.expected, visibility: 'protected' },
+      });
+    }
+
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const liveParts = projectRunParts(liveEvents).filter(({ type }) => type === 'activity');
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const replayParts = replay?.parts.filter(({ type }) => type === 'activity');
+    expect(replayParts).toEqual(liveParts);
+    expect(replayParts).toHaveLength(2);
+    expect(replayParts?.map(({ outcome }) => outcome)).toEqual(['failed', 'failed']);
     expect(JSON.stringify(liveEvents)).not.toContain('super-secret');
     expect(JSON.stringify(replayParts)).not.toContain('super-secret');
   });

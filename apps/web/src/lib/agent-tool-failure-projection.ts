@@ -6,6 +6,7 @@ export type PublicToolFailure = {
     | 'invalid_output'
     | 'tool_timeout'
     | 'tool_rate_limited'
+    | 'tool_authentication_failed'
     | 'tool_unavailable'
     | 'provider_failed'
     | 'outcome_unknown';
@@ -14,12 +15,14 @@ export type PublicToolFailure = {
     | 'tool.failure.invalid_output'
     | 'tool.failure.timeout'
     | 'tool.failure.rate_limited'
+    | 'tool.failure.authentication'
     | 'tool.failure.unavailable'
     | 'tool.failure.provider'
     | 'tool.failure.outcome_unknown';
   readonly retryable: boolean;
   readonly outcomeReason?:
     | 'connection_unavailable_before_dispatch'
+    | 'initialization_failed_before_dispatch'
     | 'connection_lost_after_dispatch'
     | 'run_cancelled_after_dispatch'
     | 'stale_client_result'
@@ -55,6 +58,11 @@ const contracts: Readonly<
     messageKey: 'tool.failure.rate_limited',
     retryable: true,
     message: '请求过于频繁，请稍后重试。',
+  },
+  tool_authentication_failed: {
+    messageKey: 'tool.failure.authentication',
+    retryable: false,
+    message: '工具凭据不可用，请联系管理员更新配置。',
   },
   tool_unavailable: {
     messageKey: 'tool.failure.unavailable',
@@ -99,14 +107,19 @@ function isReasonCompatible(
   code: string | undefined,
   reason: NonNullable<PublicToolFailure['outcomeReason']>,
 ): boolean {
-  return reason === 'connection_unavailable_before_dispatch'
-    ? code === 'provider_failed'
-    : code === 'outcome_unknown';
+  if (
+    reason === 'connection_unavailable_before_dispatch' ||
+    reason === 'initialization_failed_before_dispatch'
+  ) {
+    return code === 'provider_failed';
+  }
+  return code === 'outcome_unknown';
 }
 
 function isOutcomeReason(value: string): value is NonNullable<PublicToolFailure['outcomeReason']> {
   return (
     value === 'connection_unavailable_before_dispatch' ||
+    value === 'initialization_failed_before_dispatch' ||
     value === 'connection_lost_after_dispatch' ||
     value === 'run_cancelled_after_dispatch' ||
     value === 'stale_client_result' ||
@@ -119,6 +132,9 @@ export function toolFailureSummary(part: RunPart): string | undefined {
   if (!failure) return undefined;
   if (failure.outcomeReason === 'connection_unavailable_before_dispatch') {
     return '连接建立失败，工具尚未执行，可以重试。';
+  }
+  if (failure.outcomeReason === 'initialization_failed_before_dispatch') {
+    return '工具初始化失败，尚未执行，可以重试。';
   }
   if (failure.outcomeReason === 'connection_lost_after_dispatch') {
     return '工具发出后连接中断，结果无法确认，请先核对。';

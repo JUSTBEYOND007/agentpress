@@ -1,5 +1,6 @@
 export type ToolExecutionOutcomeReason =
   | 'connection_unavailable_before_dispatch'
+  | 'initialization_failed_before_dispatch'
   | 'connection_lost_after_dispatch'
   | 'run_cancelled_after_dispatch'
   | 'stale_client_result'
@@ -13,7 +14,8 @@ export class ToolRuntimeError extends Error {
       | 'invalid_input'
       | 'invalid_output'
       | 'tool_timeout'
-      | 'tool_rate_limited',
+      | 'tool_rate_limited'
+      | 'tool_authentication_failed',
     message: string,
     public readonly details: Readonly<Record<string, unknown>> = {},
   ) {

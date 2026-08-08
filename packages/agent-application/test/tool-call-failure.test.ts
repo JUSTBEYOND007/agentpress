@@ -62,6 +62,43 @@ describe('Tool Call failure projection', () => {
     expect(JSON.stringify(projected.publicFailure)).not.toContain('secret');
   });
 
+  it('maps typed credential failure as known, redacted, and non-retryable', () => {
+    const projected = projectToolFailure(
+      new ToolRuntimeError('tool_authentication_failed', 'authorization=secret'),
+      true,
+    );
+    expect(projected).toMatchObject({
+      status: 'failed',
+      publicFailure: {
+        code: 'tool_authentication_failed',
+        messageKey: 'tool.failure.authentication',
+        retryable: false,
+      },
+      diagnosticFailure: { visibility: 'protected' },
+    });
+    expect(JSON.stringify(projected.publicFailure)).not.toContain('secret');
+  });
+
+  it('keeps a non-network initialization failure known before dispatch', () => {
+    expect(
+      projectToolFailure(
+        new ToolExecutionError(
+          'unsupported protocol',
+          'known_failed',
+          'initialization_failed_before_dispatch',
+        ),
+        true,
+      ),
+    ).toMatchObject({
+      status: 'failed',
+      publicFailure: {
+        code: 'provider_failed',
+        retryable: true,
+        outcomeReason: 'initialization_failed_before_dispatch',
+      },
+    });
+  });
+
   it('keeps a proven pre-dispatch failure retryable even for a side-effect risk', () => {
     expect(
       projectToolFailure(
