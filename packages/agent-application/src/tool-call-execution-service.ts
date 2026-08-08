@@ -12,6 +12,7 @@ import { hashToolArguments } from '@agentpress/tool-runtime';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { AGENT_RUN_COMMAND_TOPIC, type DurableRunEvent } from './contracts.js';
+import { abortableDelay } from './abortable-delay.js';
 import {
   APPROVAL_RISKS,
   ToolCallApplicationError,
@@ -22,6 +23,7 @@ import {
 import { ToolEvidenceStore, type PersistedToolEvidence } from './tool-evidence-store.js';
 import { projectToolFailure } from './tool-call-failure.js';
 import { lockToolCallAggregate } from './tool-call-aggregate-lock.js';
+import { boundedEvidenceReferences } from './tool-call-output-references.js';
 
 export class ToolCallExecutionService {
   private readonly now: () => Date;
@@ -479,39 +481,6 @@ function articleEditProposalOutput(value: unknown): Readonly<Record<string, unkn
   return output.kind === 'article_edit_proposal' && typeof output.proposalId === 'string'
     ? output
     : undefined;
-}
-
-function boundedEvidenceReferences(
-  references: readonly PersistedToolEvidence[],
-): readonly Readonly<Record<string, string>>[] {
-  return references.slice(0, 32).map((reference) => ({
-    evidenceId: reference.evidenceId.slice(0, 240),
-    title: reference.title.slice(0, 240),
-    source: reference.source.slice(0, 240),
-    sourceRevision: reference.sourceRevision.slice(0, 240),
-  }));
-}
-
-function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(abortError(signal.reason));
-      return;
-    }
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        reject(abortError(signal.reason));
-      },
-      { once: true },
-    );
-  });
-}
-
-function abortError(reason: unknown): Error {
-  return reason instanceof Error ? reason : new Error('Operation aborted', { cause: reason });
 }
 
 function toDurableEvent(event: {
