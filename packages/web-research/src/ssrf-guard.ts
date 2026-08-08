@@ -10,28 +10,61 @@ export type SsrfOptions = {
   readonly allowRanges?: readonly string[];
 };
 
+export type ResearchUrlFailureKind =
+  | 'invalid_url'
+  | 'invalid_scheme'
+  | 'embedded_credentials'
+  | 'blocked_private'
+  | 'dns_failure'
+  | 'invalid_dns_answer';
+
+export class ResearchUrlError extends Error {
+  public override readonly name = 'ResearchUrlError';
+
+  public constructor(
+    public readonly kind: ResearchUrlFailureKind,
+    message: string,
+    options?: { readonly cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
 export async function assertSafeUrl(raw: string, options: SsrfOptions = {}): Promise<URL> {
-  const url = new URL(raw);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch (error) {
+    throw new ResearchUrlError('invalid_url', 'Research URL is invalid', { cause: error });
+  }
   if (url.protocol !== 'https:' && url.protocol !== 'http:')
-    throw new Error('Only HTTP(S) research URLs are allowed');
-  if (url.username || url.password) throw new Error('Research URLs cannot contain credentials');
+    throw new ResearchUrlError('invalid_scheme', 'Only HTTP(S) research URLs are allowed');
+  if (url.username || url.password)
+    throw new ResearchUrlError('embedded_credentials', 'Research URLs cannot contain credentials');
   const allowRanges = parseAllowRanges(options.allowRanges);
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (hostname === 'localhost' || hostname.endsWith('.localhost'))
-    throw new Error('Private or loopback research hosts are blocked');
+    throw new ResearchUrlError('blocked_private', 'Private or loopback research hosts are blocked');
   const literalVersion = isIP(hostname);
   if (literalVersion !== 0) {
     assertPublicAddress(hostname, hostname, allowRanges);
     return url;
   }
-  const addresses = await (
-    options.lookup ??
-    (async (host) =>
-      (await systemLookup(host, { all: true, verbatim: true })).map(({ address, family }) => ({
-        address,
-        family,
-      })))
-  )(hostname);
+  let addresses: readonly DnsAddress[];
+  try {
+    addresses = await (
+      options.lookup ??
+      (async (host) =>
+        (await systemLookup(host, { all: true, verbatim: true })).map(({ address, family }) => ({
+          address,
+          family,
+        })))
+    )(hostname);
+  } catch (error) {
+    throw new ResearchUrlError('dns_failure', `DNS lookup failed for ${hostname}`, {
+      cause: error,
+    });
+  }
   for (const entry of addresses) assertPublicAddress(entry.address, hostname, allowRanges);
   return url;
 }
@@ -45,10 +78,17 @@ function assertPublicAddress(
 ): void {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
   const family = isIP(normalized);
-  if (family === 0) throw new Error(`Resolved non-IP address for ${hostname}: ${address}`);
+  if (family === 0)
+    throw new ResearchUrlError(
+      'invalid_dns_answer',
+      `Resolved non-IP address for ${hostname}: ${address}`,
+    );
   if (isInAllowedRange(normalized, family, allowRanges)) return;
   if ((family === 4 && blockedIpv4(normalized)) || (family === 6 && blockedIpv6(normalized))) {
-    throw new Error(`Blocked internal address for ${hostname}: ${normalized}`);
+    throw new ResearchUrlError(
+      'blocked_private',
+      `Blocked internal address for ${hostname}: ${normalized}`,
+    );
   }
 }
 

@@ -50,4 +50,43 @@ describe('web research execution handler', () => {
       { kind: 'fetch_failed', detail: 'fetch timed out', url: 'https://b.test' },
     ]);
   });
+
+  it('returns only successful sources and marks an all-source failure', async () => {
+    const result = await executeWebResearchSearch(
+      { query: 'topic', limit: 2, signal: new AbortController().signal },
+      {
+        search: vi.fn(() =>
+          Promise.resolve([
+            { title: 'A', url: 'https://a.test', excerpt: 'A excerpt', source: 'test' },
+            { title: 'B', url: 'https://b.test', excerpt: 'B excerpt', source: 'test' },
+          ]),
+        ),
+        fetchSource: vi.fn(() => Promise.reject(new Error('source unavailable'))),
+      },
+    );
+    expect(result.results).toEqual([]);
+    expect(result.failures).toEqual([
+      { kind: 'fetch_failed', detail: 'source unavailable', url: 'https://a.test' },
+      { kind: 'fetch_failed', detail: 'source unavailable', url: 'https://b.test' },
+      { kind: 'all_sources_failed', detail: 'All fetched research sources failed' },
+    ]);
+  });
+
+  it('preserves caller cancellation instead of degrading it into a fetch failure', async () => {
+    const controller = new AbortController();
+    const cancellation = new Error('cancelled by caller');
+    const search = vi.fn(() =>
+      Promise.resolve([{ title: 'A', url: 'https://a.test', excerpt: '', source: 'test' }]),
+    );
+    const fetchSource = vi.fn(async () => {
+      controller.abort(cancellation);
+      throw cancellation;
+    });
+    await expect(
+      executeWebResearchSearch(
+        { query: 'topic', limit: 1, signal: controller.signal },
+        { search, fetchSource },
+      ),
+    ).rejects.toBe(cancellation);
+  });
 });

@@ -1,4 +1,8 @@
-import { fetchResearchSource } from '@agentpress/web-research';
+import {
+  fetchResearchSource,
+  ResearchFetchError,
+  type ResearchFailure,
+} from '@agentpress/web-research';
 
 import { PublicSearchError, searchPublicSources } from './web-search.js';
 
@@ -23,7 +27,7 @@ export async function executeWebResearchSearch(
     }
     throw error;
   }
-  const results = await Promise.all(
+  const fetchedResults = await Promise.all(
     sources.map(async (source) => {
       try {
         const fetched = await fetchSource(source.url, {
@@ -37,19 +41,33 @@ export async function executeWebResearchSearch(
           fetchedAt: fetched.fetchedAt,
         };
       } catch (error) {
+        if (input.signal.aborted) throw error;
         return {
-          ...source,
-          fetchError: error instanceof Error ? error.message : 'Source extraction failed',
+          source,
+          failure: {
+            kind: error instanceof ResearchFetchError ? error.kind : ('fetch_failed' as const),
+            detail: error instanceof Error ? error.message : 'Source extraction failed',
+            url: source.url,
+          },
         };
       }
     }),
   );
+  const results = fetchedResults.filter(
+    (result): result is Exclude<(typeof fetchedResults)[number], { readonly failure: unknown }> =>
+      !('failure' in result),
+  );
+  const failures: ResearchFailure[] = fetchedResults.flatMap((result) =>
+    'failure' in result ? [result.failure] : [],
+  );
+  if (sources.length > 0 && results.length === 0) {
+    failures.push({
+      kind: 'all_sources_failed',
+      detail: 'All fetched research sources failed',
+    });
+  }
   return {
     results,
-    failures: results.flatMap((result) =>
-      'fetchError' in result
-        ? [{ kind: 'fetch_failed' as const, detail: result.fetchError, url: result.url }]
-        : [],
-    ),
+    failures,
   };
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { assertSafeUrl, fetchPublicImage, fetchResearchSource } from '../src/index.js';
+import {
+  assertSafeUrl,
+  fetchPublicImage,
+  fetchResearchSource,
+  ResearchFetchError,
+} from '../src/index.js';
 
 const publicLookup = () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]);
 
@@ -102,15 +107,74 @@ describe('SSRF guard', () => {
   });
 
   it('rejects a response claiming to be a PDF without a PDF signature', async () => {
+    const result = fetchResearchSource('https://example.test/report.pdf', {
+      lookup: publicLookup,
+      fetch: () =>
+        Promise.resolve(
+          new Response('not a pdf', { headers: { 'content-type': 'application/pdf' } }),
+        ),
+    });
+    await expect(result).rejects.toThrow(/signature/);
+    await expect(result).rejects.toMatchObject({
+      name: 'ResearchFetchError',
+      kind: 'pdf_signature_invalid',
+    });
+  });
+
+  it('types redirect, DNS, empty-body and caller-cancellation failures', async () => {
     await expect(
-      fetchResearchSource('https://example.test/report.pdf', {
+      fetchResearchSource('https://example.test', {
+        lookup: publicLookup,
+        fetch: () =>
+          Promise.resolve(new Response('', { status: 302, headers: { location: '/again' } })),
+        maxRedirects: 0,
+      }),
+    ).rejects.toMatchObject({ kind: 'redirect_loop' });
+    await expect(
+      fetchResearchSource('https://dns.test', {
+        lookup: () => Promise.reject(new Error('DNS unavailable')),
+      }),
+    ).rejects.toMatchObject({ kind: 'dns_failure' });
+    await expect(
+      fetchResearchSource('https://example.test/empty', {
         lookup: publicLookup,
         fetch: () =>
           Promise.resolve(
-            new Response('not a pdf', { headers: { 'content-type': 'application/pdf' } }),
+            new Response('<html><body><script>ignored</script></body></html>', {
+              headers: { 'content-type': 'text/html' },
+            }),
           ),
       }),
-    ).rejects.toThrow(/signature/);
+    ).rejects.toMatchObject({ kind: 'empty_body' });
+
+    const controller = new AbortController();
+    const cancellation = new Error('cancelled by caller');
+    const cancelled = fetchResearchSource('https://example.test/cancelled', {
+      lookup: publicLookup,
+      signal: controller.signal,
+      fetch: () => {
+        controller.abort(cancellation);
+        return Promise.reject(cancellation);
+      },
+    });
+    await expect(cancelled).rejects.toBe(cancellation);
+
+    const timedOut = fetchResearchSource('https://example.test/timeout', {
+      lookup: publicLookup,
+      timeoutMs: 1,
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new Error('Research fetch aborted'));
+            },
+            { once: true },
+          );
+        }),
+    });
+    await expect(timedOut).rejects.toBeInstanceOf(ResearchFetchError);
+    await expect(timedOut).rejects.toMatchObject({ kind: 'fetch_timeout' });
   });
 
   it('extracts HTML through a parser and excludes executable nodes', async () => {
