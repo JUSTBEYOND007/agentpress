@@ -496,8 +496,14 @@ TODO：
       live/replay 与相反的充足预算场景保持一致。不得把计数器塞入 `PlannedDagScheduler`。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
-- [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与
-      测试路径，只复用已验证行为，不复制成 AgentPress 的第二套 Task 状态机。
+- [x] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与
+      测试路径，只复用已验证行为，不复制成 AgentPress 的第二套 Task 状态机。固定来源为
+      `can1357/oh-my-pi@f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`（`v17.1.8`，MIT），源码为
+      `packages/coding-agent/src/task/structured-subagent.ts`、`types.ts`、`spawn-policy.ts`、
+      `provider-concurrency.ts`、`parallel.ts`、`persisted-revive.ts`、`yield-assembly.ts`，测试为
+      `packages/coding-agent/test/task/structured-subagent.test.ts` 及对应 `task-*` fixtures；本项目只
+      复用 schema precedence、spawn/depth/provider ceiling、yield/revive 和 stale-owner 行为，事实源仍为
+      PostgreSQL Task/Attempt/TaskResult，拒绝引入 Oh My Pi Runtime 或第二套 Task 状态机。
 - [ ] 真实模型验收至少覆盖“研究 -> 写作 -> 审阅 -> 修订 -> 提案”和“审阅认为无需修改”两个相反场景。
 - [ ] 在线矩阵还需覆盖部分成功、Specialist timeout、冲突 Evidence、取消/恢复和预算耗尽；量化门槛为
       DAG/Task/Tool 不超宿主上限、重复副作用=0、非法 capability=0、private thinking 泄漏=0、Proposal
