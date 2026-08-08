@@ -23,9 +23,9 @@ import type {
   McpTransportAuditObserver,
 } from './contracts.js';
 import type { McpServerManager } from './server-manager.js';
+import { isMcpAuthenticationFailure, isMcpConnectionFailure } from './transport-errors.js';
 
 type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
-const MCP_CONNECTION_CLOSED_CODE = -32_000;
 
 export type McpCallOutcomeUnknownReason = 'connection_lost_after_dispatch' | 'stale_client_result';
 
@@ -125,10 +125,10 @@ export class McpClientGateway implements BuiltInMcpGateway {
       if (error instanceof StreamableHTTPError && error.code === 429) {
         throw new McpRateLimitError(input.serverId, input.toolName);
       }
-      if (error instanceof McpError && !isConnectionFailure(error)) {
+      if (error instanceof McpError && !isMcpConnectionFailure(error)) {
         throw new McpProtocolError(input.serverId, error.code);
       }
-      if (!isConnectionFailure(error)) throw error;
+      if (!isMcpConnectionFailure(error)) throw error;
       await this.manager.markDegraded(input.serverId, client);
       throwIfAborted(input.context.signal);
       throw new McpCallOutcomeUnknownError(
@@ -148,7 +148,7 @@ export class McpClientGateway implements BuiltInMcpGateway {
       validateListedTools(tools);
       return tools.sort((left, right) => left.name.localeCompare(right.name));
     } catch (error) {
-      if (isConnectionFailure(error)) await this.manager.markDegraded(serverId, client);
+      if (isMcpConnectionFailure(error)) await this.manager.markDegraded(serverId, client);
       throw error;
     }
   }
@@ -256,10 +256,10 @@ export class McpClientGateway implements BuiltInMcpGateway {
       return client;
     } catch (error) {
       throwIfAborted(input.context.signal);
-      if (isAuthenticationFailure(error)) {
+      if (isMcpAuthenticationFailure(error)) {
         throw new McpAuthenticationError(input.serverId, input.toolName);
       }
-      if (!isConnectionFailure(error)) {
+      if (!isMcpConnectionFailure(error)) {
         throw new McpCallBeforeDispatchError(
           input.serverId,
           input.toolName,
@@ -275,10 +275,10 @@ export class McpClientGateway implements BuiltInMcpGateway {
         return client;
       } catch (retryError) {
         throwIfAborted(input.context.signal);
-        if (isAuthenticationFailure(retryError)) {
+        if (isMcpAuthenticationFailure(retryError)) {
           throw new McpAuthenticationError(input.serverId, input.toolName);
         }
-        if (isConnectionFailure(retryError)) {
+        if (isMcpConnectionFailure(retryError)) {
           throw new McpCallBeforeDispatchError(input.serverId, input.toolName, retryError);
         }
         throw new McpCallBeforeDispatchError(
@@ -308,10 +308,6 @@ export class McpClientGateway implements BuiltInMcpGateway {
       toolCallId: input.context.toolCallId,
     });
   }
-}
-
-function isAuthenticationFailure(error: unknown): boolean {
-  return error instanceof StreamableHTTPError && (error.code === 401 || error.code === 403);
 }
 
 function validateListedTools(tools: readonly ListedMcpTool[]): void {
@@ -360,37 +356,4 @@ async function callTool(
 function throwIfAborted(signal: AbortSignal): void {
   if (!signal.aborted) return;
   throw signal.reason instanceof Error ? signal.reason : new Error('MCP tool call was aborted');
-}
-
-function isConnectionFailure(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (error instanceof McpError && error.code === MCP_CONNECTION_CLOSED_CODE) return true;
-  const code = 'code' in error && typeof error.code === 'string' ? error.code : '';
-  if (
-    [
-      'ECONNRESET',
-      'ECONNREFUSED',
-      'EPIPE',
-      'ENETUNREACH',
-      'EHOSTUNREACH',
-      'UND_ERR_SOCKET',
-    ].includes(code)
-  ) {
-    return true;
-  }
-  const message = error.message.toLocaleLowerCase();
-  return (
-    /^http (404|502|503):/.test(message) ||
-    [
-      'econnrefused',
-      'econnreset',
-      'epipe',
-      'enetunreach',
-      'ehostunreach',
-      'fetch failed',
-      'transport not connected',
-      'transport closed',
-      'network error',
-    ].some((pattern) => message.includes(pattern))
-  );
 }

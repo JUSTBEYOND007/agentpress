@@ -105,7 +105,9 @@ describe('MCP Server lifecycle', () => {
       displayName: 'Web',
       createClient: () => {
         attempt += 1;
-        return attempt <= 2 ? Promise.reject(new Error('offline')) : Promise.resolve(recovered);
+        return attempt <= 2
+          ? Promise.reject(Object.assign(new Error('offline'), { code: 'ECONNREFUSED' }))
+          : Promise.resolve(recovered);
       },
     });
     await expect(manager.getClient('web_research')).rejects.toThrow('offline');
@@ -117,6 +119,23 @@ describe('MCP Server lifecycle', () => {
     now = new Date('2026-08-04T00:00:01.001Z');
     await expect(manager.getClient('web_research')).resolves.toBe(recovered);
     expect(attempt).toBe(3);
+  });
+
+  it('does not open the reconnect circuit for repeated initialization rejections', async () => {
+    const manager = new McpServerManager({ reconnectFailureThreshold: 2 });
+    const createClient = vi.fn(() => Promise.reject(new Error('unsupported protocol')));
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient,
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expect(manager.getClient('web_research')).rejects.toThrow('unsupported protocol');
+    }
+    expect(createClient).toHaveBeenCalledTimes(4);
+    expect(manager.state('web_research')).toBe('degraded');
   });
 
   it('lists registered built-ins in stable order', () => {

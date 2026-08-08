@@ -8,7 +8,7 @@ import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 import { ToolRegistry } from '@agentpress/tool-runtime';
 import { Type } from '@sinclair/typebox';
 import * as z from 'zod/v4';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createStreamableHttpClient,
@@ -103,6 +103,35 @@ describe('MCP Streamable HTTP real fixture', () => {
     } finally {
       await fixture.close();
     }
+  });
+
+  it('proves a real unreachable TCP endpoint fails before tool dispatch after one probe', async () => {
+    const endpoint = await closedLocalEndpoint();
+    const manager = new McpServerManager();
+    let connectionAttempts = 0;
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => {
+        connectionAttempts += 1;
+        return createStreamableHttpClient({ url: endpoint });
+      },
+    });
+    const onTransportEvent = vi.fn(() => Promise.resolve());
+
+    await expect(
+      new McpClientGateway(manager, { onTransportEvent }).call(
+        toolCallInput('unreachable-before-dispatch', 'ignored'),
+      ),
+    ).rejects.toMatchObject({
+      name: 'McpCallBeforeDispatchError',
+      outcome: 'known_failed',
+      outcomeReason: 'connection_unavailable_before_dispatch',
+    });
+    expect(connectionAttempts).toBe(2);
+    expect(onTransportEvent).toHaveBeenCalledTimes(1);
+    expect(manager.state('web_research')).toBe('degraded');
   });
 
   it('propagates client cancellation to an in-flight HTTP tool request', async () => {
@@ -564,6 +593,22 @@ async function startInitializationFailureFixture(
         });
       }),
   };
+}
+
+async function closedLocalEndpoint(): Promise<string> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('fixture did not bind TCP');
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      resolve();
+    });
+  });
+  return `http://127.0.0.1:${String(address.port)}/mcp`;
 }
 
 function toolCallInput(toolCallId: string, value: string) {

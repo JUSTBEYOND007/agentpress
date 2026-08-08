@@ -613,7 +613,12 @@ MCP 初始化失败也已按 dispatch 事实分流：官方 SDK 在 `Client.conn
 `initialization_failed_before_dispatch`，绝不因工具是 external write 而变为 `outcome_unknown`。真实 HTTP
 fixture 分别覆盖无 Authorization 的 401、携带 `Bearer expired` 的 403 和不支持 protocol version，均只
 发出一次 initialize 且 `tools/call=0`；PostgreSQL ledger、live/replay 与 Web fail-closed 投影已覆盖。
-具体内置 Server 的“配置声明凭据必需但缺失”、连续认证失败后的 circuit 分类仍未完成。
+具体内置 Server 的“配置声明凭据必需但缺失”校验仍未完成。
+
+MCP reconnect circuit 现在只累计共享 classifier 证明的连接错误。真实关闭 TCP endpoint 会进行一次初始
+连接和一次安全 probe，然后以 `connection_unavailable_before_dispatch` 失败；连续认证或协议拒绝不会打开
+circuit，第四次仍保持相同 typed authentication/initialization failure。连接拒绝的相反语义测试继续证明
+达到阈值会开 circuit 并在 cooldown 后只允许一次 probe。具体内置 Server 的本地必需凭据配置校验仍未完成。
 
 MCP Approval 拒绝沿用同一 ToolCall ledger，没有另建 MCP 审批路径：测试型 external-write MCP Tool 在
 `awaiting_approval` 被拒绝后结算为 `tool.denied`，provider 执行次数为 0，持久化 transport revisions 不变，
@@ -815,9 +820,10 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 47 个 MCP Runtime 测试
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 50 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放、旧 client result identity fence，以及结构化 HTTP 429
-      脱敏、拒绝后 session 健康、非 429 相反语义、401/403 初始化认证失败和非法 protocol handshake；
+      脱敏、拒绝后 session 健康、非 429 相反语义、真实 TCP 不可达、401/403 初始化认证失败、非法
+      protocol handshake 及只针对连接故障的 reconnect circuit；
       ToolRegistry 19 个测试、29 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
       handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流、初始化失败和 JSON-RPC error；
       Runtime Tools 11 个测试另覆盖官方 MCP Streamable HTTP Server -> PersistentToolBridge -> PostgreSQL

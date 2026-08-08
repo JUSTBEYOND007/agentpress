@@ -190,6 +190,30 @@ describe('MCP client gateway', () => {
     },
   );
 
+  it('keeps repeated authentication failures typed instead of opening a reconnect circuit', async () => {
+    const create = vi.fn(() =>
+      Promise.reject(new StreamableHTTPError(401, 'authorization=secret credential=generated')),
+    );
+    const manager = new McpServerManager({ reconnectFailureThreshold: 2 });
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: create,
+    });
+    const gateway = new McpClientGateway(manager);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await expect(
+        gateway.call(toolCallInput(`authentication-${String(attempt)}`)),
+      ).rejects.toMatchObject({
+        name: 'McpAuthenticationError',
+        code: 'tool_authentication_failed',
+      });
+    }
+    expect(create).toHaveBeenCalledTimes(4);
+  });
+
   it('wraps a non-network handshake failure as known failed before dispatch', async () => {
     const handshake = new Error('unsupported protocol credential=generated');
     const create = vi.fn(() => Promise.reject(handshake));

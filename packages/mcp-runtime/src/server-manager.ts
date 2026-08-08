@@ -4,6 +4,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 import type { BuiltInMcpServerId, McpServerDefinition, McpServerState } from './contracts.js';
+import { isMcpConnectionFailure } from './transport-errors.js';
 
 export class McpCircuitOpenError extends Error {
   public constructor(
@@ -88,7 +89,8 @@ export class McpServerManager {
         return client;
       } catch (error) {
         this.states.set(serverId, 'degraded');
-        this.recordFailure(serverId);
+        if (isMcpConnectionFailure(error)) this.recordFailure(serverId);
+        else this.failures.delete(serverId);
         throw error;
       } finally {
         this.starts.delete(serverId);
