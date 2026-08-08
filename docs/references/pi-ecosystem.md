@@ -503,6 +503,14 @@ does not settle promptly. Only the interrupted optional Task receives attempt-tw
 previously committed Research Artifact keeps its id, immutable version, and content. Late runtime
 events are ignored, the HTTP connection is aborted, and PostgreSQL live/replay exposes the same
 `timed_out` activity before the Run settles as `completed_with_degradation`.
+Run settlement now reconciles connection loss against PostgreSQL rather than inferring commit state
+from an exception. A second real PostgreSQL connection terminates the settlement backend before
+commit and proves the assistant message, checkpoint, terminal event, and Run status all roll back;
+the same generated result can then settle once. The opposite fixture commits the real transaction and
+then drops the client acknowledgement. A bounded classifier accepts SQLSTATE class 08, shutdown and
+system connection codes, plus Drizzle's structurally failed `rollback`, but never provider text. The
+service reads terminal facts after the pre-transaction RunEvent watermark and adopts only a matching
+committed terminal event, preventing duplicate messages and settlement events.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 

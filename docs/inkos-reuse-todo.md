@@ -670,19 +670,28 @@ live/replay 使用同一 RunPart，Web 显示“执行进程中断，结果无�
 `tool.recovery_ready`，不会被该失败分支吞掉。Application/Web 各 116 个单元测试和 29 个 PostgreSQL
 ToolCall 场景通过。恢复期间取消也已由第 30 个 PostgreSQL 场景覆盖：replay-ready 的 read-only 调用在
 dispatch 前结算为 `tool.cancelled`，后续 prepare/execute 都不能复活它，provider 执行次数为 0，live/replay
-保持同一 cancelled activity。该证据不替代数据库提交前后断线。
+保持同一 cancelled activity。数据库提交边界由下述独立 settlement fixture 覆盖。
 
 stale worker settlement 现有两层 PostgreSQL fence：Specialist attempt 2 成功后，attempt 1 的迟到
 TaskResult（含 Artifact）返回 false，TaskResult/Artifact/RunEvent 数量均不变；Run 进入 `recovering` 后，
 旧 Main worker 的 terminal settlement 抛 `StaleWorkerSettlementError`，不写 assistant message、Checkpoint
-或 terminal RunEvent，Run 继续保持 recovering。聚焦的两个 Direct Run 集成场景通过；数据库提交前后断线
-仍未完成。
+或 terminal RunEvent，Run 继续保持 recovering。聚焦的两个 Direct Run 集成场景通过。
 
 部分 Artifact/失效 Evidence 的原子回滚也已由 Direct Run 全套 52 个 PostgreSQL 场景验证：同一 Specialist
 TaskResult 的第一个 Artifact 先进入写入流程，第二个 Artifact 引用不存在的 Evidence 并触发外键失败；
 整个事务回滚为 0 Artifact、0 Evidence link，仅由独立 fallback 事务写入 claim-free
 `persistence_failed` TaskResult/事件，失效 Evidence ID 不进入公开事件。协议入口另有三次有界修复后
-`task_evidence_invalid` 的相反场景。剩余故障注入缺口为数据库提交前/后断线。
+`task_evidence_invalid` 的相反场景。
+
+数据库提交边界现已使用 PostgreSQL 事实回读闭合。提交前场景由第二个真实 PostgreSQL 连接在 settlement
+事务返回前终止 backend；Drizzle 的结构化 failed-rollback 被基础设施 classifier 识别，Run、assistant
+message、Checkpoint 和 terminal RunEvent 全部保持原计数，随后同一生成结果可以重新 settlement。提交后
+场景让真实事务先完成，再注入客户端丢失 COMMIT acknowledgement；`RunSettlementService` 只对 SQLSTATE、
+Node connection code 或 failed-rollback 进入 reconciliation，从事务前 RunEvent watermark 后回读 terminal
+事实，确认已提交后返回并发布同一 durable events，不重复写入。普通 SQL/FK 错误和仅在 message 中出现的
+连接字样都不触发该路径。数据库连接池同时安装 pool/checked-out client error listener，查询 rejection 仍由
+调用方处理，但 backend 终止不再升级为进程级未捕获异常。至此本节列出的本地故障注入矩阵已闭合；真实目标
+模型和浏览器验收仍由总门禁单独追踪。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
@@ -691,7 +700,7 @@ TaskResult 的第一个 Artifact 先进入写入流程，第二个 Artifact 引�
 - [ ] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
 - [ ] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
 - [x] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。
-- [ ] 测试覆盖 provider timeout、worker crash、数据库提交前后断线、重复恢复、部分 Artifact、失效引用、
+- [x] 测试覆盖 provider timeout、worker crash、数据库提交前后断线、重复恢复、部分 Artifact、失效引用、
       stale worker 和恢复期间用户取消。
 
 ## P1：Context Governance

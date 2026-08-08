@@ -1,6 +1,7 @@
 export * from './agent-run-store.js';
 export * from './checkpoint-store.js';
 export * from './conversation-compaction-store.js';
+export * from './database-failure.js';
 export * from './agent-session-compaction-store.js';
 export * from './inbox.js';
 export * from './memory-store.js';

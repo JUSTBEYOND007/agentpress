@@ -18,6 +18,13 @@ export function connectDatabase(connectionString: string): DatabaseConnection {
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
   });
+  // node-postgres emits idle-client failures on the Pool in addition to
+  // rejecting the active query/transaction. A listener is required to keep a
+  // terminated backend from becoming an uncaught process exception.
+  pool.on('error', () => undefined);
+  pool.on('connect', (client) => {
+    client.on('error', () => undefined);
+  });
 
   return {
     db: drizzle(pool, { schema }),
