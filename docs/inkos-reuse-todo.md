@@ -548,6 +548,9 @@ MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连�
 部分 Artifact、失效 Evidence、stale worker 和恢复期间取消尚未形成完整矩阵，因此总项不勾选。
 已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
 增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
+恢复准备现在还会为同事务内从 `running` 转为 `interrupted` 的每个 Task Attempt 写入
+`task.interrupted(reason=worker_lease_lost)`；RunPart 由宿主投影为 `outcome: interrupted`，不再出现
+PostgreSQL Task 状态已中断但消息流仍显示运行中的分裂状态。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。

@@ -2685,6 +2685,21 @@ describeWithDatabase('Direct Run application flow', () => {
       .update(agentRuns)
       .set({ status: 'running', activePlanRevisionId: revisionId })
       .where(eq(agentRuns.id, run.runId));
+    const interruptedTaskId = randomUUID();
+    await connection.db.insert(agentTasks).values({
+      id: interruptedTaskId,
+      runId: run.runId,
+      planRevisionId: revisionId,
+      objective: 'Resume interrupted research',
+      criticality: 'required',
+      owner: 'researcher',
+      acceptanceCriteria: ['Research is complete'],
+      outputSchema: {},
+      toolPolicy: {},
+      budget: {},
+      status: 'running',
+      attempt: 1,
+    });
     const choiceId = randomUUID();
     const staleClaimToken = randomUUID();
     await connection.db.insert(runToolChoices).values({
@@ -2727,6 +2742,17 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(agentRuns)
       .where(eq(agentRuns.id, run.runId));
     expect(recoveredRuns[0]?.status).toBe('recovering');
+    expect(
+      eventsAfterFirstRecovery.filter(({ eventType }) => eventType === 'task.interrupted'),
+    ).toHaveLength(1);
+    const recoveryProjection = await recoveryService.getProjection(run.runId);
+    expect(
+      recoveryProjection?.parts.find(({ status }) => status === 'task.interrupted'),
+    ).toMatchObject({
+      status: 'task.interrupted',
+      outcome: 'interrupted',
+      payload: { taskId: interruptedTaskId, attempt: 1 },
+    });
     const revisions = await connection.db
       .select({ reason: planRevisions.reason })
       .from(planRevisions)

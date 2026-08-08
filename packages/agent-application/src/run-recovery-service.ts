@@ -201,10 +201,24 @@ export class RunRecoveryService {
         });
         events.push(toDurableEvent(toolEvent));
       }
-      await transaction
+      const interruptedTasks = await transaction
         .update(agentTasks)
         .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
-        .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, 'running')));
+        .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, 'running')))
+        .returning({ taskId: agentTasks.id, attempt: agentTasks.attempt });
+      for (const task of interruptedTasks) {
+        const taskEvent = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'task.interrupted',
+          payload: {
+            taskId: task.taskId,
+            attempt: task.attempt,
+            reason: 'worker_lease_lost',
+          },
+        });
+        events.push(toDurableEvent(taskEvent));
+      }
       await transaction
         .update(agentRuns)
         .set({ status: 'recovering', updatedAt: now, version: sql`${agentRuns.version} + 1` })
