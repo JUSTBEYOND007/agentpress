@@ -59,6 +59,7 @@ describeWithDatabase('Tool Call application flow', () => {
   let searchExecutions = 0;
   let hangingReadExecutions = 0;
   let webSearchExecutions = 0;
+  let mcpPublishExecutions = 0;
   let externalExecutions = 0;
   let hangingExternalExecutions = 0;
   let delayedExternalExecutions = 0;
@@ -198,6 +199,32 @@ describeWithDatabase('Tool Call application flow', () => {
         'known_failed',
         'initialization_failed_before_dispatch',
       );
+    },
+  });
+  registry.register({
+    toolId: 'publication.mcp_publish',
+    version: '1.0.0',
+    owner: 'agentpress.mcp',
+    description: 'Publish through a bounded MCP server',
+    transport: {
+      kind: 'mcp',
+      serverId: 'licensed_media',
+      serverRevision: '1.0.0',
+      toolName: 'publish',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    },
+    capabilities: ['publication.write'],
+    inputSchema: Type.Object({ editionId: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ publicationId: Type.String() }, { additionalProperties: false }),
+    risk: 'external_write',
+    sideEffect: 'Publish the selected immutable edition',
+    idempotency: 'provider_key',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () => {
+      mcpPublishExecutions += 1;
+      return Promise.resolve({ publicationId: randomUUID() });
     },
   });
   registry.register({
@@ -512,6 +539,76 @@ describeWithDatabase('Tool Call application flow', () => {
         .from(toolCalls)
         .where(eq(toolCalls.id, proposal.toolCallId)),
     ).resolves.toEqual([{ status: 'proposed' }]);
+  });
+
+  it('denies an MCP ToolCall before dispatch with live and replay parity', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const before = mcpPublishExecutions;
+    const proposal = await service.propose({
+      runId,
+      toolId: 'publication.mcp_publish',
+      toolVersion: '1.0.0',
+      arguments: { editionId: randomUUID() },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['publication.write']),
+      idempotencyKey: `mcp-publish:${randomUUID()}`,
+    });
+    expect(proposal.status).toBe('awaiting_approval');
+
+    await expect(
+      service.decideApproval({
+        toolCallId: proposal.toolCallId,
+        decision: 'denied',
+        userId,
+      }),
+    ).resolves.toMatchObject({ status: 'denied' });
+    await expect(service.execute(proposal.toolCallId)).rejects.toMatchObject({
+      code: 'invalid_tool_state',
+    });
+    expect(mcpPublishExecutions).toBe(before);
+
+    await expect(
+      connection.db
+        .select({ status: toolCalls.status, transport: toolCalls.transportProvenance })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([
+      {
+        status: 'denied',
+        transport: {
+          kind: 'mcp',
+          serverId: 'licensed_media',
+          serverRevision: '1.0.0',
+          toolName: 'publish',
+          toolRevision: '1.0.0',
+          adapterRevision: 'agentpress-mcp-adapter-v1',
+        },
+      },
+    ]);
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const liveParts = projectRunParts(liveEvents);
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    expect(replay?.parts).toEqual(liveParts);
+    expect(liveParts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'tool.denied',
+          outcome: 'failed',
+          payload: expect.objectContaining({
+            toolCallId: proposal.toolCallId,
+            approvalId: expect.any(String) as unknown,
+            transportProvenance: expect.objectContaining({
+              kind: 'mcp',
+              serverId: 'licensed_media',
+              toolName: 'publish',
+            }) as unknown,
+          }) as unknown,
+        }),
+      ]),
+    );
   });
 
   it('persists idempotent MCP reconnect audit facts with live and replay parity', async () => {

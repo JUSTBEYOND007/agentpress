@@ -615,6 +615,11 @@ fixture 分别覆盖无 Authorization 的 401、携带 `Bearer expired` 的 403 
 发出一次 initialize 且 `tools/call=0`；PostgreSQL ledger、live/replay 与 Web fail-closed 投影已覆盖。
 具体内置 Server 的“配置声明凭据必需但缺失”、连续认证失败后的 circuit 分类仍未完成。
 
+MCP Approval 拒绝沿用同一 ToolCall ledger，没有另建 MCP 审批路径：测试型 external-write MCP Tool 在
+`awaiting_approval` 被拒绝后结算为 `tool.denied`，provider 执行次数为 0，持久化 transport revisions 不变，
+live/replay 合并成同一 `outcome=failed` activity。该证据只覆盖拒绝，不替代 Approval expiry、并发取消和
+真实 Server 组合；后两者仍分别由通用 ToolCall 测试和总验收门禁追踪。
+
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
 由 status fence 忽略。Run、ToolCall、Approval 和 transport audit 入口统一使用 `Run -> ToolCall` 锁顺序，
@@ -801,7 +806,7 @@ MCP manager。
       已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 44 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放、旧 client result identity fence，以及结构化 HTTP 429
       脱敏、拒绝后 session 健康、非 429 相反语义、401/403 初始化认证失败和非法 protocol handshake；
-      ToolRegistry 19 个测试、28 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
+      ToolRegistry 19 个测试、29 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
       handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流及初始化失败的 live/replay；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
