@@ -490,14 +490,13 @@ TODO：
       单次 settlement、重复 settlement 和 active reservation forfeiture；Direct Run 集成覆盖两条并行
       Specialist 在 5,000 token 额度下一个成功、一个 `budget_exhausted` 并投影为
       `completed_with_degradation`。更大范围的 provider timeout/断流与完整 recovery 预算矩阵仍待补齐。
-- [ ] 并发分支共享预算：当前 `validateSubmittedPlan` 只有静态 `96,000` estimated-token 上限，
-      `agent_tasks.budget` 只保存 Task 局部策略，`task_results.usage` 和 Run `usage` 只在结算后汇总；
-      尚无 Run-level 原子 reservation/ledger。新增前必须先固定 `reserve -> claim -> settle/release` 的窄
-      Port/Store 契约：reservation 绑定 `runId/planRevisionId/taskId/attempt`，PostgreSQL 行锁或条件更新
-      保证并行 wave 不会 check-after-use 共同超支；重复 settlement、lease loss、cancel 和 retry 必须幂等。
-      验收要求：两个并行 Task 同时争抢剩余预算时至多一个获得 reservation；拒绝项写 typed
-      `budget_exhausted` fact；实际 usage 只结算一次并可 replay；预算失败不能创建替代 Task/Plan Revision，
-      live/replay 与相反的充足预算场景保持一致。不得把计数器塞入 `PlannedDagScheduler`。
+- [x] 并发分支共享预算：`run_specialist_budgets` 提供 Run-level 原子 ledger，
+      `task_budget_reservations` 绑定 `runId/planRevisionId/taskId/attempt`，Task claim 在同一事务中执行
+      `reserve -> claim`，TaskResult 在同一结算事务中执行 `settle`；cancel/lease loss 对 active reservation
+      保守 forfeiture，重复 settlement 和 reservation 由条件更新/唯一键幂等。并行 wave 不把计数器放进
+      `PlannedDagScheduler`；PostgreSQL 与 Direct Run 反例测试证明争抢时至多一个 reservation 成功、
+      `budget_exhausted` 不创建替代 Task/Plan Revision，充足预算场景和 replay 保持一致。更大范围 provider
+      timeout/断流下的实际 usage overage 评估仍属于在线矩阵。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
 - [x] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与
