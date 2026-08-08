@@ -832,8 +832,16 @@ TODO：
       RootRequest、Run、Context Pack 或 Skill Binding；解除故障后同一 idempotency key 可安全重试并绑定
       原始资源。恢复阶段继续只读冻结 Context Pack，不重新读取 resource table，因此没有新增 Skill
       recovery manager 或第二套状态机。
-- [ ] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
+- [x] 把 discovery、selection、binding、resource loading 和 tool narrowing 固定为独立 owner；明确
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
+      discovery/conformance/resource byte safety 继续由 `packages/agent-context/src/skill.ts` 负责；
+      `skill-selection-policy.ts` 只负责 PostgreSQL catalog、显式/模型选择合并和 host catalog 校验；
+      `skill-preselection.ts` 只负责有界 Pi 模型选择；`run-skill-context.ts` 只负责精确 revision/resource
+      完整性读取和 `run_skill_bindings` 持久化；`persistent-tool-bridge.ts` 继续只做已授权工具集合的 Skill
+      交集收窄。`DirectRunCreationService` 从 496 行降至 384 行，`RunContextService` 从 481 行降至
+      422 行，新 owner 分别为 124/138 行，没有新增 manager/coordinator。`badlogic/pi-skills` 固定
+      commit `90bb51cae36515a648515b633a81c0c6efc8c74d` 仅作为 MIT 格式/行为证据；没有复制可执行源码，
+      也不是运行时依赖。纯策略相反语义测试和真实 PostgreSQL Run 创建/资源中断回归均通过。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，
       旧 Skill 指令不进入新 turn；Playwright 验证显式禁用、缺失/失效 Skill 与诊断详情。当前已补充
       binding hash drift 的 fail-closed 回归（`PersistentToolBridge`），并用 PostgreSQL 证明旧 Run 在新

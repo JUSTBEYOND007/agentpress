@@ -22,9 +22,6 @@ import {
   promptRevisions,
   runAttachments,
   runContextPacks,
-  runSkillBindings,
-  skillRevisionResources,
-  skillRevisions,
 } from '@agentpress/database';
 import { and, desc, eq, gt, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 
@@ -40,8 +37,8 @@ import {
   normalizeBindings,
   unique,
   uniqueSkills,
-  validateStoredSkill,
 } from './run-context-sources.js';
+import { loadRunSkillContext, persistRunSkillBindings } from './run-skill-context.js';
 
 export class RunContextService {
   private readonly createId: () => string;
@@ -165,55 +162,7 @@ export class RunContextService {
         'An Evidence binding is missing or outside the current workspace',
       );
 
-    const requestedSkillIds = unique(selectedSkills.map(({ skillId }) => skillId));
-    const availableSkillRows =
-      requestedSkillIds.length === 0
-        ? []
-        : await transaction
-            .select()
-            .from(skillRevisions)
-            .where(
-              and(
-                eq(skillRevisions.workspaceId, input.workspaceId),
-                inArray(skillRevisions.skillId, requestedSkillIds),
-              ),
-            );
-    const selectedSkillRows = selectedSkills.map((selection) => {
-      const row = availableSkillRows.find(
-        (candidate) =>
-          candidate.skillId === selection.skillId && candidate.version === selection.version,
-      );
-      if (!row)
-        throw new AgentApplicationError(
-          'unauthorized_context',
-          `Skill ${selection.skillId}@${selection.version} is unavailable`,
-        );
-      return row;
-    });
-    const skillResourceRows =
-      selectedSkillRows.length === 0
-        ? []
-        : await transaction
-            .select({
-              skillRevisionId: skillRevisionResources.skillRevisionId,
-              path: skillRevisionResources.path,
-              content: skillRevisionResources.content,
-              contentHash: skillRevisionResources.contentHash,
-              byteSize: skillRevisionResources.byteSize,
-            })
-            .from(skillRevisionResources)
-            .where(
-              inArray(
-                skillRevisionResources.skillRevisionId,
-                selectedSkillRows.map(({ id }) => id),
-              ),
-            );
-    const parsedSkills = selectedSkillRows.map((row) =>
-      validateStoredSkill(
-        row,
-        skillResourceRows.filter(({ skillRevisionId }) => skillRevisionId === row.id),
-      ),
-    );
+    const skillContext = await loadRunSkillContext(transaction, input.workspaceId, selectedSkills);
     const now = new Date();
     const acceptedMemoryRows = await transaction
       .select()
@@ -274,13 +223,13 @@ export class RunContextService {
         1,
         { required: true, trusted: true },
       ),
-      ...parsedSkills.map((skill) =>
+      ...skillContext.skills.map((skill) =>
         contextCandidate(`skill:${skill.id}`, 'policy', skill.instructions, skill.version, 0.9, {
           required: false,
           trusted: false,
         }),
       ),
-      ...skillResourceRows.map((resource) =>
+      ...skillContext.resources.map((resource) =>
         contextCandidate(
           `skill-resource:${resource.skillRevisionId}:${resource.path}`,
           'attachment',
@@ -358,7 +307,7 @@ export class RunContextService {
       contextWindow: this.contextWindow,
       candidates,
       acceptedMemoryIds: new Set(memoryHits.map(({ candidate }) => candidate.id)),
-      skillVersions: pinSkills(parsedSkills),
+      skillVersions: pinSkills(skillContext.skills),
       retrievalVersion: 'accepted-memory.hybrid-v1',
       ...(compaction?.summary && compaction.firstKeptMessageSequence
         ? {
@@ -412,15 +361,7 @@ export class RunContextService {
           authorizedUserId: input.userId,
         })),
       );
-    if (selectedSkillRows.length > 0)
-      await transaction.insert(runSkillBindings).values(
-        selectedSkillRows.map((skill) => ({
-          runId: input.runId,
-          skillRevisionId: skill.id,
-          contentHash: skill.contentHash,
-          allowedTools: skill.allowedTools,
-        })),
-      );
+    await persistRunSkillBindings(transaction, input.runId, skillContext.revisions);
     await transaction.insert(runContextPacks).values({
       id: this.createId(),
       runId: input.runId,

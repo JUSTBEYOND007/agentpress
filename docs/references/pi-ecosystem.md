@@ -143,6 +143,18 @@ the compact Skill identity while revision/hash/resource diagnostics remain persi
 online `pnpm eval:skill` target-model gate remains intentionally unchecked until credentials and a
 provider/model manifest are supplied.
 
+The production responsibilities are now fixed as independent owners rather than a central Skill
+manager: `packages/agent-context/src/skill.ts` owns discovery, conformance, and resource-byte safety;
+`skill-selection-policy.ts` owns the PostgreSQL candidate catalog plus explicit/model merge and host
+validation; `skill-preselection.ts` owns only bounded Pi model selection; `run-skill-context.ts` owns
+exact revision/resource integrity loading and `run_skill_bindings` persistence; and
+`persistent-tool-bridge.ts` owns tool narrowing by intersection. `DirectRunCreationService` and
+`RunContextService` orchestrate these contracts but no longer embed their state transitions.
+`badlogic/pi-skills` at commit `90bb51cae36515a648515b633a81c0c6efc8c74d` remains MIT-licensed
+format and behavior evidence only: no executable upstream source was copied and it is not a runtime
+dependency. Focused opposite-path policy tests plus the existing real-PostgreSQL Run/resource tests
+guard the extracted boundaries.
+
 Worker recovery keeps the same ownership boundary: `RunRecoveryService` only fences interrupted
 work and changes the Run lifecycle, while `RunContextService.load` reads the already persisted
 Context Pack. It does not rediscover a Skill directory, query the latest revision, or invoke

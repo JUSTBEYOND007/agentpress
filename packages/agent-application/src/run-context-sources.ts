@@ -1,17 +1,5 @@
-import {
-  hashSkillRevisionContent,
-  loadSkill,
-  loadStaticSkillResources,
-  type ContextCandidate,
-  type ContextOrigin,
-  type SkillDefinition,
-} from '@agentpress/agent-context';
-import {
-  articleRevisions,
-  articles,
-  type DatabaseTransaction,
-  skillRevisions,
-} from '@agentpress/database';
+import type { ContextCandidate, ContextOrigin } from '@agentpress/agent-context';
+import { articleRevisions, articles, type DatabaseTransaction } from '@agentpress/database';
 import { hashBlock, type EditorBlock } from '@agentpress/editor-patch';
 import { and, eq } from 'drizzle-orm';
 
@@ -20,45 +8,6 @@ import {
   type RunContextBinding,
   type SelectedSkillInput,
 } from './contracts.js';
-
-export function validateStoredSkill(
-  row: typeof skillRevisions.$inferSelect,
-  resourceRows: readonly {
-    readonly path: string;
-    readonly content: string;
-    readonly contentHash: string;
-    readonly byteSize: number;
-  }[],
-): SkillDefinition {
-  const skill = loadSkill(row.content);
-  const resources = loadStaticSkillResources(
-    skill,
-    resourceRows.map((resource) => ({
-      path: resource.path,
-      content: resource.content,
-      fileType: 'file',
-    })),
-  );
-  const resourcesValid =
-    resources.length === resourceRows.length &&
-    resources.every((resource) => {
-      const persisted = resourceRows.find(({ path }) => path === resource.path);
-      return (
-        persisted?.contentHash === resource.contentHash &&
-        persisted.byteSize === Buffer.byteLength(resource.content, 'utf8')
-      );
-    });
-  const contentHash = hashSkillRevisionContent(row.content, resources);
-  if (
-    skill.id !== row.skillId ||
-    skill.version !== row.version ||
-    contentHash !== row.contentHash ||
-    !resourcesValid ||
-    JSON.stringify(skill.allowedTools) !== JSON.stringify([...row.allowedTools].sort())
-  )
-    throw new Error(`Stored Skill ${row.skillId}@${row.version} failed integrity validation`);
-  return skill;
-}
 
 export function contextCandidate(
   id: string,
