@@ -198,6 +198,9 @@ export class RunProjectionService {
         ? { type: 'tool-approval', approvals: approvalRows }
         : undefined;
     const queuedEvent = events.find(({ eventType }) => eventType === 'run.queued');
+    const skillSelectionEvent = events.findLast(
+      ({ eventType }) => eventType === 'skill.selection.completed',
+    );
     const contextManifest = queuedEvent?.payload.contextManifest;
     const model = modelRows[0];
     const executionFacts = projectRunExecutionFacts({
@@ -291,6 +294,7 @@ export class RunProjectionService {
             context: {
               manifest: contextManifest,
               contextHash: queuedEvent.payload.contextHash,
+              ...(skillSelectionEvent ? { skillSelections: skillSelectionEvent.payload } : {}),
               ...(model
                 ? {
                     model: model.selectedModel,

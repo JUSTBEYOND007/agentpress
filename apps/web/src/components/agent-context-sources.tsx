@@ -9,7 +9,12 @@ import {
   type RunPart,
 } from '../lib/agentpress-assistant-runtime';
 
-type ContextSource = { readonly id: string; readonly kind: string; readonly revision?: string };
+type ContextSource = {
+  readonly id: string;
+  readonly kind: string;
+  readonly revision?: string;
+  readonly selectionOrigin?: 'explicit' | 'model';
+};
 
 export function ContextSourcesPart({
   part,
@@ -68,6 +73,9 @@ function ContextSourcesBody({
           <li key={`${source.kind}:${source.id}`}>
             <SourceIcon kind={source.kind} />
             <span>{sourceLabel(source)}</span>
+            {source.selectionOrigin ? (
+              <small>{selectionOriginLabel(source.selectionOrigin)}</small>
+            ) : null}
             {source.revision ? <small>{shortRevision(source.revision)}</small> : null}
           </li>
         ))}
@@ -79,14 +87,22 @@ function ContextSourcesBody({
 
 export function contextSourcesView(payload: Readonly<Record<string, unknown>>) {
   const manifest = recordValue(payload.manifest);
+  const skillSelections = recordValue(payload.skillSelections);
+  const explicitSkills = skillSelectionIds(skillSelections.explicit);
+  const modelSkills = skillSelectionIds(skillSelections.model);
   const sources = Array.isArray(manifest.included)
     ? manifest.included
         .map(recordValue)
-        .map((item) => ({
-          id: stringValue(item.id),
-          kind: stringValue(item.kind),
-          ...(stringValue(item.revision) ? { revision: stringValue(item.revision) } : {}),
-        }))
+        .map((item) => {
+          const id = stringValue(item.id);
+          const selectionOrigin = skillSelectionOrigin(id, explicitSkills, modelSkills);
+          return {
+            id,
+            kind: stringValue(item.kind),
+            ...(stringValue(item.revision) ? { revision: stringValue(item.revision) } : {}),
+            ...(selectionOrigin ? { selectionOrigin } : {}),
+          };
+        })
         .filter(({ id }) => id)
     : [];
   return {
@@ -97,6 +113,31 @@ export function contextSourcesView(payload: Readonly<Record<string, unknown>>) {
     model: stringValue(payload.model),
     provider: stringValue(payload.provider),
   };
+}
+
+function skillSelectionIds(value: unknown): ReadonlySet<string> {
+  if (!Array.isArray(value)) return new Set();
+  return new Set(
+    value.flatMap((item) => {
+      const skillId = stringValue(recordValue(item).skillId);
+      return skillId ? [skillId] : [];
+    }),
+  );
+}
+
+function skillSelectionOrigin(
+  sourceId: string,
+  explicit: ReadonlySet<string>,
+  model: ReadonlySet<string>,
+): ContextSource['selectionOrigin'] {
+  if (!sourceId.startsWith('skill:')) return undefined;
+  const skillId = sourceId.slice(6);
+  if (explicit.has(skillId)) return 'explicit';
+  return model.has(skillId) ? 'model' : undefined;
+}
+
+function selectionOriginLabel(origin: NonNullable<ContextSource['selectionOrigin']>): string {
+  return origin === 'explicit' ? '用户选择' : 'Agent 选择';
 }
 
 function SourceIcon({ kind }: { readonly kind: string }): React.JSX.Element {

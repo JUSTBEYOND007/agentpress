@@ -1165,6 +1165,15 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(packs[0]?.content).toContain('kind="mention" trust="untrusted"');
     expect(packs[0]?.content).toContain('kind="policy" trust="untrusted"');
     expect(packs[0]?.content).toContain('kind="memory" trust="untrusted"');
+    await expect(service.getProjection(run.runId)).resolves.toMatchObject({
+      context: {
+        skillSelections: {
+          explicit: [{ skillId: 'concise', version: '1.0.0' }],
+          model: [],
+          selected: [{ skillId: 'concise', version: '1.0.0' }],
+        },
+      },
+    });
     const promptRows = await connection.db
       .select()
       .from(promptRevisions)

@@ -320,7 +320,7 @@ export class DirectRunCreationService {
           contextHash: contextPack.contentHash,
         },
       });
-      if (this.options.skillPreselector) {
+      if (this.options.skillPreselector || selectedSkills.length > 0) {
         await appendRunEvent(transaction, {
           id: this.options.createId(),
           runId,
