@@ -574,8 +574,9 @@ TODO：
       `badlogic/pi-skills` 是格式/行为证据还是直接依赖，禁止汇总进单一 Skill manager。
 - [ ] PostgreSQL replay 验证 Run Skill Binding revision/hash 在 worker 重启、恢复和分支切换后不漂移，
       旧 Skill 指令不进入新 turn；Playwright 验证显式禁用、缺失/失效 Skill 与诊断详情。当前已补充
-      binding hash drift 的 fail-closed 回归（`PersistentToolBridge`），并用 PostgreSQL 通过；完整
-      worker recovery、branch switch 和 Playwright 状态矩阵仍待完成。
+      binding hash drift 的 fail-closed 回归（`PersistentToolBridge`），并用 PostgreSQL 证明旧 Run 在新
+      revision 发布后保持 v1、sibling branch 可显式绑定 v2、未再次选择 Skill 的新 turn 不注入 v1/v2
+      instructions。完整 worker recovery 和 Playwright 状态矩阵仍待完成。
 - [x] 使用 `pnpm eval:skill` 的固定数据集验证准确选择、选择 none、禁用项和恶意 description。
       2026-08-07 使用真实 Pi Runtime 与目标模型 `gpt-5.6-terra` 运行 5 个固定用例：5/5 exact match、
       0 forbidden selection、0 error。版本化报告为

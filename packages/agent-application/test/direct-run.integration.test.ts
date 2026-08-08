@@ -1659,6 +1659,51 @@ describeWithDatabase('Direct Run application flow', () => {
 
     await service.requestCancellation(run.runId);
     await service.execute(run.runId);
+
+    const siblingBranchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: siblingBranchId,
+      conversationId: ids.conversation,
+    });
+    const siblingRun = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: siblingBranchId,
+      prompt: 'Use the newer Skill only on this branch',
+      idempotencyKey: randomUUID(),
+      skills: [{ skillId, version: '2.0.0' }],
+    });
+    const unboundRun = await service.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId: ids.branch,
+      prompt: 'Do not inherit a Skill from the previous turn',
+      idempotencyKey: randomUUID(),
+    });
+    const [siblingPack, unboundPack, siblingBindings, unboundBindings] = await Promise.all([
+      restartedContexts.load(siblingRun.runId),
+      restartedContexts.load(unboundRun.runId),
+      connection.db
+        .select()
+        .from(runSkillBindings)
+        .where(eq(runSkillBindings.runId, siblingRun.runId)),
+      connection.db
+        .select()
+        .from(runSkillBindings)
+        .where(eq(runSkillBindings.runId, unboundRun.runId)),
+    ]);
+    expect(siblingPack?.content).toContain('Use revision two.');
+    expect(siblingPack?.content).not.toContain('Use revision one.');
+    expect(siblingBindings).toHaveLength(1);
+    expect(siblingBindings[0]?.allowedTools).toEqual(['web_research.search']);
+    expect(unboundPack?.content).not.toContain('Use revision one.');
+    expect(unboundPack?.content).not.toContain('Use revision two.');
+    expect(unboundBindings).toEqual([]);
+
+    await service.requestCancellation(siblingRun.runId);
+    await service.execute(siblingRun.runId);
+    await service.requestCancellation(unboundRun.runId);
+    await service.execute(unboundRun.runId);
   });
 
   it('persists cancellation before aborting Pi and reaches a terminal state', async () => {
