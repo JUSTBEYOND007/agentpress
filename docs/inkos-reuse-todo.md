@@ -486,6 +486,14 @@ TODO：
       不同 `messageId` 的 recovery command 先到而旧 original command 晚到，以及取消后 late command；
       Task terminal/attempt fence 保证只产生 attempt 2 的唯一 TaskResult，两个乱序消息各自写入 inbox，
       不新增 Kafka manager 或第二套幂等状态。并发分支共享预算矩阵仍待补齐。
+- [ ] 并发分支共享预算：当前 `validateSubmittedPlan` 只有静态 `96,000` estimated-token 上限，
+      `agent_tasks.budget` 只保存 Task 局部策略，`task_results.usage` 和 Run `usage` 只在结算后汇总；
+      尚无 Run-level 原子 reservation/ledger。新增前必须先固定 `reserve -> claim -> settle/release` 的窄
+      Port/Store 契约：reservation 绑定 `runId/planRevisionId/taskId/attempt`，PostgreSQL 行锁或条件更新
+      保证并行 wave 不会 check-after-use 共同超支；重复 settlement、lease loss、cancel 和 retry 必须幂等。
+      验收要求：两个并行 Task 同时争抢剩余预算时至多一个获得 reservation；拒绝项写 typed
+      `budget_exhausted` fact；实际 usage 只结算一次并可 replay；预算失败不能创建替代 Task/Plan Revision，
+      live/replay 与相反的充足预算场景保持一致。不得把计数器塞入 `PlannedDagScheduler`。
 - [ ] 明确并测试 Main planner、DAG scheduler、Task executor、lease store、Specialist runtime、result/evidence
       store、synthesis 和 projection 的 Port/Event 边界；禁止共享可变 plan context 或把状态机塞回 facade。
 - [ ] 在 `docs/references/pi-ecosystem.md` 固定 Oh My Pi structured-subagent 的版本、commit、许可证、源码与
