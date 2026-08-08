@@ -99,7 +99,7 @@ export class SpecialistResultStore {
         id: this.options.createId(),
         runId,
         reason: 'task_settled',
-        state: { taskId: result.id, status: result.status },
+        state: { taskId: result.id, attempt: expectedAttempt, status: result.status },
       });
       const event = await appendRunEvent(transaction, {
         id: this.options.createId(),
@@ -107,6 +107,7 @@ export class SpecialistResultStore {
         eventType: `task.${result.status}`,
         payload: {
           taskId: result.id,
+          attempt: expectedAttempt,
           owner: result.owner,
           criticality: result.criticality,
           summary: result.summary,
@@ -158,7 +159,12 @@ export class SpecialistResultStore {
         id: this.options.createId(),
         runId,
         eventType: 'task.skipped',
-        payload: { taskId: task.id, owner: task.owner, ...(failure ? { failure } : {}) },
+        payload: {
+          taskId: task.id,
+          attempt: updated[0]?.attempt,
+          owner: task.owner,
+          ...(failure ? { failure } : {}),
+        },
       });
       return { attempt: updated[0]?.attempt, event };
     });

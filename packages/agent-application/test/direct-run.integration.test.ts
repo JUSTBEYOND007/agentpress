@@ -1964,10 +1964,17 @@ describeWithDatabase('Direct Run application flow', () => {
       results.filter(({ taskId }) => persistedTasks.some(({ id }) => id === taskId)),
     ).toHaveLength(5);
     const events = await connection.db
-      .select({ eventType: runEvents.eventType })
+      .select({ eventType: runEvents.eventType, payload: runEvents.payload })
       .from(runEvents)
       .where(eq(runEvents.runId, run.runId));
     expect(events.filter(({ eventType }) => eventType === 'plan.revised')).toHaveLength(1);
+    const settledTaskEvents = events.filter(({ eventType }) => eventType === 'task.succeeded');
+    expect(settledTaskEvents).toHaveLength(5);
+    expect(
+      settledTaskEvents.every(({ payload }) =>
+        Number.isSafeInteger((payload as Record<string, unknown>).attempt),
+      ),
+    ).toBe(true);
     const choices = await connection.db
       .select({
         choice: runToolChoices.choice,

@@ -139,7 +139,8 @@ function lifecycleKey(event: DurableRunEvent): string | undefined {
   }
   if (event.eventType.startsWith('task.')) {
     const taskId = stringProperty(event.payload, 'taskId');
-    return taskId ? `task:${taskId}` : undefined;
+    const attempt = positiveIntegerProperty(event.payload, 'attempt');
+    return taskId && attempt ? `task:${taskId}:attempt:${String(attempt)}` : undefined;
   }
   if (event.eventType.startsWith('action.')) {
     const proposalId =
@@ -196,6 +197,7 @@ function toRunParts(
       type: partType,
       status: type,
       ...(outcome ? { outcome } : {}),
+      ...(lifecycle ? { correlationId: lifecycle } : {}),
       payload: {
         ...event.payload,
         eventAt: event.createdAt.toISOString(),
@@ -245,4 +247,12 @@ function recordProperty(
 function stringProperty(value: Readonly<Record<string, unknown>>, key: string): string | undefined {
   const candidate = value[key];
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+function positiveIntegerProperty(
+  value: Readonly<Record<string, unknown>>,
+  key: string,
+): number | undefined {
+  const candidate = value[key];
+  return Number.isSafeInteger(candidate) && Number(candidate) > 0 ? Number(candidate) : undefined;
 }

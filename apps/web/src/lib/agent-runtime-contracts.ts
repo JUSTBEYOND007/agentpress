@@ -22,6 +22,7 @@ export type RunPart = {
     | 'usage';
   readonly status: string;
   readonly outcome?: ActivityOutcome;
+  readonly correlationId?: string;
   readonly payload: Readonly<Record<string, unknown>>;
 };
 

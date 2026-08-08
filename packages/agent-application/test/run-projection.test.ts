@@ -14,13 +14,13 @@ describe('run projection', () => {
   });
   it('folds tool and task lifecycle events into their latest durable state', () => {
     const parts = projectRunParts([
-      event(1, 'task.started', { taskId: 'task-1' }),
+      event(1, 'task.started', { taskId: 'task-1', attempt: 1 }),
       event(2, 'tool.executing', {
         toolCallId: 'tool-1',
         progress: { completed: 1, total: 2 },
       }),
       event(3, 'tool.succeeded', { toolCallId: 'tool-1' }),
-      event(4, 'task.succeeded', { taskId: 'task-1' }),
+      event(4, 'task.succeeded', { taskId: 'task-1', attempt: 1 }),
     ]);
 
     expect(parts).toHaveLength(2);
@@ -145,6 +145,30 @@ describe('run projection', () => {
       'stale',
       'degraded',
       'failed',
+    ]);
+  });
+
+  it('keeps task attempts isolated when an old attempt settles late', () => {
+    const parts = projectRunParts([
+      event(1, 'task.started', { taskId: 'task-retry', attempt: 1 }),
+      event(2, 'task.started', { taskId: 'task-retry', attempt: 2 }),
+      event(3, 'task.succeeded', { taskId: 'task-retry', attempt: 2 }),
+      event(4, 'task.failed', { taskId: 'task-retry', attempt: 1 }),
+    ]);
+    expect(parts.map(({ correlationId, status }) => ({ correlationId, status }))).toEqual([
+      { correlationId: 'task:task-retry:attempt:1', status: 'task.failed' },
+      { correlationId: 'task:task-retry:attempt:2', status: 'task.succeeded' },
+    ]);
+  });
+
+  it('does not guess task correlation when a legacy event has no attempt', () => {
+    const parts = projectRunParts([
+      event(1, 'task.started', { taskId: 'legacy-task' }),
+      event(2, 'task.succeeded', { taskId: 'legacy-task' }),
+    ]);
+    expect(parts.map(({ id, correlationId }) => ({ id, correlationId }))).toEqual([
+      { id: 'event-1', correlationId: undefined },
+      { id: 'event-2', correlationId: undefined },
     ]);
   });
 

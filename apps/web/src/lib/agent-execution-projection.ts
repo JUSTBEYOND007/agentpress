@@ -156,11 +156,13 @@ export function executionItems(
     if (part.type !== 'activity') continue;
     const toolId = stringProperty(part.payload, 'toolId');
     const taskId = stringProperty(part.payload, 'taskId');
-    const key = toolId
-      ? `tool:${stringProperty(part.payload, 'toolCallId') ?? part.id}`
-      : taskId
-        ? `task:${taskId}`
-        : undefined;
+    const key = part.correlationId
+      ? `correlation:${part.correlationId}`
+      : toolId
+        ? `tool:${stringProperty(part.payload, 'toolCallId') ?? part.id}`
+        : taskId
+          ? `task:${taskId}`
+          : undefined;
     if (!key) continue;
     const status = executionStatus(part.status, part.outcome);
     const label = activityDisplayLabel(part, taskLabels);

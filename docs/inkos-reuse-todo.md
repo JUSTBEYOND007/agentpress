@@ -76,6 +76,10 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       96 个测试和 Web 92 个测试覆盖 opaque status + typed label/outcome 场景。
 - [ ] 为 execution/task/attempt 统一 correlation id；所有 progress/log/result 必须带归属，缺 id 时
       fail closed，不回退到“最近运行项”；补齐乱序、重复、旧 attempt 晚到、断线、刷新和 worker 重启回归。
+      当前 Specialist terminal/skip event 已持久化 attempt，RunPart 写入 `correlationId`；Task lifecycle 使用
+      `taskId + attempt` 隔离，缺 attempt 的历史事件保持独立而不按 taskId 猜测。旧 attempt 晚到与缺身份
+      fail-closed 测试已通过，五 Specialist PostgreSQL fixture 证明 5 个 terminal event 均携带 attempt；
+      progress/log 全链、断线刷新和 worker restart 仍待补齐，因此总项不勾选。
 - [ ] 将 planner、DAG scheduler、task executor、lease store、Specialist runtime、result/evidence
       store、synthesis、projection 固定为窄 Port/Command/Event owner；禁止共享 mutable plan context、
       隐式 callback 链或新增 `AgentManager/RunCoordinator`。
