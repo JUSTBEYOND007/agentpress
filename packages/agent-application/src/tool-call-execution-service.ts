@@ -8,7 +8,7 @@ import {
   enqueueOutboxMessage,
   toolCalls,
 } from '@agentpress/database';
-import { hashToolArguments, ToolExecutionError } from '@agentpress/tool-runtime';
+import { hashToolArguments } from '@agentpress/tool-runtime';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { AGENT_RUN_COMMAND_TOPIC, type DurableRunEvent } from './contracts.js';
@@ -20,6 +20,7 @@ import {
   type ToolCallServiceOptions,
 } from './tool-call-contracts.js';
 import { ToolEvidenceStore } from './tool-evidence-store.js';
+import { projectToolFailure } from './tool-call-failure.js';
 
 export class ToolCallExecutionService {
   private readonly now: () => Date;
@@ -244,7 +245,7 @@ export class ToolCallExecutionService {
     await this.options.publisher.publish({ durable: true, event: claimed.event });
 
     let output: unknown;
-    let failure: unknown;
+    let failure: ReturnType<typeof projectToolFailure> | undefined;
     let status: 'succeeded' | 'failed' | 'outcome_unknown';
     try {
       output = await this.options.registry.execute(claimed.definition, claimed.call.arguments, {
@@ -256,15 +257,8 @@ export class ToolCallExecutionService {
       });
       status = 'succeeded';
     } catch (error) {
-      failure = { message: error instanceof Error ? error.message : 'Unknown tool error' };
-      status =
-        error instanceof ToolExecutionError
-          ? error.outcome === 'unknown'
-            ? 'outcome_unknown'
-            : 'failed'
-          : APPROVAL_RISKS.has(claimed.call.risk)
-            ? 'outcome_unknown'
-            : 'failed';
+      failure = projectToolFailure(error, APPROVAL_RISKS.has(claimed.call.risk));
+      status = failure.status;
     }
     const settled = await this.options.database.transaction(async (transaction) => {
       const now = this.now();
@@ -272,9 +266,7 @@ export class ToolCallExecutionService {
         .update(toolCalls)
         .set({
           status,
-          ...(status === 'succeeded'
-            ? { output }
-            : { failure: failure as Readonly<Record<string, unknown>> }),
+          ...(status === 'succeeded' ? { output } : { failure: failure?.diagnosticFailure }),
           settledAt: now,
           updatedAt: now,
           version: sql`${toolCalls.version} + 1`,
@@ -333,7 +325,10 @@ export class ToolCallExecutionService {
         id: this.createId(),
         runId: claimed.call.runId,
         eventType: `tool.${status}`,
-        payload: { toolCallId, ...(status === 'succeeded' ? { output } : { failure }) },
+        payload: {
+          toolCallId,
+          ...(status === 'succeeded' ? { output } : { failure: failure?.publicFailure }),
+        },
       });
       const events = [toDurableEvent(event)];
       const articleProposal = articleEditProposalOutput(output);

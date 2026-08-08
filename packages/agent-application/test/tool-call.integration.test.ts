@@ -93,6 +93,23 @@ describeWithDatabase('Tool Call application flow', () => {
     },
   });
   registry.register({
+    toolId: 'workspace.secret_failure',
+    version: '1.0.0',
+    owner: 'workspace',
+    description: 'Fail with protected provider diagnostics',
+    capabilities: ['workspace.read'],
+    inputSchema: Type.Object({ query: Type.String() }, { additionalProperties: false }),
+    outputSchema: Type.Object({ result: Type.String() }, { additionalProperties: false }),
+    risk: 'read_only',
+    sideEffect: 'No side effect',
+    idempotency: 'none',
+    timeoutMs: 1_000,
+    estimateCost: () => ({}),
+    execute: () => {
+      throw new Error('provider credential=super-secret stack=/private/runtime.ts:42');
+    },
+  });
+  registry.register({
     toolId: 'web.search',
     version: '1.0.0',
     owner: 'research',
@@ -409,6 +426,53 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(toolCalls)
       .where(eq(toolCalls.id, proposal.toolCallId));
     expect(rows).toEqual([{ status: 'outcome_unknown' }]);
+  });
+
+  it('keeps provider diagnostics protected while live and replay expose one public failure', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'workspace.secret_failure',
+      toolVersion: '1.0.0',
+      arguments: { query: 'failure boundary' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['workspace.read']),
+    });
+
+    await expect(service.execute(proposal.toolCallId)).resolves.toMatchObject({ status: 'failed' });
+    const [saved] = await connection.db
+      .select({ failure: toolCalls.failure })
+      .from(toolCalls)
+      .where(eq(toolCalls.id, proposal.toolCallId));
+    expect(saved?.failure).toMatchObject({
+      code: 'provider_failed',
+      messageKey: 'tool.failure.provider',
+      retryable: true,
+      visibility: 'protected',
+    });
+    expect(saved?.failure?.message).toContain('super-secret');
+
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const liveParts = projectRunParts(liveEvents).filter(({ type }) => type === 'activity');
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const replayParts = replay?.parts.filter(({ type }) => type === 'activity');
+    expect(replayParts).toEqual(liveParts);
+    expect(replayParts).toHaveLength(1);
+    expect(replayParts?.[0]).toMatchObject({
+      status: 'tool.failed',
+      payload: {
+        failure: {
+          code: 'provider_failed',
+          messageKey: 'tool.failure.provider',
+          retryable: true,
+        },
+      },
+    });
+    expect(JSON.stringify(liveEvents)).not.toContain('super-secret');
+    expect(JSON.stringify(replayParts)).not.toContain('/private/runtime.ts');
   });
 
   it('bridges a Pi Runtime tool through the persistent ledger', async () => {

@@ -104,6 +104,10 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       业务动作。原始参数值和 transport 对象会在进入 assistant-ui transcript 前从成功、失败和待审批
       ToolCall 中删除，刷新后再次净化不会丢失 Artifact 引用。schema-aware 参数值摘要、retry 和统一
       redacted failure 尚未完成，因此总项保持未勾选。
+      其中 redacted failure 已完成：ToolCall settlement 依据 typed `ToolRuntimeError`、
+      `ToolExecutionError` 和 side-effect 风险生成 `code/messageKey/retryable`；ledger 只在 protected
+      failure 中保留截断后的诊断，RunEvent/live/replay 只携带公共结构，Web 对旧的非结构化 failure
+      fail closed。未知副作用仍保持 `outcome_unknown`，不会被转成普通失败或自动重试。
 - [ ] Server/tool revision 变化、断线重连、调用中断线、重复结果、`outcome_unknown` 和旧连接晚到结果必须
       有独立 projection fixture 与 Playwright 场景。
 

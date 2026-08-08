@@ -8,6 +8,7 @@ import type {
 } from './agent-runtime-contracts';
 import { consumerTaskLabel } from './agent-consumer-labels';
 import { toolActivityAudit } from './agent-tool-audit-projection';
+import { projectPublicToolFailure, toolFailureSummary } from './agent-tool-failure-projection';
 
 export function processDurationMs(parts: readonly RunPart[]): number {
   const usage = parts.findLast(({ type }) => type === 'usage');
@@ -85,12 +86,24 @@ export function sanitizeProcessPart(part: RunPart): RunPart {
   }
   if (part.type === 'activity') {
     const audit = toolActivityAudit(part);
+    const failure = projectPublicToolFailure(part.payload.failure);
     const payload = Object.fromEntries(
       Object.entries(part.payload).filter(
-        ([key]) => key !== 'objective' && key !== 'arguments' && key !== 'transportProvenance',
+        ([key]) =>
+          key !== 'objective' &&
+          key !== 'arguments' &&
+          key !== 'transportProvenance' &&
+          key !== 'failure',
       ),
     );
-    return { ...part, payload: { ...payload, ...(audit ? { toolAudit: audit } : {}) } };
+    return {
+      ...part,
+      payload: {
+        ...payload,
+        ...(audit ? { toolAudit: audit } : {}),
+        ...(failure ? { failure } : {}),
+      },
+    };
   }
   return part;
 }
@@ -186,7 +199,7 @@ export function executionItems(
     const status = executionStatus(part.status, part.outcome);
     const label = activityDisplayLabel(part, taskLabels);
     const result = recordProperty(part.payload, 'output');
-    const error = stringProperty(recordProperty(part.payload, 'failure'), 'message');
+    const error = toolFailureSummary(part);
     const audit = toolActivityAudit(part);
     if (toolId && utilityTools.has(toolId)) {
       if (!utility || utility.sequence > part.sequence) {

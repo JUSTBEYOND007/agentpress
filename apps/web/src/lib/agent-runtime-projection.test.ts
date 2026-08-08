@@ -269,6 +269,13 @@ describe('run presentation projection', () => {
             toolId: 'web.search',
             toolCallId: 'call-1',
             arguments: { query: 'private failed query' },
+            failure: {
+              code: 'provider_failed',
+              messageKey: 'tool.failure.provider',
+              retryable: true,
+              message: 'legacy credential=private-failure',
+              stack: '/private/runtime.ts:42',
+            },
             transportProvenance: {
               kind: 'mcp',
               serverId: 'web_research',
@@ -293,6 +300,9 @@ describe('run presentation projection', () => {
     ]);
     expect(JSON.stringify(content)).toContain('call-1');
     expect(JSON.stringify(content)).not.toContain('private failed query');
+    expect(JSON.stringify(content)).not.toContain('private-failure');
+    expect(JSON.stringify(content)).not.toContain('/private/runtime.ts');
+    expect(JSON.stringify(content)).toContain('tool.failure.provider');
     expect(JSON.stringify(content)).not.toContain('transportProvenance');
     expect(JSON.stringify(content)).toContain('toolAudit');
   });
