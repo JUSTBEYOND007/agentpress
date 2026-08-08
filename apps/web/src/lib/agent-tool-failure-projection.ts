@@ -19,6 +19,7 @@ export type PublicToolFailure = {
   readonly outcomeReason?:
     | 'connection_unavailable_before_dispatch'
     | 'connection_lost_after_dispatch'
+    | 'run_cancelled_after_dispatch'
     | 'stale_client_result';
 };
 
@@ -99,6 +100,7 @@ function isOutcomeReason(value: string): value is NonNullable<PublicToolFailure[
   return (
     value === 'connection_unavailable_before_dispatch' ||
     value === 'connection_lost_after_dispatch' ||
+    value === 'run_cancelled_after_dispatch' ||
     value === 'stale_client_result'
   );
 }
@@ -111,6 +113,9 @@ export function toolFailureSummary(part: RunPart): string | undefined {
   }
   if (failure.outcomeReason === 'connection_lost_after_dispatch') {
     return '工具发出后连接中断，结果无法确认，请先核对。';
+  }
+  if (failure.outcomeReason === 'run_cancelled_after_dispatch') {
+    return '取消发生在工具发出后，结果无法确认，请先核对。';
   }
   if (failure.outcomeReason === 'stale_client_result') {
     return '旧连接返回了迟到结果，结果无法确认，请先核对。';

@@ -127,7 +127,13 @@ export class RunProjectionService {
         })
         .from(approvals)
         .innerJoin(toolCalls, eq(toolCalls.id, approvals.toolCallId))
-        .where(and(eq(toolCalls.runId, runId), eq(approvals.decision, 'pending')))
+        .where(
+          and(
+            eq(toolCalls.runId, runId),
+            eq(toolCalls.status, 'awaiting_approval'),
+            eq(approvals.decision, 'pending'),
+          ),
+        )
         .orderBy(asc(approvals.createdAt)),
       this.database
         .select({

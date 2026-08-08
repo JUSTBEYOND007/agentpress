@@ -10,7 +10,11 @@ import {
   runToolChoices,
   toolCalls,
 } from '@agentpress/database';
-import { decideToolReplay, resolveToolReplaySafety } from '@agentpress/tool-runtime';
+import {
+  decideToolReplay,
+  resolveToolReplaySafety,
+  ToolExecutionError,
+} from '@agentpress/tool-runtime';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import type {
@@ -19,6 +23,7 @@ import type {
   RunEventPublisher,
 } from './contracts.js';
 import { isTerminalRunStatus, toDurableEvent } from './run-projection-service.js';
+import { projectToolFailure } from './tool-call-failure.js';
 
 type RunRecoveryServiceOptions = {
   readonly database: AgentPressDatabase;
@@ -32,6 +37,7 @@ export class RunRecoveryService {
 
   public async requestCancellation(runId: string): Promise<RequestRunCancellationResult> {
     const settled = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select id from ${agentRuns} where id = ${runId} for update`);
       const rows = await transaction
         .select({ status: agentRuns.status })
         .from(agentRuns)
@@ -83,6 +89,68 @@ export class RunRecoveryService {
         };
       }
       const now = this.options.now();
+      const cancelledToolCalls = await transaction
+        .update(toolCalls)
+        .set({
+          status: 'cancelled',
+          settledAt: now,
+          updatedAt: now,
+          version: sql`${toolCalls.version} + 1`,
+        })
+        .where(
+          and(
+            eq(toolCalls.runId, runId),
+            inArray(toolCalls.status, ['proposed', 'awaiting_approval', 'approved']),
+          ),
+        )
+        .returning({ id: toolCalls.id });
+      const toolEvents: DurableRunEvent[] = [];
+      for (const toolCall of cancelledToolCalls) {
+        const toolEvent = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'tool.cancelled',
+          payload: {
+            toolCallId: toolCall.id,
+            reason: 'run_cancelled',
+            phase: 'before_dispatch',
+          },
+        });
+        toolEvents.push(toDurableEvent(toolEvent));
+      }
+      const outcomeUnknownFailure = projectToolFailure(
+        new ToolExecutionError(
+          'Run cancellation fenced a Tool Call after dispatch',
+          'unknown',
+          'run_cancelled_after_dispatch',
+        ),
+        true,
+      );
+      const uncertainToolCalls = await transaction
+        .update(toolCalls)
+        .set({
+          status: 'outcome_unknown',
+          failure: outcomeUnknownFailure.diagnosticFailure,
+          settledAt: now,
+          updatedAt: now,
+          version: sql`${toolCalls.version} + 1`,
+        })
+        .where(and(eq(toolCalls.runId, runId), eq(toolCalls.status, 'executing')))
+        .returning({ id: toolCalls.id });
+      for (const toolCall of uncertainToolCalls) {
+        const toolEvent = await appendRunEvent(transaction, {
+          id: this.options.createId(),
+          runId,
+          eventType: 'tool.outcome_unknown',
+          payload: {
+            toolCallId: toolCall.id,
+            reason: 'run_cancelled_after_dispatch',
+            phase: 'after_dispatch',
+            failure: outcomeUnknownFailure.publicFailure,
+          },
+        });
+        toolEvents.push(toDurableEvent(toolEvent));
+      }
       const cancelledTasks = await cancelAgentRunTasks(transaction, { runId, now });
       const taskEvents: DurableRunEvent[] = [];
       for (const task of cancelledTasks) {
@@ -106,7 +174,7 @@ export class RunRecoveryService {
       });
       return {
         result: { outcome: 'accepted' as const, runId, status: 'cancelling' as const },
-        events: [...taskEvents, toDurableEvent(event)],
+        events: [...toolEvents, ...taskEvents, toDurableEvent(event)],
       };
     });
 

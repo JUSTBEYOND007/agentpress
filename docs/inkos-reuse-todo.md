@@ -149,7 +149,12 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
 - [ ] approval/denied/cancel/degraded/duplicate-result/recovered 各有 typed event；权限只来自宿主 capability、
       Approval 和 Settlement 事实，远端 Server、Skill、网页内容和工具名称不能授予权限。
       replay-safe ToolCall 重复执行现在追加脱敏 `tool.duplicate_result_ignored` durable fact；消费者 projector
-      忽略该审计事件，保留原成功 lifecycle，不重复展示或执行副作用。其余 typed event 仍待补齐。
+      忽略该审计事件，保留原成功 lifecycle，不重复展示或执行副作用。Run 取消现在与 ToolCall ledger 在
+      同一 PostgreSQL 事务内结算：`proposed/awaiting_approval/approved` 以
+      `tool.cancelled(reason=run_cancelled, phase=before_dispatch)` 终止，`executing` 以
+      `tool.outcome_unknown(reason=run_cancelled_after_dispatch)` fence；provider 迟到结果不能覆盖终态。
+      projection 只把仍为 `awaiting_approval` 的 pending Approval 暴露为交互，取消/审批并发通过统一
+      `Run -> ToolCall` aggregate lock 顺序串行化。degraded 和完整 recovered 展示矩阵仍待补齐。
 - [ ] 复用现有 RunPart projector 增加 MCP 审计投影：消费者只显示业务 label；server/tool/revision、attempt、
       retry、duration、schema-aware 参数摘要、output refs 和脱敏错误只进入按需详情。
 - [ ] guarded raw payload、JSON-RPC、header、credential、stack 和 private thinking 不进入普通 transcript；
@@ -580,6 +585,12 @@ MCP 调用中断的确定性边界已由 `f333750` 接通：调用发出后连�
 的晚到结果由 identity fence 拒绝，只有调用前连接 probe 可安全重连；真实 Streamable HTTP 重启测试
 证明中断逻辑调用执行 0 次，下一次新逻辑调用执行 1 次。其余凭据、握手、Schema、timeout/cancel、
 重复结果、恶意输出、审批拒绝和审计投影矩阵仍未完成。
+
+Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
+结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
+由 status fence 忽略。Run、ToolCall、Approval 和 transport audit 入口统一使用 `Run -> ToolCall` 锁顺序，
+并发审批不能复活取消调用；live 与 replay 使用同一 projector，取消后的旧 pending Approval 不再出现。
+该证据覆盖取消时点与审批 race，但不替代 worker crash、恢复期间再次取消和真实 MCP transport cancel 矩阵。
 
 运行时故障注入进度：inline 与 detached Specialist 的 timeout 已接入实际 Pi Runtime
 `AbortSignal.timeout`，并与父级取消通过 `AbortSignal.any` 组合；超时结果是 failed `task_timeout`，不会把

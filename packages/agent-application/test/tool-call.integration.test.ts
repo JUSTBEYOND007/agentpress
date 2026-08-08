@@ -860,6 +860,218 @@ describeWithDatabase('Tool Call application flow', () => {
     );
   });
 
+  it('cancels undispatched Tool Calls and removes stale approvals from replay', async () => {
+    const publishedFrom = published.length;
+    const runId = await createRunningRun();
+    const search = await service.propose({
+      runId,
+      toolId: 'workspace.search',
+      toolVersion: '1.0.0',
+      arguments: { query: 'cancel before dispatch' },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['workspace.read']),
+    });
+    const publish = await service.propose({
+      runId,
+      toolId: 'publication.successful_publish',
+      toolVersion: '1.0.0',
+      arguments: { editionId: randomUUID() },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['publication.write']),
+      idempotencyKey: `publish:${randomUUID()}`,
+    });
+    const inFlight = await service.propose({
+      runId,
+      toolId: 'publication.delayed_publish',
+      toolVersion: '1.0.0',
+      arguments: { editionId: randomUUID() },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['publication.write']),
+      idempotencyKey: `publish:${randomUUID()}`,
+    });
+    expect(search.status).toBe('proposed');
+    expect(publish.status).toBe('awaiting_approval');
+    await service.decideApproval({
+      toolCallId: inFlight.toolCallId,
+      decision: 'approved',
+      userId,
+    });
+    const delayedBefore = delayedExternalExecutions;
+    const lateSettlement = service.execute(inFlight.toolCallId);
+    await waitForToolStatus(inFlight.toolCallId, 'executing');
+    expect(delayedExternalExecutions - delayedBefore).toBe(1);
+
+    const runs = new DirectRunService({
+      database: connection.db,
+      publisher: {
+        publish(event) {
+          published.push(event);
+          return Promise.resolve();
+        },
+      },
+      runtimeFactory: {
+        create() {
+          throw new Error('Cancellation ledger test must not invoke the runtime');
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    await expect(runs.requestCancellation(runId)).resolves.toMatchObject({
+      outcome: 'accepted',
+      status: 'cancelling',
+    });
+
+    const rows = await connection.db
+      .select({ id: toolCalls.id, status: toolCalls.status, settledAt: toolCalls.settledAt })
+      .from(toolCalls)
+      .where(eq(toolCalls.runId, runId));
+    expect(rows).toHaveLength(3);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { id: search.toolCallId, status: 'cancelled', settledAt: expect.any(Date) as Date },
+        { id: publish.toolCallId, status: 'cancelled', settledAt: expect.any(Date) as Date },
+        {
+          id: inFlight.toolCallId,
+          status: 'outcome_unknown',
+          settledAt: expect.any(Date) as Date,
+        },
+      ]),
+    );
+    finishDelayedPublish?.({ publicationId: randomUUID() });
+    await expect(lateSettlement).resolves.toMatchObject({ status: 'outcome_unknown' });
+    await expect(service.execute(search.toolCallId)).rejects.toMatchObject({
+      code: 'invalid_tool_state',
+    });
+    await expect(
+      service.decideApproval({
+        toolCallId: publish.toolCallId,
+        decision: 'approved',
+        userId,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_tool_state' });
+    await expect(
+      service.propose({
+        runId,
+        toolId: 'workspace.search',
+        toolVersion: '1.0.0',
+        arguments: { query: 'too late' },
+        requestedFromUserId: userId,
+        allowedCapabilities: new Set(['workspace.read']),
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_tool_state' });
+
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    expect(
+      liveEvents
+        .filter(({ eventType }) => eventType === 'tool.cancelled')
+        .map(({ payload }) => payload),
+    ).toEqual(
+      expect.arrayContaining([
+        { toolCallId: search.toolCallId, reason: 'run_cancelled', phase: 'before_dispatch' },
+        { toolCallId: publish.toolCallId, reason: 'run_cancelled', phase: 'before_dispatch' },
+      ]),
+    );
+    expect(
+      liveEvents.find(
+        ({ eventType, payload }) =>
+          eventType === 'tool.outcome_unknown' && payload.toolCallId === inFlight.toolCallId,
+      )?.payload,
+    ).toMatchObject({
+      reason: 'run_cancelled_after_dispatch',
+      phase: 'after_dispatch',
+      failure: {
+        code: 'outcome_unknown',
+        messageKey: 'tool.failure.outcome_unknown',
+        retryable: false,
+        outcomeReason: 'run_cancelled_after_dispatch',
+      },
+    });
+    const projection = await new RunProjectionService(connection.db).get(runId);
+    expect(projection?.parts).toEqual(projectRunParts(liveEvents));
+    expect(projection?.pendingInteraction).toBeUndefined();
+    expect(
+      projection?.parts
+        .filter(({ status }) => status === 'tool.cancelled')
+        .map(({ outcome }) => outcome),
+    ).toEqual(['cancelled', 'cancelled']);
+    expect(
+      projection?.parts.find(
+        ({ status, payload }) =>
+          status === 'tool.outcome_unknown' && payload.toolCallId === inFlight.toolCallId,
+      ),
+    ).toMatchObject({
+      outcome: 'outcome_unknown',
+      payload: {
+        failure: { outcomeReason: 'run_cancelled_after_dispatch' },
+      },
+    });
+  });
+
+  it('serializes approval and cancellation without reviving the Tool Call', async () => {
+    const runId = await createRunningRun();
+    const proposal = await service.propose({
+      runId,
+      toolId: 'publication.successful_publish',
+      toolVersion: '1.0.0',
+      arguments: { editionId: randomUUID() },
+      requestedFromUserId: userId,
+      allowedCapabilities: new Set(['publication.write']),
+      idempotencyKey: `publish:${randomUUID()}`,
+    });
+    const runs = new DirectRunService({
+      database: connection.db,
+      publisher: {
+        publish(event) {
+          published.push(event);
+          return Promise.resolve();
+        },
+      },
+      runtimeFactory: {
+        create() {
+          throw new Error('Cancellation race test must not invoke the runtime');
+        },
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+
+    const [cancellation, approval] = await Promise.allSettled([
+      runs.requestCancellation(runId),
+      service.decideApproval({
+        toolCallId: proposal.toolCallId,
+        decision: 'approved',
+        userId,
+      }),
+    ]);
+    expect(cancellation).toMatchObject({
+      status: 'fulfilled',
+      value: { outcome: 'accepted', status: 'cancelling' },
+    });
+    if (approval.status === 'rejected') {
+      expect(approval.reason).toMatchObject({ code: 'invalid_tool_state' });
+    } else {
+      expect(approval.value).toMatchObject({ status: 'approved' });
+    }
+    await expect(
+      connection.db
+        .select({ status: toolCalls.status })
+        .from(toolCalls)
+        .where(eq(toolCalls.id, proposal.toolCallId)),
+    ).resolves.toEqual([{ status: 'cancelled' }]);
+    const projection = await new RunProjectionService(connection.db).get(runId);
+    expect(projection?.pendingInteraction).toBeUndefined();
+    expect(projection).toMatchObject({
+      status: 'cancelling',
+      parts: expect.arrayContaining([
+        expect.objectContaining({
+          status: 'tool.cancelled',
+          outcome: 'cancelled',
+        }),
+      ]) as unknown,
+    });
+  });
+
   it('narrows runtime tools to the intersection of pinned Skill permissions', async () => {
     const runId = await createRunningRun();
     const markdown =

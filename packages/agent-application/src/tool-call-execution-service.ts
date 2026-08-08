@@ -21,6 +21,7 @@ import {
 } from './tool-call-contracts.js';
 import { ToolEvidenceStore } from './tool-evidence-store.js';
 import { projectToolFailure } from './tool-call-failure.js';
+import { lockToolCallAggregate } from './tool-call-aggregate-lock.js';
 
 export class ToolCallExecutionService {
   private readonly now: () => Date;
@@ -47,9 +48,7 @@ export class ToolCallExecutionService {
     readonly status: 'approved' | 'denied';
   }> {
     const persisted = await this.options.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${toolCalls} where id = ${input.toolCallId} for update`,
-      );
+      await lockToolCallAggregate(transaction, input.toolCallId);
       const rows = await transaction
         .select({
           runId: toolCalls.runId,
@@ -171,9 +170,7 @@ export class ToolCallExecutionService {
     readonly output?: unknown;
   }> {
     const claimed = await this.options.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${toolCalls} where id = ${toolCallId} for update`,
-      );
+      await lockToolCallAggregate(transaction, toolCallId);
       const rows = await transaction
         .select()
         .from(toolCalls)
@@ -401,9 +398,7 @@ export class ToolCallExecutionService {
 
   private async expirePendingApproval(toolCallId: string): Promise<void> {
     const persisted = await this.options.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${toolCalls} where id = ${toolCallId} for update`,
-      );
+      await lockToolCallAggregate(transaction, toolCallId);
       const rows = await transaction
         .select({ runId: toolCalls.runId, status: toolCalls.status, approvalId: approvals.id })
         .from(toolCalls)

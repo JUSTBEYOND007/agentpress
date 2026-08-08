@@ -4,6 +4,7 @@ import { appendRunEvent, toolCalls, type AgentPressDatabase } from '@agentpress/
 import { eq, sql } from 'drizzle-orm';
 
 import type { RunEventPublisher } from './contracts.js';
+import { lockToolCallAggregate } from './tool-call-aggregate-lock.js';
 
 export type ToolTransportAuditInput = {
   readonly event: 'retry_attempted' | 'reconnected';
@@ -50,9 +51,7 @@ export class ToolTransportAuditService {
   }> {
     validateInput(input);
     const persisted = await this.options.database.transaction(async (transaction) => {
-      await transaction.execute(
-        sql`select id from ${toolCalls} where id = ${input.toolCallId} for update`,
-      );
+      await lockToolCallAggregate(transaction, input.toolCallId);
       const rows = await transaction
         .select({
           runId: toolCalls.runId,

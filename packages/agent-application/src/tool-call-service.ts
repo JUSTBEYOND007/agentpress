@@ -84,6 +84,9 @@ export class ToolCallService {
     const now = this.now();
     const status = requiresApproval ? ('awaiting_approval' as const) : ('proposed' as const);
     const persisted = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select id from ${agentRuns} where id = ${input.runId} for update`,
+      );
       const runRows = await transaction
         .select({ status: agentRuns.status })
         .from(agentRuns)
@@ -91,6 +94,14 @@ export class ToolCallService {
         .limit(1);
       if (!runRows[0]) {
         throw new ToolCallApplicationError('run_not_found', `Agent Run ${input.runId} not found`);
+      }
+      if (
+        !['planning', 'running', 'waiting_for_approval', 'recovering'].includes(runRows[0].status)
+      ) {
+        throw new ToolCallApplicationError(
+          'invalid_tool_state',
+          `Agent Run is ${runRows[0].status}`,
+        );
       }
       if (input.taskId) {
         await transaction.execute(
