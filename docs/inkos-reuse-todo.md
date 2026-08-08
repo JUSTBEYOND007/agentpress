@@ -721,12 +721,15 @@ MCP manager。
 - [x] MCP Tool 必须通过同一 PersistentToolBridge、ToolCallService、capability、approval 和 settlement；
       不为 Multi-Agent 或 Skill 创建旁路。
 - [x] UI 显示用户目标和结果摘要，不默认显示 JSON-RPC、Server transport 和原始 JSON；技术详情可审计。
-- [ ] 在 `docs/references/pi-ecosystem.md` 逐项固定官方 MCP SDK client/session/transport、Oh My Pi
+- [x] 在 `docs/references/pi-ecosystem.md` 逐项固定官方 MCP SDK client/session/transport、Oh My Pi
       reconnect、`pi-mcp-adapter` Schema/output guard 以及本地 Tool Registry、PersistentToolBridge、
       ToolCall ledger、Approval、Settlement 和 Run projection 的版本、许可证、源码/测试路径与 owner。
-- [ ] 明确 Adapter 边界：Server capability/tool-list revision 在 Run 冻结；MCP Schema -> 宿主 Tool Schema
+- [x] 明确 Adapter 边界：Server capability/tool-list revision 在 Run 冻结；MCP Schema -> 宿主 Tool Schema
       转换由 Adapter 拥有；stdio/HTTP transport 和 JSON-RPC error 不进入 Domain 公共契约；远端 Server、
       Skill 或网页内容永远不能授予 capability。
+      具体 owner、事实表、转换点和测试路径已记录在 `docs/references/pi-ecosystem.md` 的
+      “MCP owner and adapter map”；`tool_calls.transport_provenance` 固定 server/tool/adapter revision，
+      `ToolRegistry` 与 `PersistentToolBridge` 分别拥有宿主 Schema/capability 和持久化执行入口。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
