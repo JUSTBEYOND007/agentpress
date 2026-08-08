@@ -182,6 +182,24 @@ describe('run projection', () => {
     ]);
   });
 
+  it('keeps an unknown ToolCall outcome distinct from an ordinary failure', () => {
+    const parts = projectRunParts([
+      event(1, 'tool.failed', { toolCallId: 'tool-failed', failure: { code: 'provider_failed' } }),
+      event(2, 'tool.outcome_unknown', {
+        toolCallId: 'tool-unknown',
+        reason: 'connection_lost',
+      }),
+    ]);
+    expect(parts.map(({ status, outcome }) => ({ status, outcome }))).toEqual([
+      { status: 'tool.failed', outcome: 'failed' },
+      { status: 'tool.outcome_unknown', outcome: 'outcome_unknown' },
+    ]);
+    expect(parts[1]?.type).toBe('warning');
+    expect(parts[1]?.payload.lifecycleStages).toMatchObject([
+      { labelKey: 'execution.outcome_unknown', outcome: 'outcome_unknown' },
+    ]);
+  });
+
   it('keeps task attempts isolated when an old attempt settles late', () => {
     const parts = projectRunParts([
       event(1, 'task.started', { taskId: 'task-retry', attempt: 1 }),

@@ -98,6 +98,7 @@ function stageLabelKey(status: string, outcome?: ActivityOutcome): string {
   if (outcome === 'timed_out') return 'execution.timed_out';
   if (outcome === 'interrupted') return 'execution.interrupted';
   if (outcome === 'stale') return 'execution.stale';
+  if (outcome === 'outcome_unknown') return 'execution.outcome_unknown';
   if (status.endsWith('.executing')) return 'execution.executing';
   return 'execution.started';
 }
@@ -114,7 +115,7 @@ function lifecycleStages(
 }
 
 function isSettledLifecycleStatus(status: string): boolean {
-  return /\.(succeeded|failed|cancelled|denied|expired)$/u.test(status);
+  return /\.(succeeded|failed|cancelled|denied|expired|outcome_unknown)$/u.test(status);
 }
 
 function closesReasoning(eventType: string): boolean {
@@ -170,25 +171,28 @@ function toRunParts(
                 ? 'tool-approval'
                 : type === 'user.input_requested'
                   ? 'ask-user'
-                  : type.includes('artifact')
-                    ? 'artifact'
-                    : type.startsWith('run.recover')
-                      ? 'recovery'
-                      : type === 'run.completed_with_degradation' ||
-                          type === 'run.failed' ||
-                          type === 'run.cancelled'
-                        ? 'warning'
-                        : type.startsWith('tool.') || type.startsWith('task.')
-                          ? 'activity'
-                          : type.startsWith('run.completed')
-                            ? 'usage'
-                            : undefined;
+                  : type === 'tool.outcome_unknown'
+                    ? 'warning'
+                    : type.includes('artifact')
+                      ? 'artifact'
+                      : type.startsWith('run.recover')
+                        ? 'recovery'
+                        : type === 'run.completed_with_degradation' ||
+                            type === 'run.failed' ||
+                            type === 'run.cancelled'
+                          ? 'warning'
+                          : type.startsWith('tool.') || type.startsWith('task.')
+                            ? 'activity'
+                            : type.startsWith('run.completed')
+                              ? 'usage'
+                              : undefined;
   if (!partType) return [];
 
   const proposalId = proposalIdFromPayload(event.payload);
   const proposalStatus = proposalId ? proposalStatuses.get(proposalId) : undefined;
   const lifecycle = lifecycleKey(event);
-  const outcome = partType === 'activity' ? activityOutcome(type) : undefined;
+  const outcome =
+    partType === 'activity' || type === 'tool.outcome_unknown' ? activityOutcome(type) : undefined;
   return [
     {
       id: lifecycle ? `${event.runId}:${lifecycle}` : event.id,
@@ -217,6 +221,7 @@ function activityOutcome(status: string): ActivityOutcome | undefined {
   if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return 'cancelled';
   if (status.endsWith('.interrupted')) return 'interrupted';
   if (status.endsWith('.stale')) return 'stale';
+  if (status.endsWith('.outcome_unknown')) return 'outcome_unknown';
   if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
     return 'failed';
   return undefined;

@@ -40,6 +40,7 @@ export function recoveryAction(
   error: Readonly<Record<string, unknown>> = {},
 ): { readonly label: string } | undefined {
   if (part.type === 'recovery' || part.payload.pendingDraft === true) return undefined;
+  if (part.status === 'tool.outcome_unknown') return undefined;
   if (error.retryable === false) return undefined;
   if (code === 'stale_revision' || code === 'proposal_expired')
     return { label: '基于最新正文重试' };
@@ -61,6 +62,7 @@ export function noticeMessage(
   error: Readonly<Record<string, unknown>>,
 ): string {
   if (part.type === 'recovery') return '连接中断，正在恢复当前工作。';
+  if (part.status === 'tool.outcome_unknown') return '工具结果暂时无法确认，请先核对。';
   if (part.payload.pendingDraft === true)
     return '本次运行未完成，但正文修改草稿仍已保留，可以继续审阅。';
   if (part.status === 'run.cancelled') return '本次运行已停止。';

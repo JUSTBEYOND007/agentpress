@@ -34,6 +34,13 @@ describe('noticeMessage', () => {
       '重新生成完整结果',
     );
     expect(recoveryAction(part('run.recovering', 'recovery'), '')).toBeUndefined();
+    expect(recoveryAction(part('tool.outcome_unknown'), '')).toBeUndefined();
+  });
+
+  it('keeps unknown tool outcomes as a warning requiring verification', () => {
+    expect(noticeMessage(part('tool.outcome_unknown'), '', {})).toBe(
+      '工具结果暂时无法确认，请先核对。',
+    );
   });
 
   it('does not expose internal runtime payloads', () => {

@@ -33,7 +33,8 @@ export type ActivityOutcome =
   | 'cancelled'
   | 'timed_out'
   | 'interrupted'
-  | 'stale';
+  | 'stale'
+  | 'outcome_unknown';
 
 export type RunProjection = {
   readonly runId: string;
@@ -85,7 +86,8 @@ export type ConsumerExecutionStatus =
   | 'cancelled'
   | 'timed_out'
   | 'interrupted'
-  | 'stale';
+  | 'stale'
+  | 'outcome_unknown';
 
 export type ConsumerExecutionStage = {
   readonly id: string;

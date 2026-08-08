@@ -408,6 +408,7 @@ describeWithDatabase('Tool Call application flow', () => {
   });
 
   it('settles an interrupted read-only provider call as outcome unknown', async () => {
+    const publishedFrom = published.length;
     const runId = await createRunningRun();
     const proposal = await service.propose({
       runId,
@@ -426,6 +427,28 @@ describeWithDatabase('Tool Call application flow', () => {
       .from(toolCalls)
       .where(eq(toolCalls.id, proposal.toolCallId));
     expect(rows).toEqual([{ status: 'outcome_unknown' }]);
+    const liveEvents = published
+      .slice(publishedFrom)
+      .flatMap((event) => (event.durable && event.event.runId === runId ? [event.event] : []));
+    const liveParts = projectRunParts(liveEvents).filter(
+      ({ status }) => status === 'tool.outcome_unknown',
+    );
+    const replay = await new RunProjectionService(connection.db).get(runId);
+    const replayParts = replay?.parts.filter(({ status }) => status === 'tool.outcome_unknown');
+    expect(replayParts).toEqual(liveParts);
+    expect(replayParts).toHaveLength(1);
+    expect(replayParts?.[0]).toMatchObject({
+      type: 'warning',
+      status: 'tool.outcome_unknown',
+      outcome: 'outcome_unknown',
+      payload: {
+        failure: {
+          code: 'outcome_unknown',
+          messageKey: 'tool.failure.outcome_unknown',
+          retryable: false,
+        },
+      },
+    });
   });
 
   it('keeps provider diagnostics protected while live and replay expose one public failure', async () => {

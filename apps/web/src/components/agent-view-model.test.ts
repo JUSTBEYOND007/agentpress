@@ -22,6 +22,21 @@ describe('agent view model', () => {
     ).toBe('正在使用所需工具');
   });
 
+  it('labels unknown ToolCall outcomes for human reconciliation', () => {
+    expect(statusLabel('tool.outcome_unknown')).toBe('结果待核对');
+    expect(
+      activityLabel({
+        id: 'tool-unknown',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'activity',
+        status: 'tool.outcome_unknown',
+        outcome: 'outcome_unknown',
+        payload: {},
+      }),
+    ).toBe('结果待核对');
+  });
+
   it('only exposes navigable web links', () => {
     expect(safeExternalUrl('https://example.com/source')).toBe('https://example.com/source');
     for (const hostile of [

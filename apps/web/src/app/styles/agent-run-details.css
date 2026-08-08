@@ -104,6 +104,10 @@
   color: #4e986c;
 }
 
+.execution-status.is-outcome_unknown {
+  color: #9a6b27;
+}
+
 .run-process-pipeline ol,
 .run-process-utility ul {
   display: grid;
@@ -147,6 +151,11 @@
 .stage-dot.is-error {
   border-color: #b34b43;
   background: #b34b43;
+}
+
+.stage-dot.is-outcome_unknown {
+  border-color: #9a6b27;
+  background: #9a6b27;
 }
 
 .execution-result {

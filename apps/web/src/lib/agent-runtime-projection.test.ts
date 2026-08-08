@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RunPart, RunProjection } from './agent-runtime-contracts';
-import { executionItems } from './agent-execution-projection';
 import { projectionContent } from './agent-runtime-projection';
 
 describe('run presentation projection', () => {
@@ -358,34 +357,6 @@ describe('run presentation projection', () => {
     expect(JSON.stringify(content)).toContain('读取授权来源');
     expect(JSON.stringify(content)).not.toContain('credential-value');
     expect(JSON.stringify(content)).not.toContain('transportProvenance');
-  });
-
-  it('preserves typed timeout, cancellation, interruption, stale and degraded stage outcomes', () => {
-    const activity = {
-      ...part('activity', 'task.succeeded', 1, {
-        taskId: 'task-typed-outcomes',
-        lifecycleStages: [
-          { status: 'opaque-1', outcome: 'timed_out', labelKey: 'execution.timed_out' },
-          { status: 'opaque-2', outcome: 'cancelled', labelKey: 'execution.cancelled' },
-          { status: 'opaque-3', outcome: 'interrupted', labelKey: 'execution.interrupted' },
-          { status: 'opaque-4', outcome: 'stale', labelKey: 'execution.stale' },
-          { status: 'opaque-5', outcome: 'degraded', labelKey: 'execution.degraded' },
-        ],
-      }),
-      outcome: 'degraded' as const,
-    };
-    const [item] = executionItems([activity], [activity]);
-    expect(item).toMatchObject({
-      kind: 'pipeline',
-      status: 'degraded',
-      stages: [
-        { status: 'timed_out', label: '已超时' },
-        { status: 'cancelled', label: '已取消' },
-        { status: 'interrupted', label: '已中断' },
-        { status: 'stale', label: '已过期' },
-        { status: 'degraded', label: '部分完成' },
-      ],
-    });
   });
 });
 

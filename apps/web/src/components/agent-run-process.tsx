@@ -262,12 +262,15 @@ function statusText(status: ConsumerExecutionItem['status']): string {
     timed_out: '已超时',
     interrupted: '已中断',
     stale: '已过期',
+    outcome_unknown: '结果待核对',
   };
   return labels[status];
 }
 
 function isFailureStatus(status: ConsumerExecutionItem['status']): boolean {
-  return ['failed', 'cancelled', 'timed_out', 'interrupted', 'stale'].includes(status);
+  return ['failed', 'cancelled', 'timed_out', 'interrupted', 'stale', 'outcome_unknown'].includes(
+    status,
+  );
 }
 
 function resultSummary(value: unknown): string {

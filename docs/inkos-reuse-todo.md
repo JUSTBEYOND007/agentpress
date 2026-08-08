@@ -62,13 +62,13 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       ToolCall settlement publisher 与 `RunProjectionService` PostgreSQL replay 证明 activity RunPart 深相等，
       并另有 `task.timed_out` PostgreSQL replay fixture；Plan/Attempt/Artifact/Evidence/Proposal/Settlement
       的完整单链 fixture 仍待补齐，因此总项不勾选。
-- [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale`；
+- [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown`；
       projector 不得把 degraded 映射为 completed 或普通 error。当前 Web consumer status 已保留
-      `degraded|failed|cancelled|timed_out|interrupted|stale` 并有 92 个投影测试，但还需把该 outcome
-      作为 host-owned RunPart fact 接入 PostgreSQL/live-SSE 同构链后才能勾选。当前
-      `packages/agent-application/src/run-projection.ts` 已为 activity RunPart 写入不可变 `outcome`，并将
-      outcome 复制到 lifecycle stage；96 个 Agent Application projection tests 与 92 个 Web tests 通过，
-      ToolCall live/replay 深相等集成已通过，但其余完整事件链仍待补齐。
+      `degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown` 并有 102 个 Web 测试，但还需把完整
+      outcome 矩阵作为 host-owned RunPart fact 接入所有 PostgreSQL/live-SSE 场景后才能勾选。当前
+      `packages/agent-application/src/run-projection.ts` 为普通 activity 写入不可变 `outcome`，并将
+      `tool.outcome_unknown` 投影为独立 warning part；outcome 同时复制到 lifecycle stage。103 个 Agent
+      Application tests 与 102 个 Web tests 通过，ToolCall live/replay 深相等集成已通过，但其余完整事件链仍待补齐。
 - [x] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
       本地化只发生在 projector/consumer；React 不得匹配日志或阶段文案来推断状态。
       `run-projection.ts` 现在从 durable event 确定性生成 stage identity、label key、时间、outcome 和可选
@@ -102,8 +102,8 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       当前 Web consumer projector 已把 MCP provenance 转为有界 `ToolActivityAudit`，在过程详情内按需
       展示 server/tool/adapter revision、Specialist task attempt、参数名和 Artifact 引用；普通标签仍只显示“搜索资料”等
       业务动作。原始参数值和 transport 对象会在进入 assistant-ui transcript 前从成功、失败和待审批
-      ToolCall 中删除，刷新后再次净化不会丢失 Artifact 引用。schema-aware 参数值摘要、retry 和统一
-      redacted failure 尚未完成，因此总项保持未勾选。
+      ToolCall 中删除，刷新后再次净化不会丢失 Artifact 引用。schema-aware 参数值摘要和 retry 尚未
+      完成，因此总项保持未勾选；redacted failure 已单独完成。
       其中 redacted failure 已完成：ToolCall settlement 依据 typed `ToolRuntimeError`、
       `ToolExecutionError` 和 side-effect 风险生成 `code/messageKey/retryable`；ledger 只在 protected
       failure 中保留截断后的诊断，RunEvent/live/replay 只携带公共结构，Web 对旧的非结构化 failure
@@ -122,10 +122,15 @@ lockfile 中的 `@modelcontextprotocol/sdk` 只是 Pi/Google GenAI 的传递依�
       `tool.proposed`/`tool.approval_requested` durable event 会保存同一 PostgreSQL JSONB 快照；执行与
       idempotency replay 都校验当前定义和持久化来源完全一致，revision drift 会在 provider 调用前以
       `approval_mismatch` fail closed。Tool Registry、三个内置 MCP 工具和 21 个 ToolCall PostgreSQL
-      集成场景已通过；attempt、authoritative timestamps、retry/reconnect、output reference 和完整
-      redacted failure 仍未补齐，因此总项保持未勾选。
+      集成场景已通过；attempt、authoritative timestamps、retry/reconnect 和完整 output reference 仍未
+      补齐，redacted failure 已完成，因此总项保持未勾选。
 - [ ] 为 disconnect-before/after-dispatch、stale client result 和 late result 投影独立 `outcome_unknown`；
       不压成普通 error/completed，也不自动重放可能有副作用的调用。
+      当前 `tool.outcome_unknown` 已由 Agent Application projector 投影为独立 warning part，并写入
+      `outcome_unknown` 和 `execution.outcome_unknown` stage label；Web Notice 保持“结果待核对”，不会映射为
+      failed 或 completed，也不提供自动重试；warning 复用 activity sanitizer，原始 arguments/transport 不进入
+      transcript。真实 PostgreSQL interrupted-call live/replay fixture 已通过。disconnect-before-dispatch、
+      stale late result、duplicate end 和 Playwright 场景仍待补齐。
 - [ ] approval/denied/cancel/degraded/duplicate-result/recovered 各有 typed event；权限只来自宿主 capability、
       Approval 和 Settlement 事实，远端 Server、Skill、网页内容和工具名称不能授予权限。
 - [ ] 复用现有 RunPart projector 增加 MCP 审计投影：消费者只显示业务 label；server/tool/revision、attempt、

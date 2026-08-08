@@ -151,6 +151,7 @@ export function statusLabel(status: string): string {
     'tool.executing': '执行中',
     'tool.succeeded': '已完成',
     'tool.failed': '失败',
+    'tool.outcome_unknown': '结果待核对',
   };
   return labels[status] ?? '正在处理';
 }
@@ -160,6 +161,7 @@ export function activityLabel(part: RunPart): string {
     if (part.status === 'tool.executing') return '正在使用所需工具';
     if (part.status === 'tool.succeeded') return '所需信息已准备好';
     if (part.status === 'tool.failed') return '这一步未能完成';
+    if (part.status === 'tool.outcome_unknown') return '结果待核对';
     return '正在准备下一步';
   }
   if (part.status.startsWith('task.')) {

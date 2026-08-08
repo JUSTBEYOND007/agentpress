@@ -110,6 +110,12 @@ export function sanitizeProcessPart(part: RunPart): RunPart {
 
 export function sanitizeVisiblePart(part: RunPart): RunPart {
   if (part.type === 'activity') return sanitizeProcessPart(part);
+  if (part.type === 'warning' && part.status === 'tool.outcome_unknown') {
+    return {
+      ...sanitizeProcessPart({ ...part, type: 'activity' }),
+      type: 'warning',
+    };
+  }
   if (part.type !== 'tool-approval') return part;
   return {
     ...part,
@@ -272,6 +278,7 @@ function executionStatus(status: string, outcome?: ActivityOutcome): ConsumerExe
   if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return 'cancelled';
   if (status.endsWith('.interrupted')) return 'interrupted';
   if (status.endsWith('.stale')) return 'stale';
+  if (status.endsWith('.outcome_unknown')) return 'outcome_unknown';
   if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
     return 'failed';
   if (status.endsWith('.degraded') || status === 'completed_with_degradation') return 'degraded';
@@ -287,6 +294,7 @@ function aggregateStatus(statuses: readonly ConsumerExecutionStatus[]): Consumer
     'timed_out',
     'interrupted',
     'stale',
+    'outcome_unknown',
   ];
   const failure = terminalFailure.find((status) => statuses.includes(status));
   if (failure) return failure;
@@ -342,6 +350,7 @@ const localizedStageLabels: Readonly<Record<string, string>> = {
   'execution.timed_out': '已超时',
   'execution.interrupted': '已中断',
   'execution.stale': '已过期',
+  'execution.outcome_unknown': '结果待核对',
 };
 
 function localizedStageLabel(labelKey: string | undefined): string | undefined {
@@ -355,7 +364,8 @@ function activityOutcome(value: unknown): ActivityOutcome | undefined {
     value === 'cancelled' ||
     value === 'timed_out' ||
     value === 'interrupted' ||
-    value === 'stale'
+    value === 'stale' ||
+    value === 'outcome_unknown'
     ? value
     : undefined;
 }
@@ -369,6 +379,7 @@ function stageLabel(label: string, status: string): string {
   if (status.endsWith('.cancelled') || status.endsWith('.canceled')) return '已取消';
   if (status.endsWith('.interrupted')) return '已中断';
   if (status.endsWith('.stale')) return '已过期';
+  if (status.endsWith('.outcome_unknown')) return '结果待核对';
   if (status.endsWith('.degraded')) return '部分完成';
   if (status.endsWith('.failed') || status.endsWith('.denied') || status.endsWith('.expired'))
     return '未完成';
