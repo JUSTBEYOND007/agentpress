@@ -131,6 +131,13 @@ truncation state. Run context still freezes article revisions, Evidence, attachm
 memory retrieval version and compaction before execution; current request remains a separate typed
 runtime turn. Untrusted content is escaped and never becomes a capability or a new user message.
 
+Consumer activity outcome is a host-owned RunPart contract, not a label inferred by React. The
+closed set is `succeeded|degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown`.
+`activity-outcome-replay.integration.test.ts` persists all eight terminal facts in PostgreSQL and
+proves byte-equivalent live/replay projection with exact Task attempt or ToolCall correlation. A
+late success after a timed-out attempt remains an audit fact but cannot replace the immutable
+terminal consumer outcome.
+
 Skill behavior reuses the existing AgentPress `validateSkillConformance`, deterministic discovery
 precedence, `loadStaticSkillResources`, `pinSkills`, `Run Skill Binding`, and `PiSkillPreselector`
 paths. These were compared with InkOS registry/loader/`use_skill` source and tests at the fixed

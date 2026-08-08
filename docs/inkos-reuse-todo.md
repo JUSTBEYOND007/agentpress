@@ -65,13 +65,14 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       `RunProjectionService` PostgreSQL replay 的 `projectRunParts` 深相等。夹具显式区分 Agent Run ID 与
       Pi session ID，不把 runtime session identity 误用为领域关联键。五 Specialist DAG 仍另外断言并行
       Task terminal event 的 live/replay 等价；worker restart、late settlement 等故障链由后续独立项验收。
-- [ ] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown`；
-      projector 不得把 degraded 映射为 completed 或普通 error。当前 Web consumer status 已保留
-      `degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown` 并有 102 个 Web 测试，但还需把完整
-      outcome 矩阵作为 host-owned RunPart fact 接入所有 PostgreSQL/live-SSE 场景后才能勾选。当前
-      `packages/agent-application/src/run-projection.ts` 为普通 activity 写入不可变 `outcome`，并将
-      `tool.outcome_unknown` 投影为独立 warning part；outcome 同时复制到 lifecycle stage。103 个 Agent
-      Application tests 与 102 个 Web tests 通过，ToolCall live/replay 深相等集成已通过，但其余完整事件链仍待补齐。
+- [x] 定义 typed activity outcome：`succeeded|degraded|failed|cancelled|timed_out|interrupted|stale|outcome_unknown`；
+      projector 不得把 degraded 映射为 completed 或普通 error。Web consumer 保留完整 outcome，不把
+      degraded 降成 completed/error；`run-projection.ts` 将 outcome 固定在 host-owned RunPart 和 lifecycle
+      stage，`tool.outcome_unknown` 仍是独立 warning。新增
+      `activity-outcome-replay.integration.test.ts` 在真实 PostgreSQL 中持久化八种 terminal fact，验证 live
+      durable events 与 replay 的 RunPart、outcome、`taskId+attempt`/ToolCall correlation 深相等，并证明
+      `timed_out` 后同 attempt 的晚到 success 不会覆盖不可变终态。progress/log 全链 correlation 与浏览器
+      矩阵仍由后续独立项验收。
 - [x] 定义 host-owned typed stage fact（`stageId/labelKey/status/startedAt/completedAt/progress`），
       本地化只发生在 projector/consumer；React 不得匹配日志或阶段文案来推断状态。
       `run-projection.ts` 现在从 durable event 确定性生成 stage identity、label key、时间、outcome 和可选
