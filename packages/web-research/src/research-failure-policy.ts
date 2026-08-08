@@ -29,6 +29,7 @@ export const researchFailureKinds = [
   'pdf_page_limit',
   'synthesis_timeout',
   'synthesis_schema_invalid',
+  'synthesis_failed',
   'budget_exhausted',
   'persistence_failed',
   'conflicting_sources',
@@ -52,6 +53,15 @@ export type ResearchFailureAssessment = {
   readonly ignoredInstructions: readonly string[];
 };
 
+const terminalFailureKinds = new Set<ResearchFailureKind>([
+  'synthesis_timeout',
+  'synthesis_schema_invalid',
+  'synthesis_failed',
+  'budget_exhausted',
+  'persistence_failed',
+  'all_sources_failed',
+]);
+
 export function assessResearchFailures(input: {
   readonly sources: readonly { readonly url?: string; readonly sourceUri?: string }[];
   readonly failures?: readonly ResearchFailure[];
@@ -67,9 +77,9 @@ export function assessResearchFailures(input: {
     .filter(({ kind }) => kind === 'malicious_page_instructions')
     .map(formatFailure);
   const sourceCount = input.sources.length;
-  const allFailed = sourceCount === 0 && failures.some(({ kind }) => kind === 'all_sources_failed');
+  const terminalFailure = failures.some(({ kind }) => terminalFailureKinds.has(kind));
   const confidence =
-    sourceCount === 0
+    sourceCount === 0 || terminalFailure
       ? 0
       : Math.max(
           0,
@@ -82,7 +92,7 @@ export function assessResearchFailures(input: {
           ),
         );
   return {
-    status: allFailed ? 'failed' : failures.length > 0 ? 'degraded' : 'ok',
+    status: terminalFailure ? 'failed' : failures.length > 0 ? 'degraded' : 'ok',
     sourceCount,
     confidence,
     partialFailures,

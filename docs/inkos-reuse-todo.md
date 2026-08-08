@@ -845,12 +845,16 @@ TODO：
       cancellation；`fetchResearchSource` 通过 `ResearchFetchError` 区分 timeout、DNS/URL、私网重定向、
       redirect loop、空正文、PDF 签名/页数、内容类型和大小限制，MCP `value.results` 也能进入 Evidence
       projector；Specialist Artifact/Evidence 持久化异常已原子回滚并结算为 claim-free
-      `persistence_failed`，synthesis、Token/费用故障注入仍待补齐。
-- [ ] partial query/fetch failure 必须保留已成功来源；全部 search/fetch/synthesis 失败只允许产出无 Claim、
-      `confidence=0` 的 typed degraded Artifact；handler 的全部 search failure 已输出空 `results` 与 typed
-      failure，partial/all fetch failure 已只保留成功 `results` 并追加 `all_sources_failed`；ResearchBrief
-      synthesis failure 仍需形成 degraded Artifact 后才能勾选；持久化失败当前保留 typed Task failure，
-      不会伪造成功 Claim 或留下半个 Artifact。
+      `persistence_failed`。synthesis timeout/Schema/protocol failure 现在由独立
+      `ResearchFailureResultFactory` 从当前 Run/Task 的 succeeded ToolCall + Evidence 构造失败 Artifact；
+      Token 预算映射为 `budget_exhausted`，费用和 provider/fetch 组合故障注入仍待补齐。
+- [x] partial query/fetch failure 必须保留已成功来源；全部 search/fetch/synthesis 失败只允许产出无 Claim、
+      `confidence=0` 的 typed degraded Artifact。handler 的全部 search failure 输出空 `results` 与 typed
+      failure，partial/all fetch failure 只保留成功 `results` 并追加 `all_sources_failed`；synthesis
+      失败时 `ResearchFailureResultFactory` 只读取当前 Task 的闭合 Evidence，生成 canonical ResearchBrief
+      和精确 Artifact-Evidence 边，Task/Run 仍保持 failed，不伪造 `task.succeeded`。PostgreSQL 集成测试
+      证明 retained Evidence、`claims=[]`、`confidence=0` 与失败事件同存；用户取消的现有回归继续不生成
+      失败 Artifact。持久化失败仍原子回滚为 typed `persistence_failed`，不留下半个 Artifact。
 - [ ] 恶意网页指令不仅不能生成 Claim，还必须证明不会产生 ToolCall、Skill Binding 或 Article Proposal。
 - [ ] 真实目标模型验收来源引用准确率、未知项保留、冲突表达和“无可靠来源时拒绝硬结论”。
 - [ ] 在线验收预先固定 citation precision、无证据 Claim 数、unknown retention、conflict recall 和拒绝

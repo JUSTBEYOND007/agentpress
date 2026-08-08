@@ -117,4 +117,31 @@ describe('provider-neutral research failure policy', () => {
     expect(report.partialFailures).toHaveLength(kinds.length);
     expect(report.unknowns).toHaveLength(kinds.length);
   });
+
+  it('sets confidence to zero when synthesis fails after sources were retained', () => {
+    const report = buildDegradedResearchBrief({
+      purpose: 'fact-check',
+      depth: 'deep',
+      summary: 'Sources were retained but synthesis failed',
+      providerRevision: 'test-v1',
+      sources: [
+        {
+          evidenceId: '11111111-1111-4111-8111-111111111111',
+          title: 'Retained source',
+          sourceUri: 'https://example.test/source',
+        },
+      ],
+      failures: [failure('synthesis_schema_invalid', 'The model result failed validation')],
+    });
+
+    expect(report.sources).toHaveLength(1);
+    expect(report.claims).toEqual([]);
+    expect(report.confidence).toBe(0);
+    expect(
+      assessResearchFailures({
+        sources: report.sources,
+        failures: [failure('synthesis_schema_invalid')],
+      }).status,
+    ).toBe('failed');
+  });
 });

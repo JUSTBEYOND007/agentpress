@@ -541,6 +541,16 @@ exception past the selection fact boundary. The host catalog remains authoritati
 or absent Skills cannot become permissions through model output. The opposite-path contract is covered by
 `packages/agent-application/test/skill-preselection.test.ts`.
 
+Research synthesis failure now preserves useful facts without manufacturing claims. The provider-neutral
+failure policy treats synthesis timeout, invalid schema, provider failure, budget exhaustion, and persistence
+failure as terminal with zero confidence even when sources were retained. The application-owned
+`ResearchFailureResultFactory` reads only succeeded ToolCalls and Evidence for the current Run/Task, requires
+one evidence-provider revision, and emits a canonical claim-free ResearchBrief plus exact Artifact-Evidence
+edges. `PlannedTaskExecutor` delegates this work and remains below 500 lines; the Task and Run retain their
+failed terminal semantics. `research-failure-result.integration.test.ts` verifies the PostgreSQL TaskResult,
+Artifact Version, Evidence closure, and `task.failed` projection, while the existing cancellation regression
+proves user cancellation is not converted into this fallback.
+
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
 ### Implemented InkOS behavior baseline

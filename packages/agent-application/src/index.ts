@@ -33,6 +33,7 @@ export * from './run-projection-service.js';
 export * from './run-recovery-service.js';
 export * from './recovery-policy.js';
 export * from './recovery-fact-validation-service.js';
+export * from './research-failure-result.js';
 export * from './run-settlement-service.js';
 export * from './runtime-message-codec.js';
 export * from './execution-fact-cache.js';

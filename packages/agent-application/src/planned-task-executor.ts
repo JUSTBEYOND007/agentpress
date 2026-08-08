@@ -31,6 +31,7 @@ import {
 import { budgetExhaustedTask, findAssistant, staleTaskSettlement } from './planned-run-results.js';
 import { settledTaskFromFact } from './planned-task-result-projection.js';
 import { toDurableEvent } from './run-projection-service.js';
+import { ResearchFailureResultFactory } from './research-failure-result.js';
 import { parseSpecialistTaskRequest, type SpecialistRole } from './specialist-task-contract.js';
 import { SpecialistResultStore } from './specialist-result-store.js';
 import {
@@ -38,6 +39,7 @@ import {
   validateSpecialistSubmission,
   type ValidatedSpecialistSubmission,
 } from './specialist-submission-validator.js';
+import { assertTaskTimeout, taskExecutionSignal } from './task-execution-boundary.js';
 
 const INLINE_TASK_TIMEOUT_MS = 120_000;
 const DETACHED_TASK_WAIT_TIMEOUT_MS = 10 * 60_000;
@@ -60,8 +62,10 @@ type PlannedTaskExecutorOptions = {
 
 export class PlannedTaskExecutor {
   private readonly detachedTaskWaitTimeoutMs: number;
+  private readonly researchFailures: ResearchFailureResultFactory;
 
   public constructor(private readonly options: PlannedTaskExecutorOptions) {
+    this.researchFailures = new ResearchFailureResultFactory(options.database);
     assertTaskTimeout(options.inlineTaskTimeoutMs ?? INLINE_TASK_TIMEOUT_MS);
     this.detachedTaskWaitTimeoutMs =
       options.detachedTaskWaitTimeoutMs ?? DETACHED_TASK_WAIT_TIMEOUT_MS;
@@ -371,17 +375,24 @@ export class PlannedTaskExecutor {
     const assistant = findAssistant(result);
     if (!completion) {
       const timedOut = didTimeout();
-      const failed: SettledTask = {
-        ...task,
-        status: timedOut ? 'failed' : result.status === 'cancelled' ? 'cancelled' : 'failed',
-        artifacts: [],
-        warnings: [],
-        failure: timedOut
-          ? 'task_timeout'
-          : (submissionFailure ??
-            (result.status === 'failed' ? result.error.code : 'protocol_error')),
-        ...(assistant ? { usage: assistant.usage } : {}),
-      };
+      const failure = timedOut
+        ? 'task_timeout'
+        : (submissionFailure ??
+          (result.status === 'failed' ? result.error.code : 'protocol_error'));
+      const failed: SettledTask =
+        task.owner === 'researcher' && (timedOut || result.status !== 'cancelled')
+          ? {
+              ...(await this.researchFailures.create(runId, task, failure)),
+              ...(assistant ? { usage: assistant.usage } : {}),
+            }
+          : {
+              ...task,
+              status: timedOut ? 'failed' : result.status === 'cancelled' ? 'cancelled' : 'failed',
+              artifacts: [],
+              warnings: [],
+              failure,
+              ...(assistant ? { usage: assistant.usage } : {}),
+            };
       return (await this.options.results.persistTaskResult(runId, failed, attempt))
         ? failed
         : staleTaskSettlement(task);
@@ -475,19 +486,5 @@ export class PlannedTaskExecutor {
     );
     if (!toolResult) return undefined;
     return [message, toolResult];
-  }
-}
-
-function taskExecutionSignal(parent: AbortSignal | undefined, timeoutMs: number) {
-  const timeout = AbortSignal.timeout(timeoutMs);
-  return {
-    signal: parent ? AbortSignal.any([parent, timeout]) : timeout,
-    didTimeout: () => timeout.aborted && parent?.aborted !== true,
-  };
-}
-
-function assertTaskTimeout(timeoutMs: number): void {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10 * 60_000) {
-    throw new RangeError('Specialist Task timeout must be between 1 ms and 10 minutes');
   }
 }
