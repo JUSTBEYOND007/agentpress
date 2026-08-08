@@ -1,6 +1,7 @@
 import {
   agentRuns,
   agentTasks,
+  agentTaskLeases,
   appendCheckpoint,
   appendRunEvent,
   cancelAgentRunTasks,
@@ -206,6 +207,21 @@ export class RunRecoveryService {
         .set({ status: 'interrupted', updatedAt: now, version: sql`${agentTasks.version} + 1` })
         .where(and(eq(agentTasks.runId, runId), eq(agentTasks.status, 'running')))
         .returning({ taskId: agentTasks.id, attempt: agentTasks.attempt });
+      if (interruptedTasks.length > 0) {
+        await transaction
+          .update(agentTaskLeases)
+          .set({ releasedAt: now })
+          .where(
+            and(
+              eq(agentTaskLeases.runId, runId),
+              inArray(
+                agentTaskLeases.taskId,
+                interruptedTasks.map(({ taskId }) => taskId),
+              ),
+              sql`${agentTaskLeases.releasedAt} is null`,
+            ),
+          );
+      }
       for (const task of interruptedTasks) {
         const taskEvent = await appendRunEvent(transaction, {
           id: this.options.createId(),

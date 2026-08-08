@@ -10,6 +10,7 @@ import {
   agentSessionCompactions,
   agentTranscriptEntries,
   agentTasks,
+  agentTaskLeases,
   agentRuns,
   appendConversationCompaction,
   appendRunEvent,
@@ -2700,6 +2701,17 @@ describeWithDatabase('Direct Run application flow', () => {
       status: 'running',
       attempt: 1,
     });
+    const leaseId = randomUUID();
+    await connection.db.insert(agentTaskLeases).values({
+      id: leaseId,
+      taskId: interruptedTaskId,
+      runId: run.runId,
+      attempt: 1,
+      leaseToken: randomUUID(),
+      workerId: 'crashed-worker',
+      acquiredAt: new Date(Date.now() - 1_000),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
     const choiceId = randomUUID();
     const staleClaimToken = randomUUID();
     await connection.db.insert(runToolChoices).values({
@@ -2745,6 +2757,11 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(
       eventsAfterFirstRecovery.filter(({ eventType }) => eventType === 'task.interrupted'),
     ).toHaveLength(1);
+    const releasedLeases = await connection.db
+      .select({ releasedAt: agentTaskLeases.releasedAt })
+      .from(agentTaskLeases)
+      .where(eq(agentTaskLeases.id, leaseId));
+    expect(releasedLeases[0]?.releasedAt).toBeInstanceOf(Date);
     const recoveryProjection = await recoveryService.getProjection(run.runId);
     expect(
       recoveryProjection?.parts.find(({ status }) => status === 'task.interrupted'),
