@@ -70,6 +70,12 @@ type ToolTransportProvenance = {
   readonly toolRevision: string;
   readonly adapterRevision: string;
 };
+type ToolArgumentSummary = {
+  readonly schemaVersion: 1;
+  readonly fieldCount: number;
+  readonly additionalFieldCount: number;
+  readonly fields: readonly Readonly<Record<string, unknown>>[];
+};
 
 const createdAt = timestamp('created_at', { withTimezone: true, precision: 3 })
   .notNull()
@@ -1270,6 +1276,10 @@ export const toolCalls = pgTable(
     transportProvenance: jsonb('transport_provenance').$type<ToolTransportProvenance>(),
     evidenceProviderRevision: varchar('evidence_provider_revision', { length: 160 }),
     arguments: jsonb('arguments').$type<Readonly<Record<string, unknown>>>().notNull(),
+    argumentSummary: jsonb('argument_summary')
+      .$type<ToolArgumentSummary>()
+      .notNull()
+      .default({ schemaVersion: 1, fieldCount: 0, additionalFieldCount: 0, fields: [] }),
     argumentsHash: varchar('arguments_hash', { length: 80 }).notNull(),
     risk: toolRiskEnum('risk').$type<ToolRisk>().notNull(),
     sideEffect: text('side_effect').notNull(),

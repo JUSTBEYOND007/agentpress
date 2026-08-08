@@ -104,8 +104,11 @@ InkOS 的 `packages/core/src/agent/agent-tools.ts` 是固定
       展示 server/tool/adapter revision、Specialist task attempt、参数名和 Artifact 引用；普通标签仍只显示“搜索资料”等
       业务动作。原始参数值和 transport 对象会在进入 assistant-ui transcript 前从成功、失败和待审批
       ToolCall 中删除，刷新后再次净化不会丢失 Artifact 引用；host projector 现在从 durable lifecycle
-      fact 提取并限制 ToolCall `durationMs`。schema-aware 参数值摘要和 retry 尚未完成，因此总项保持未
-      勾选；redacted failure 已单独完成。
+      fact 提取并限制 ToolCall `durationMs`。schema-aware 参数摘要已完成：`tool-runtime` 从受控 TypeBox
+      input Schema 生成字段名、required、Schema/实际类型及字符串/数组/对象规模，只把该版本化摘要写入
+      durable RunEvent；受保护的 ToolCall ledger 继续持有执行所需原始参数。PostgreSQL migration 为历史
+      ToolCall 回填不伪造字段类型的空 v1 摘要，Web 只消费有界结构并在按需详情展示，参数值不会进入
+      transcript。retry 审计仍未完成，因此总项保持未勾选；redacted failure 已单独完成。
       其中 redacted failure 已完成：ToolCall settlement 依据 typed `ToolRuntimeError`、
       `ToolExecutionError` 和 side-effect 风险生成 `code/messageKey/retryable`；ledger 只在 protected
       failure 中保留截断后的诊断，RunEvent/live/replay 只携带公共结构，Web 对旧的非结构化 failure

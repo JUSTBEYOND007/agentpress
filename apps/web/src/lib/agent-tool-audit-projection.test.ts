@@ -62,6 +62,53 @@ describe('MCP tool audit projection', () => {
         ?.durationMs,
     ).toBeUndefined();
   });
+
+  it('keeps bounded schema-aware shape metadata without consuming raw argument values', () => {
+    const base = {
+      kind: 'mcp' as const,
+      serverId: 'web_research',
+      serverRevision: '1.0.0',
+      toolName: 'search',
+      toolRevision: '1.0.0',
+      adapterRevision: 'agentpress-mcp-adapter-v1',
+    };
+    const projected = toolActivityAudit(
+      activity({
+        transportProvenance: base,
+        arguments: { query: 'must-not-survive' },
+        argumentSummary: {
+          schemaVersion: 1,
+          fieldCount: 1,
+          additionalFieldCount: 0,
+          fields: [
+            {
+              name: 'query',
+              required: true,
+              schemaTypes: ['string'],
+              valueType: 'string',
+              stringLength: 16,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(projected?.argumentSummary).toEqual({
+      schemaVersion: 1,
+      fieldCount: 1,
+      additionalFieldCount: 0,
+      fields: [
+        {
+          name: 'query',
+          required: true,
+          schemaTypes: ['string'],
+          valueType: 'string',
+          stringLength: 16,
+        },
+      ],
+    });
+    expect(JSON.stringify(projected)).not.toContain('must-not-survive');
+  });
 });
 
 function activity(payload: Readonly<Record<string, unknown>>): RunPart {

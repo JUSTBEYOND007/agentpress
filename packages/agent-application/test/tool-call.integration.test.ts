@@ -309,15 +309,57 @@ describeWithDatabase('Tool Call application flow', () => {
     } as const;
     await expect(
       connection.db
-        .select({ transportProvenance: toolCalls.transportProvenance })
+        .select({
+          transportProvenance: toolCalls.transportProvenance,
+          argumentSummary: toolCalls.argumentSummary,
+        })
         .from(toolCalls)
         .where(eq(toolCalls.id, proposal.toolCallId)),
-    ).resolves.toEqual([{ transportProvenance: expectedTransport }]);
+    ).resolves.toEqual([
+      {
+        transportProvenance: expectedTransport,
+        argumentSummary: {
+          schemaVersion: 1,
+          fieldCount: 1,
+          additionalFieldCount: 0,
+          fields: [
+            {
+              name: 'query',
+              required: true,
+              schemaTypes: ['string'],
+              valueType: 'string',
+              stringLength: 20,
+            },
+          ],
+        },
+      },
+    ]);
     const events = await connection.db
       .select({ payload: runEvents.payload })
       .from(runEvents)
       .where(and(eq(runEvents.runId, runId), eq(runEvents.eventType, 'tool.proposed')));
-    expect(events).toMatchObject([{ payload: { transportProvenance: expectedTransport } }]);
+    expect(events).toMatchObject([
+      {
+        payload: {
+          transportProvenance: expectedTransport,
+          argumentSummary: {
+            schemaVersion: 1,
+            fieldCount: 1,
+            additionalFieldCount: 0,
+            fields: [
+              {
+                name: 'query',
+                required: true,
+                schemaTypes: ['string'],
+                valueType: 'string',
+                stringLength: 20,
+              },
+            ],
+          },
+        },
+      },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('transport provenance');
 
     await connection.db
       .update(toolCalls)

@@ -234,6 +234,26 @@ describe('Agent run process disclosure', () => {
                     taskAttempt: 2,
                     argumentNames: ['limit', 'query'],
                     argumentCount: 2,
+                    argumentSummary: {
+                      schemaVersion: 1,
+                      fieldCount: 2,
+                      additionalFieldCount: 0,
+                      fields: [
+                        {
+                          name: 'limit',
+                          required: false,
+                          schemaTypes: ['integer'],
+                          valueType: 'integer',
+                        },
+                        {
+                          name: 'query',
+                          required: true,
+                          schemaTypes: ['string'],
+                          valueType: 'string',
+                          stringLength: 16,
+                        },
+                      ],
+                    },
                     outputReference: {
                       artifactId: 'artifact-1',
                       uri: 'artifact://artifact-1/versions/1',
@@ -253,7 +273,8 @@ describe('Agent run process disclosure', () => {
     expect(markup).toContain('web_research@1.0.0');
     expect(markup).toContain('search@1.0.0');
     expect(markup).toContain('agentpress-mcp-adapter-v1');
-    expect(markup).toContain('limit、query');
+    expect(markup).toContain('limit (integer)');
+    expect(markup).toContain('query (string, 长度 16)');
     expect(markup).toContain('artifact://artifact-1/versions/1');
     expect(markup).not.toContain('top-secret-query');
   });

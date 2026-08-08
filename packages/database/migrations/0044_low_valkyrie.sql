@@ -1,0 +1,1 @@
+ALTER TABLE "tool_calls" ADD COLUMN "argument_summary" jsonb DEFAULT '{"schemaVersion":1,"fieldCount":0,"additionalFieldCount":0,"fields":[]}'::jsonb NOT NULL;

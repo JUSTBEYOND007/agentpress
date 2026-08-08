@@ -15,6 +15,9 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
   if (!serverId || !serverRevision || !toolName || !toolRevision || !adapterRevision) {
     return undefined;
   }
+  const argumentSummary = boundedArgumentSummary(
+    Object.keys(existing).length ? existing.argumentSummary : part.payload.argumentSummary,
+  );
   const argumentKeys = Object.keys(existing).length
     ? []
     : Object.keys(recordProperty(part.payload, 'arguments'));
@@ -30,13 +33,16 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
           value === value.trim(),
       )
     : [];
-  const argumentNames = (existingNames.length ? existingNames : rawArguments).slice(0, 12);
+  const summaryNames = argumentSummary?.fields.map(({ name }) => name) ?? [];
+  const argumentNames = (
+    summaryNames.length ? summaryNames : existingNames.length ? existingNames : rawArguments
+  ).slice(0, 12);
   const rawArgumentCount = existing.argumentCount;
   const argumentCount = Math.min(
     10_000,
     typeof rawArgumentCount === 'number' && Number.isSafeInteger(rawArgumentCount)
       ? Math.max(argumentNames.length, rawArgumentCount)
-      : argumentKeys.length,
+      : (argumentSummary?.fieldCount ?? argumentKeys.length),
   );
   const taskAttempt = positiveInteger(existing.taskAttempt ?? part.payload.taskAttempt);
   const durationMs = boundedDuration(existing.durationMs ?? part.payload.durationMs);
@@ -54,8 +60,80 @@ export function toolActivityAudit(part: RunPart): ToolActivityAudit | undefined 
     ...(durationMs !== undefined ? { durationMs } : {}),
     argumentNames,
     argumentCount,
+    ...(argumentSummary ? { argumentSummary } : {}),
     ...(outputReference ? { outputReference } : {}),
   };
+}
+
+function boundedArgumentSummary(value: unknown): ToolActivityAudit['argumentSummary'] | undefined {
+  const summary = asRecord(value);
+  if (summary.schemaVersion !== 1) return undefined;
+  const fieldCount = boundedInteger(summary.fieldCount, 10_000);
+  const additionalFieldCount = boundedInteger(summary.additionalFieldCount, 10_000);
+  if (
+    fieldCount === undefined ||
+    additionalFieldCount === undefined ||
+    additionalFieldCount > fieldCount
+  ) {
+    return undefined;
+  }
+  if (!Array.isArray(summary.fields) || summary.fields.length > 32) return undefined;
+  const fields = summary.fields.map(boundedArgumentField);
+  if (fields.some((field) => field === undefined)) return undefined;
+  return {
+    schemaVersion: 1,
+    fieldCount,
+    additionalFieldCount,
+    fields: fields as NonNullable<ToolActivityAudit['argumentSummary']>['fields'],
+  };
+}
+
+function boundedArgumentField(
+  value: unknown,
+): NonNullable<ToolActivityAudit['argumentSummary']>['fields'][number] | undefined {
+  const field = asRecord(value);
+  const name = boundedString(field, 'name');
+  const schemaTypes = Array.isArray(field.schemaTypes)
+    ? field.schemaTypes.filter(isArgumentType).slice(0, 8)
+    : [];
+  if (
+    !name ||
+    typeof field.required !== 'boolean' ||
+    !isArgumentType(field.valueType) ||
+    schemaTypes.length === 0
+  ) {
+    return undefined;
+  }
+  const stringLength = boundedInteger(field.stringLength, 1_000_000);
+  const arrayLength = boundedInteger(field.arrayLength, 1_000_000);
+  const objectKeyCount = boundedInteger(field.objectKeyCount, 1_000_000);
+  return {
+    name,
+    required: field.required,
+    schemaTypes,
+    valueType: field.valueType,
+    ...(stringLength !== undefined ? { stringLength } : {}),
+    ...(arrayLength !== undefined ? { arrayLength } : {}),
+    ...(objectKeyCount !== undefined ? { objectKeyCount } : {}),
+  };
+}
+
+function isArgumentType(value: unknown): value is string {
+  return ['string', 'number', 'integer', 'boolean', 'array', 'object', 'null', 'unknown'].includes(
+    String(value),
+  );
+}
+
+function boundedInteger(value: unknown, maximum: number): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= maximum
+    ? Number(value)
+    : undefined;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
 }
 
 function boundedDuration(value: unknown): number | undefined {

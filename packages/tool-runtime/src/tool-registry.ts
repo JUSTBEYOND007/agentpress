@@ -129,6 +129,7 @@ function validateDefinition(
 }
 
 function validateTransportProvenance(transport: NonNullable<ToolDefinition['transport']>): void {
+  const kind: unknown = (transport as { readonly kind?: unknown }).kind;
   const values = [
     transport.serverId,
     transport.serverRevision,
@@ -137,7 +138,7 @@ function validateTransportProvenance(transport: NonNullable<ToolDefinition['tran
     transport.adapterRevision,
   ];
   if (
-    transport.kind !== 'mcp' ||
+    kind !== 'mcp' ||
     values.some((value) => !value.trim() || value !== value.trim() || value.length > 160)
   ) {
     throw new TypeError('Tool transport provenance values must be 1-160 trimmed characters');

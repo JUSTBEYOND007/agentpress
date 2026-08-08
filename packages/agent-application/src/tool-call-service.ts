@@ -10,7 +10,7 @@ import {
   approvals,
   toolCalls,
 } from '@agentpress/database';
-import { hashToolArguments } from '@agentpress/tool-runtime';
+import { hashToolArguments, summarizeToolArguments } from '@agentpress/tool-runtime';
 import { and, eq, sql } from 'drizzle-orm';
 
 import {
@@ -77,6 +77,7 @@ export class ToolCallService {
       );
     }
     const argumentsHash = hashToolArguments(input.arguments);
+    const argumentSummary = summarizeToolArguments(definition.inputSchema, input.arguments);
     const toolCallId = this.createId();
     const requiresApproval = APPROVAL_RISKS.has(definition.risk);
     const approvalId = requiresApproval ? this.createId() : undefined;
@@ -253,6 +254,7 @@ export class ToolCallService {
           ? { evidenceProviderRevision: definition.evidence.providerRevision }
           : {}),
         arguments: input.arguments,
+        argumentSummary,
         argumentsHash,
         risk: definition.risk,
         sideEffect: definition.sideEffect,
@@ -294,7 +296,7 @@ export class ToolCallService {
           ...(definition.evidence
             ? { evidenceProviderRevision: definition.evidence.providerRevision }
             : {}),
-          arguments: input.arguments,
+          argumentSummary,
           argumentsHash,
           risk: definition.risk,
           sideEffect: definition.sideEffect,

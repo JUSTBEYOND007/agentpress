@@ -5,6 +5,7 @@ import {
   CapabilityCatalog,
   composeToolGuidance,
   hashToolArguments,
+  summarizeToolArguments,
   ToolRegistry,
   ToolRuntimeError,
 } from '../src/index.js';
@@ -167,7 +168,7 @@ describe('ToolRegistry', () => {
     for (const invalidValue of ['', ' padded ', 'x'.repeat(161)]) {
       expect(() => {
         registry.register({
-          ...tool(`web.invalid-${invalidValue.length}`, 'web.read'),
+          ...tool(`web.invalid-${String(invalidValue.length)}`, 'web.read'),
           transport: { ...transport, serverId: invalidValue },
         });
       }).toThrow(/transport provenance/u);
@@ -178,5 +179,79 @@ describe('ToolRegistry', () => {
     expect(hashToolArguments({ articleId: 'a', revision: 2 })).toBe(
       hashToolArguments({ revision: 2, articleId: 'a' }),
     );
+  });
+
+  it('summarizes validated arguments from the declared schema without retaining values', () => {
+    const schema = Type.Object(
+      {
+        query: Type.String(),
+        limit: Type.Optional(Type.Integer()),
+        filters: Type.Array(Type.String()),
+        options: Type.Object({ locale: Type.String() }),
+        enabled: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    );
+    const summary = summarizeToolArguments(schema, {
+      query: 'private research query',
+      limit: 3,
+      filters: ['private', 'values'],
+      options: { locale: 'zh-CN' },
+      enabled: true,
+    });
+
+    expect(summary).toEqual({
+      schemaVersion: 1,
+      fieldCount: 5,
+      additionalFieldCount: 0,
+      fields: [
+        {
+          name: 'enabled',
+          required: true,
+          schemaTypes: ['boolean'],
+          valueType: 'boolean',
+        },
+        {
+          name: 'filters',
+          required: true,
+          schemaTypes: ['array'],
+          valueType: 'array',
+          arrayLength: 2,
+        },
+        {
+          name: 'limit',
+          required: false,
+          schemaTypes: ['integer'],
+          valueType: 'integer',
+        },
+        {
+          name: 'options',
+          required: true,
+          schemaTypes: ['object'],
+          valueType: 'object',
+          objectKeyCount: 1,
+        },
+        {
+          name: 'query',
+          required: true,
+          schemaTypes: ['string'],
+          valueType: 'string',
+          stringLength: 22,
+        },
+      ],
+    });
+    expect(JSON.stringify(summary)).not.toContain('private');
+    expect(JSON.stringify(summary)).not.toContain('zh-CN');
+  });
+
+  it('counts additional fields without exposing their names', () => {
+    const summary = summarizeToolArguments(Type.Object({ query: Type.String() }), {
+      query: 'safe shape only',
+      'credential-secret-name': 'credential-secret-value',
+    });
+
+    expect(summary).toMatchObject({ fieldCount: 2, additionalFieldCount: 1 });
+    expect(summary.fields.map(({ name }) => name)).toEqual(['query']);
+    expect(JSON.stringify(summary)).not.toContain('credential');
   });
 });

@@ -32,7 +32,9 @@ export function AgentToolAudit({
           <div>
             <dt>参数</dt>
             <dd>
-              {audit.argumentNames.join('、')}
+              {audit.argumentSummary
+                ? audit.argumentSummary.fields.map(argumentFieldLabel).join('、')
+                : audit.argumentNames.join('、')}
               {hiddenArgumentCount > 0 ? ` 等 ${String(audit.argumentCount)} 项` : ''}
             </dd>
           </div>
@@ -46,4 +48,18 @@ export function AgentToolAudit({
       </dl>
     </details>
   );
+}
+
+function argumentFieldLabel(
+  field: NonNullable<ToolActivityAudit['argumentSummary']>['fields'][number],
+): string {
+  const size =
+    field.stringLength !== undefined
+      ? `长度 ${String(field.stringLength)}`
+      : field.arrayLength !== undefined
+        ? `${String(field.arrayLength)} 项`
+        : field.objectKeyCount !== undefined
+          ? `${String(field.objectKeyCount)} 个字段`
+          : undefined;
+  return `${field.name} (${field.valueType}${size ? `, ${size}` : ''})`;
 }

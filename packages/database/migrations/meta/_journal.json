@@ -309,6 +309,13 @@
       "when": 1786186056913,
       "tag": "0043_overrated_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786190336431,
+      "tag": "0044_low_valkyrie",
+      "breakpoints": true
     }
   ]
 }

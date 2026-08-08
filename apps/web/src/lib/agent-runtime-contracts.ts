@@ -107,6 +107,20 @@ export type ToolActivityAudit = {
   readonly durationMs?: number;
   readonly argumentNames: readonly string[];
   readonly argumentCount: number;
+  readonly argumentSummary?: {
+    readonly schemaVersion: 1;
+    readonly fieldCount: number;
+    readonly additionalFieldCount: number;
+    readonly fields: readonly {
+      readonly name: string;
+      readonly required: boolean;
+      readonly schemaTypes: readonly string[];
+      readonly valueType: string;
+      readonly stringLength?: number;
+      readonly arrayLength?: number;
+      readonly objectKeyCount?: number;
+    }[];
+  };
   readonly outputReference?: {
     readonly artifactId: string;
     readonly versionId?: string;
