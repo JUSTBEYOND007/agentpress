@@ -620,6 +620,12 @@ MCP Approval 拒绝沿用同一 ToolCall ledger，没有另建 MCP 审批路径�
 live/replay 合并成同一 `outcome=failed` activity。该证据只覆盖拒绝，不替代 Approval expiry、并发取消和
 真实 Server 组合；后两者仍分别由通用 ToolCall 测试和总验收门禁追踪。
 
+MCP JSON-RPC error 与工具消失也已收敛到 adapter：官方 SDK `McpError` 的远端 message、data、tool name
+和 cause 均不保留，只留下数值 protocol code；`isError=true` 使用同一固定安全错误。真实 Server 的不存在
+工具调用证明 client 不降级、同一 session 后续调用成功；相反语义测试固定 `ConnectionClosed` 仍必须进入
+`connection_lost_after_dispatch/outcome_unknown`，不能被普通 protocol failure 吞掉。动态 tool-list revision
+通知与 Run 冻结版本的组合验收仍未完成。
+
 Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用结算为 `cancelled`，已 dispatch 调用
 结算为 `outcome_unknown(run_cancelled_after_dispatch)`，两者均写 durable event；迟到 provider settlement
 由 status fence 忽略。Run、ToolCall、Approval 和 transport audit 入口统一使用 `Run -> ToolCall` 锁顺序，
@@ -803,11 +809,11 @@ MCP manager。
 - [ ] 建立无凭据/过期凭据、初始化/握手失败、Server 不可达、tool list/Schema 非法、工具消失或 revision
       变化、timeout/cancel、断线重连、调用中断线、重复 result、超大/恶意 output、JSON-RPC error、
       Approval 拒绝、settlement `outcome_unknown` 和旧连接晚到结果的专项失败矩阵。当前 `McpClientGateway`
-      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 44 个 MCP Runtime 测试
+      已在 capability 入口拒绝空/重复 tool name 与非 object input Schema，并以 47 个 MCP Runtime 测试
       覆盖调用前连接失败、调用后断线不重放、旧 client result identity fence，以及结构化 HTTP 429
       脱敏、拒绝后 session 健康、非 429 相反语义、401/403 初始化认证失败和非法 protocol handshake；
       ToolRegistry 19 个测试、29 个 PostgreSQL ToolCall 场景和官方 SDK 真实 HTTP Server 已覆盖非协作
-      handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流及初始化失败的 live/replay；
+      handler 的硬 timeout、wire cancel、迟到完成、风险分流、限流、初始化失败和 JSON-RPC error；
       其余故障场景未完成，因此总项不勾选。
 - [ ] MCP 验收必须包含官方 SDK contract test、真实 MCP Server、PostgreSQL ToolCall/Approval/Settlement
       replay、重连后重复副作用=0、错误脱敏、桌面/移动 projection，以及真实 Pi Runtime 对三个内置

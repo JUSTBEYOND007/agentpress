@@ -2,6 +2,7 @@
 // Copyright (c) 2025 Mario Zechner; Copyright (c) 2025-2026 Can Boluk.
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { McpClientGateway, McpServerManager } from '../src/index.js';
@@ -305,6 +306,46 @@ describe('MCP client gateway', () => {
     expect(manager.state('web_research')).toBe('ready');
   });
 
+  it('redacts a typed JSON-RPC error without degrading the healthy client', async () => {
+    const protocolError = new McpError(
+      ErrorCode.MethodNotFound,
+      'provider credential=generated authorization=secret',
+      { apiKey: 'generated' },
+    );
+    const callTool = vi.fn(() => Promise.reject(protocolError));
+    const manager = managerWithClients([
+      { callTool, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+
+    const error = await new McpClientGateway(manager)
+      .call(toolCallInput('json-rpc-error'))
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      name: 'McpProtocolError',
+      protocolCode: ErrorCode.MethodNotFound,
+    });
+    expect(String(error)).not.toMatch(/credential|authorization|secret|apiKey|generated/u);
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
+  it('keeps a typed connection-closed error on the outcome-unknown path', async () => {
+    const callTool = vi.fn(() =>
+      Promise.reject(new McpError(ErrorCode.ConnectionClosed, 'Connection closed')),
+    );
+    const manager = managerWithClients([
+      { callTool, close: () => Promise.resolve() } as unknown as Client,
+    ]);
+
+    await expect(
+      new McpClientGateway(manager).call(toolCallInput('json-rpc-connection-closed')),
+    ).rejects.toMatchObject({
+      name: 'McpCallOutcomeUnknownError',
+      outcomeReason: 'connection_lost_after_dispatch',
+    });
+    expect(manager.state('web_research')).toBe('degraded');
+  });
+
   it('fails closed on an MCP error result without retaining remote content', async () => {
     const callTool = vi.fn(() =>
       Promise.resolve({
@@ -321,9 +362,9 @@ describe('MCP client gateway', () => {
       { callTool, close: () => Promise.resolve() } as unknown as Client,
     ]);
 
-    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.toThrow(
-      'MCP tool search returned an error',
-    );
+    await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.toMatchObject({
+      name: 'McpProtocolError',
+    });
     await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.not.toThrow(
       /password|api_key|generated/u,
     );

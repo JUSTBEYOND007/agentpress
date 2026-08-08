@@ -158,6 +158,35 @@ describe('MCP Streamable HTTP real fixture', () => {
     }
   });
 
+  it('redacts a real JSON-RPC missing-tool error and keeps the session healthy', async () => {
+    const fixture = await startFixture(false);
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => createStreamableHttpClient({ url: fixture.url }),
+    });
+    const gateway = new McpClientGateway(manager);
+    try {
+      const error = await gateway
+        .call({
+          ...toolCallInput('removed-tool', 'ignored'),
+          toolName: 'provider credential=secret removed_tool',
+        })
+        .catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ name: 'McpProtocolError' });
+      expect(String(error)).not.toMatch(/credential|secret|removed_tool/u);
+      expect(manager.state('web_research')).toBe('ready');
+      await expect(gateway.call(toolCallInput('after-protocol-error', 'healthy'))).resolves.toBe(
+        'healthy',
+      );
+      await manager.stop('web_research');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('fences a non-cooperative server timeout and ignores its late completion', async () => {
     const fixture = await startFixture(false);
     const manager = new McpServerManager();

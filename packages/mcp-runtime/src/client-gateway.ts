@@ -3,6 +3,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
+  McpError,
   PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   ResourceUpdatedNotificationSchema,
@@ -24,6 +25,7 @@ import type {
 import type { McpServerManager } from './server-manager.js';
 
 type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number];
+const MCP_CONNECTION_CLOSED_CODE = -32_000;
 
 export type McpCallOutcomeUnknownReason = 'connection_lost_after_dispatch' | 'stale_client_result';
 
@@ -93,6 +95,17 @@ export class McpRateLimitError extends ToolRuntimeError {
   }
 }
 
+export class McpProtocolError extends Error {
+  public override readonly name = 'McpProtocolError';
+
+  public constructor(
+    public readonly serverId: BuiltInMcpServerId,
+    public readonly protocolCode?: number,
+  ) {
+    super('MCP protocol request failed');
+  }
+}
+
 export class McpClientGateway implements BuiltInMcpGateway {
   public constructor(
     private readonly manager: McpServerManager,
@@ -111,6 +124,9 @@ export class McpClientGateway implements BuiltInMcpGateway {
       if (error instanceof McpCallOutcomeUnknownError) throw error;
       if (error instanceof StreamableHTTPError && error.code === 429) {
         throw new McpRateLimitError(input.serverId, input.toolName);
+      }
+      if (error instanceof McpError && !isConnectionFailure(error)) {
+        throw new McpProtocolError(input.serverId, error.code);
       }
       if (!isConnectionFailure(error)) throw error;
       await this.manager.markDegraded(input.serverId, client);
@@ -333,7 +349,7 @@ async function callTool(
     { signal: input.context.signal },
   );
   if (result.isError === true) {
-    throw new Error(`MCP tool ${input.toolName} returned an error`);
+    throw new McpProtocolError(input.serverId);
   }
   const structured = result.structuredContent;
   return typeof structured === 'object' && structured !== null && 'value' in structured
@@ -348,6 +364,7 @@ function throwIfAborted(signal: AbortSignal): void {
 
 function isConnectionFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  if (error instanceof McpError && error.code === MCP_CONNECTION_CLOSED_CODE) return true;
   const code = 'code' in error && typeof error.code === 'string' ? error.code : '';
   if (
     [
