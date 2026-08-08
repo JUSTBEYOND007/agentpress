@@ -135,8 +135,12 @@ export class AgentSessionRunner {
       ? await this.toolChoices.claimNext({ runId, claimToken: toolChoiceClaimToken })
       : undefined;
     let result: RuntimeResult;
+    const runtimeEventFence = { open: true };
     try {
-      result = await runtime.execute(
+      if (signal?.aborted) {
+        throw new Error('Agent Session execution aborted before provider dispatch');
+      }
+      const execution = runtime.execute(
         {
           runId: sessionId,
           systemPrompt: governedSystemPrompt,
@@ -159,6 +163,7 @@ export class AgentSessionRunner {
           },
         },
         async (event) => {
+          if (!runtimeEventFence.open) return;
           if (event.type === 'message.completed') {
             await record(event.message.role, 'message', { message: event.message });
           } else if (event.type === 'tool.started') {
@@ -171,10 +176,14 @@ export class AgentSessionRunner {
           } else if (event.type === 'tool.completed') {
             await record('tool', 'tool_result', { result: event.result }, event.result.toolCallId);
           }
+          if (signal?.aborted) return;
           await this.options.onRuntimeEvent(runId, event);
         },
         signal,
       );
+      result = await settleRuntimeAtSignalBoundary(execution, signal, () => {
+        runtimeEventFence.open = false;
+      });
     } catch (error) {
       result = protocolFailure(
         [],
@@ -281,4 +290,42 @@ function protocolFailure(messages: readonly RuntimeMessage[], message: string): 
     messages,
     error: { code: 'protocol_error', message, retryable: true },
   };
+}
+
+function settleRuntimeAtSignalBoundary(
+  execution: Promise<RuntimeResult>,
+  signal: AbortSignal | undefined,
+  stopAcceptingEvents: () => void,
+): Promise<RuntimeResult> {
+  if (!signal) return execution;
+  if (signal.aborted) {
+    stopAcceptingEvents();
+    void execution.catch(() => undefined);
+    return Promise.resolve(cancelledRuntimeResult());
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (result: RuntimeResult): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      resolve(result);
+    };
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      reject(error instanceof Error ? error : new Error('Unknown Agent Runtime failure'));
+    };
+    const abort = (): void => {
+      stopAcceptingEvents();
+      finish(cancelledRuntimeResult());
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    execution.then(finish, fail);
+  });
+}
+
+function cancelledRuntimeResult(): RuntimeResult {
+  return { status: 'cancelled', messages: [] };
 }

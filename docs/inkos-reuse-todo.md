@@ -646,9 +646,15 @@ Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用�
 运行时故障注入进度：inline 与 detached Specialist 的 timeout 已接入实际 Pi Runtime
 `AbortSignal.timeout`，并与父级取消通过 `AbortSignal.any` 组合；超时结果是 failed `task_timeout`，不会把
 用户取消误报为超时。真实 PostgreSQL 用例证明悬挂 Specialist 会在 deadline 后终止，Run 进入
-`completed_with_degradation`，并且非法 timeout 配置 fail closed。该用例只证明 Specialist deadline 的
-确定性状态转换，不替代真实 provider timeout；provider timeout 和数据库提交前后断线尚未形成完整矩阵，
-因此总项不勾选。
+`completed_with_degradation`，并且非法 timeout 配置 fail closed。
+
+真实 provider timeout 的恢复边界也已补齐：独立集成测试通过正式 `PiRuntimeAdapter` 和
+OpenAI-compatible HTTP transport 向本地 Server 发出请求，Server 在首个响应块前悬挂；恢复 attempt 2 的
+宿主 deadline 会在 provider Promise 未协作返回时结束等待、停止接收晚到 runtime event 并中止 HTTP
+连接。PostgreSQL 只为未完成的 optional Writer 写入 attempt 2 `task_timeout`，此前成功 Researcher 的
+ResearchBrief Artifact ID、Version 和内容保持不变，Run 以 `completed_with_degradation` 结算，live/replay
+投影为 `timed_out`。已取消 signal 还会在 provider dispatch 前 fail closed，不再遗留无人接管的 rejection。
+该证据仍不替代数据库提交前/后断线和 Article/Evidence/Artifact validator 的完整接入，因此总项不勾选。
 已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
 增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
 恢复准备现在还会为同事务内从 `running` 转为 `interrupted` 的每个 Task Attempt 写入
@@ -676,7 +682,7 @@ TaskResult（含 Artifact）返回 false，TaskResult/Artifact/RunEvent 数量�
 TaskResult 的第一个 Artifact 先进入写入流程，第二个 Artifact 引用不存在的 Evidence 并触发外键失败；
 整个事务回滚为 0 Artifact、0 Evidence link，仅由独立 fallback 事务写入 claim-free
 `persistence_failed` TaskResult/事件，失效 Evidence ID 不进入公开事件。协议入口另有三次有界修复后
-`task_evidence_invalid` 的相反场景。剩余未完成项为真实 provider timeout 与数据库提交前/后断线。
+`task_evidence_invalid` 的相反场景。剩余故障注入缺口为数据库提交前/后断线。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。

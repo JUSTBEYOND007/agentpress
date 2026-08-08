@@ -496,6 +496,13 @@ Artifact, then fails a second Artifact on a missing Evidence foreign key; Postgr
 Artifacts and all links before a separate fallback transaction records only `persistence_failed`.
 The missing Evidence id never enters the public event. Protocol validation independently covers the
 opposite path where invalid Evidence is rejected before persistence after bounded repair.
+Recovery timeout is now verified through the production Pi adapter and an OpenAI-compatible HTTP
+transport rather than only a faux or cooperative runtime. A Server that accepts the provider request
+but never sends the first response chunk is fenced by the host deadline even when the provider Promise
+does not settle promptly. Only the interrupted optional Task receives attempt-two `task_timeout`; the
+previously committed Research Artifact keeps its id, immutable version, and content. Late runtime
+events are ignored, the HTTP connection is aborted, and PostgreSQL live/replay exposes the same
+`timed_out` activity before the Run settles as `completed_with_degradation`.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 
