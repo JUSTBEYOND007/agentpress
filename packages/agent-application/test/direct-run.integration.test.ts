@@ -2299,7 +2299,7 @@ describeWithDatabase('Direct Run application flow', () => {
     expect(projection?.parts.some(({ status }) => status === 'synthesis.failed')).toBe(false);
   });
 
-  it('converts an Artifact persistence exception into a durable claim-free Task failure', async () => {
+  it('rolls back partial Artifacts and invalid Evidence into a claim-free Task failure', async () => {
     const branchId = randomUUID();
     await connection.db.insert(conversationBranches).values({
       id: branchId,
@@ -2354,6 +2354,7 @@ describeWithDatabase('Direct Run application flow', () => {
       createId: randomUUID,
       now: () => new Date(),
     });
+    const missingEvidenceId = randomUUID();
     await expect(
       store.persistTaskResult(
         run.runId,
@@ -2372,10 +2373,17 @@ describeWithDatabase('Direct Run application flow', () => {
           artifacts: [
             {
               type: 'ArticleDraft',
-              title: 'Invalid draft',
-              summary: 'The content cannot be serialized',
-              content: { unserializable: BigInt(1) },
+              title: 'First valid draft',
+              summary: 'This insert must roll back with the later failure',
+              content: { body: 'valid but not independently committable' },
               evidenceIds: [],
+            },
+            {
+              type: 'ResearchBrief',
+              title: 'Invalid Evidence brief',
+              summary: 'The Evidence foreign key does not exist',
+              content: { summary: 'invalid evidence' },
+              evidenceIds: [missingEvidenceId],
             },
           ],
           warnings: [],
@@ -2413,12 +2421,17 @@ describeWithDatabase('Direct Run application flow', () => {
       .where(and(eq(runEvents.runId, run.runId), eq(runEvents.eventType, 'task.failed')));
     expect(failureEvent[0]?.payload.failure).toBe('persistence_failed');
     expect(failureEvent).toHaveLength(1);
-    expect(JSON.stringify(failureEvent)).not.toMatch(/BigInt|serialize/u);
+    expect(JSON.stringify(failureEvent)).not.toContain(missingEvidenceId);
     const artifactsForRun = await connection.db
       .select({ id: artifacts.id })
       .from(artifacts)
       .where(eq(artifacts.runId, run.runId));
     expect(artifactsForRun).toEqual([]);
+    const evidenceLinks = await connection.db
+      .select({ evidenceId: artifactEvidence.evidenceId })
+      .from(artifactEvidence)
+      .where(eq(artifactEvidence.evidenceId, missingEvidenceId));
+    expect(evidenceLinks).toEqual([]);
   });
 
   it('projects only a Specialist public result to Main while keeping private thinking isolated', async () => {

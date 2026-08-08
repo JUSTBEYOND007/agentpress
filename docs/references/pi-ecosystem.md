@@ -491,6 +491,11 @@ Stale-worker settlement is fenced at both ownership levels. A late Specialist at
 its TaskResult, Artifact, or RunEvent after a newer attempt succeeds. A stale Main worker cannot write
 an assistant message, checkpoint, or terminal event after the Run enters recovery. Both paths are
 verified against PostgreSQL row counts and leave the authoritative newer/recovering state unchanged.
+Artifact persistence is transactionally claim-free on partial failure. A fixture inserts one valid
+Artifact, then fails a second Artifact on a missing Evidence foreign key; PostgreSQL rolls back both
+Artifacts and all links before a separate fallback transaction records only `persistence_failed`.
+The missing Evidence id never enters the public event. Protocol validation independently covers the
+opposite path where invalid Evidence is rejected before persistence after bounded repair.
 
 InkOS is mature enough to be the best available implementation reference by release discipline, test breadth, and business fit. It is still a relatively young project, so this designation is not a claim of multi-year operational history and does not waive AgentPress contract tests or real-model evaluation.
 

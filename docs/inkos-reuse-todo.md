@@ -647,8 +647,8 @@ Run 取消的 ToolCall 边界已补齐 PostgreSQL 事实：未 dispatch 调用�
 `AbortSignal.timeout`，并与父级取消通过 `AbortSignal.any` 组合；超时结果是 failed `task_timeout`，不会把
 用户取消误报为超时。真实 PostgreSQL 用例证明悬挂 Specialist 会在 deadline 后终止，Run 进入
 `completed_with_degradation`，并且非法 timeout 配置 fail closed。该用例只证明 Specialist deadline 的
-确定性状态转换，不替代真实 provider timeout；provider timeout、提交前后断线、重复恢复、
-部分 Artifact 和失效 Evidence 尚未形成完整矩阵，因此总项不勾选。
+确定性状态转换，不替代真实 provider timeout；provider timeout 和数据库提交前后断线尚未形成完整矩阵，
+因此总项不勾选。
 已有 PostgreSQL 回归证明重复 `prepareRecovery` 在 `recovering` 状态下不追加 RunEvent/Checkpoint，且不重复
 增加 Tool Choice recovery count；该幂等边界已覆盖，但不能替代完整恢复矩阵。
 恢复准备现在还会为同事务内从 `running` 转为 `interrupted` 的每个 Task Attempt 写入
@@ -669,8 +669,14 @@ dispatch 前结算为 `tool.cancelled`，后续 prepare/execute 都不能复活�
 stale worker settlement 现有两层 PostgreSQL fence：Specialist attempt 2 成功后，attempt 1 的迟到
 TaskResult（含 Artifact）返回 false，TaskResult/Artifact/RunEvent 数量均不变；Run 进入 `recovering` 后，
 旧 Main worker 的 terminal settlement 抛 `StaleWorkerSettlementError`，不写 assistant message、Checkpoint
-或 terminal RunEvent，Run 继续保持 recovering。聚焦的两个 Direct Run 集成场景通过；数据库提交前后断线、
-部分 Artifact 和失效 Evidence 仍未完成。
+或 terminal RunEvent，Run 继续保持 recovering。聚焦的两个 Direct Run 集成场景通过；数据库提交前后断线
+仍未完成。
+
+部分 Artifact/失效 Evidence 的原子回滚也已由 Direct Run 全套 52 个 PostgreSQL 场景验证：同一 Specialist
+TaskResult 的第一个 Artifact 先进入写入流程，第二个 Artifact 引用不存在的 Evidence 并触发外键失败；
+整个事务回滚为 0 Artifact、0 Evidence link，仅由独立 fallback 事务写入 claim-free
+`persistence_failed` TaskResult/事件，失效 Evidence ID 不进入公开事件。协议入口另有三次有界修复后
+`task_evidence_invalid` 的相反场景。剩余未完成项为真实 provider timeout 与数据库提交前/后断线。
 
 - [ ] 将 InkOS chapter state 映射为 AgentPress Article Revision、Context Pack、Evidence、Artifact Version、
       TaskResult、Checkpoint 和 settlement，不引入本地 truth file 事实源。
