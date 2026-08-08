@@ -9,6 +9,17 @@ import type {
 
 export const SKILL_PRESELECTION_PROMPT_VERSION = 'skill-preselection-v1';
 export const SKILL_SELECTION_TOOL_VERSION = 'skill_selection_complete@1';
+export const SKILL_SELECTION_TIMEOUT_MS = 15_000;
+
+export class SkillSelectionError extends Error {
+  public constructor(
+    public readonly code: 'timeout' | 'provider_failure' | 'invalid_output',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'SkillSelectionError';
+  }
+}
 
 const selectionSchema = Type.Object(
   {
@@ -25,7 +36,14 @@ const selectionSchema = Type.Object(
  * returned identity and owns the resulting permissions and Context Pack.
  */
 export class PiSkillPreselector {
-  public constructor(private readonly runtimeFactory: AgentRuntimeFactory) {}
+  public constructor(
+    private readonly runtimeFactory: AgentRuntimeFactory,
+    private readonly timeoutMs = SKILL_SELECTION_TIMEOUT_MS,
+  ) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+      throw new RangeError('Skill selection timeout must be between 1 ms and 2 minutes');
+    }
+  }
 
   public async select(input: SkillPreselectionRequest): Promise<readonly SelectedSkillInput[]> {
     const limit = input.maxSelections ?? 8;
@@ -76,6 +94,8 @@ export class PiSkillPreselector {
         return Promise.resolve({ accepted: true });
       },
     };
+    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
     const result = await runtime.execute(
       {
         runId: `skill-selection:${crypto.randomUUID()}`,
@@ -101,10 +121,15 @@ export class PiSkillPreselector {
         maxFailedCompletionCalls: 1,
       },
       () => undefined,
-      input.signal,
+      signal,
     );
+    if (timeout.aborted && input.signal?.aborted !== true) {
+      throw new SkillSelectionError('timeout', 'Skill selection timed out');
+    }
     if (result.status === 'cancelled' || input.signal?.aborted) return [];
-    if (result.status === 'failed') throw new Error(result.error.message);
+    if (result.status === 'failed') {
+      throw new SkillSelectionError('provider_failure', result.error.message);
+    }
     if (!selected) throw new Error('Skill selection completed without structured output');
 
     const byId = new Map(candidates.map((candidate) => [candidate.skillId, candidate]));

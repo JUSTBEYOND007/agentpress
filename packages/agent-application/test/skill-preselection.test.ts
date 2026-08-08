@@ -129,4 +129,43 @@ describe('PiSkillPreselector', () => {
       }),
     ).resolves.toEqual([]);
   });
+
+  it('aborts a hanging model chooser at the host timeout boundary', async () => {
+    const runtime: AgentRuntime = {
+      execute: async (_request, _sink, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              resolve({ status: 'cancelled', messages: [] });
+            },
+            { once: true },
+          );
+        }),
+    };
+    const selector = new PiSkillPreselector({ create: () => runtime }, 5);
+
+    await expect(
+      selector.select({ prompt: 'Wait forever', explicitSkills: [], candidates }),
+    ).rejects.toMatchObject({
+      name: 'SkillSelectionError',
+      code: 'timeout',
+    });
+  });
+
+  it('keeps provider/schema failures typed instead of treating them as no selection', async () => {
+    const runtime: AgentRuntime = {
+      execute: () =>
+        Promise.resolve({
+          status: 'failed',
+          messages: [],
+          error: { code: 'protocol_error', message: 'invalid selection schema', retryable: false },
+        }),
+    };
+    const selector = new PiSkillPreselector({ create: () => runtime }, 100);
+
+    await expect(
+      selector.select({ prompt: 'Invalid output', explicitSkills: [], candidates }),
+    ).rejects.toMatchObject({ name: 'SkillSelectionError', code: 'provider_failure' });
+  });
 });
