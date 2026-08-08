@@ -47,6 +47,8 @@ import {
   memoryCandidates,
   modelSelections,
   mentionBindings,
+  initializeRunSpecialistBudget,
+  reserveTaskBudget,
   queuedFollowups,
   requeueExpiredAgentTasks,
   taskResults,
@@ -2784,6 +2786,17 @@ describeWithDatabase('Direct Run application flow', () => {
       acquiredAt: new Date(Date.now() - 1_000),
       expiresAt: new Date(Date.now() + 60_000),
     });
+    await connection.db.transaction(async (transaction) => {
+      await initializeRunSpecialistBudget(transaction, { runId: run.runId, maxTokens: 96_000 });
+      await reserveTaskBudget(transaction, {
+        reservationId: randomUUID(),
+        runId: run.runId,
+        planRevisionId: revisionId,
+        taskId: interruptedTaskId,
+        attempt: 1,
+        tokens: 4_000,
+      });
+    });
     const choiceId = randomUUID();
     const staleClaimToken = randomUUID();
     await connection.db.insert(runToolChoices).values({
@@ -2834,6 +2847,20 @@ describeWithDatabase('Direct Run application flow', () => {
       .from(agentTaskLeases)
       .where(eq(agentTaskLeases.id, leaseId));
     expect(releasedLeases[0]?.releasedAt).toBeInstanceOf(Date);
+    await expect(
+      connection.db
+        .select({
+          status: taskBudgetReservations.status,
+          actual: taskBudgetReservations.actualTokens,
+        })
+        .from(taskBudgetReservations)
+        .where(
+          and(
+            eq(taskBudgetReservations.taskId, interruptedTaskId),
+            eq(taskBudgetReservations.attempt, 1),
+          ),
+        ),
+    ).resolves.toEqual([{ status: 'forfeited', actual: 4_000 }]);
     const recoveryProjection = await recoveryService.getProjection(run.runId);
     expect(
       recoveryProjection?.parts.find(({ status }) => status === 'task.interrupted'),

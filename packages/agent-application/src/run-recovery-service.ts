@@ -5,6 +5,7 @@ import {
   appendCheckpoint,
   appendRunEvent,
   cancelAgentRunTasks,
+  forfeitActiveTaskBudgets,
   type AgentPressDatabase,
   runToolChoices,
   toolCalls,
@@ -221,6 +222,10 @@ export class RunRecoveryService {
               sql`${agentTaskLeases.releasedAt} is null`,
             ),
           );
+        await forfeitActiveTaskBudgets(transaction, {
+          taskIds: interruptedTasks.map(({ taskId }) => taskId),
+          now,
+        });
       }
       for (const task of interruptedTasks) {
         const taskEvent = await appendRunEvent(transaction, {
