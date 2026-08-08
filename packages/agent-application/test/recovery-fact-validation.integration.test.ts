@@ -177,6 +177,109 @@ describeWithDatabase('Recovery fact validation', () => {
     });
   });
 
+  it('revalidates recovered Artifact schema and owner permissions before reuse', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const service = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: {
+        create: () => PiRuntimeAdapter.forTests({ responses: ['Recovery must not run yet.'] }),
+      },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await service.create({
+      conversationId: ids.conversation,
+      branchId,
+      userId: ids.user,
+      prompt: 'Validate the recovered candidate.',
+      idempotencyKey: randomUUID(),
+    });
+    const planId = randomUUID();
+    const planRevisionId = randomUUID();
+    const taskId = randomUUID();
+    const taskResultId = randomUUID();
+    const artifactId = randomUUID();
+    const artifactVersionId = randomUUID();
+    const invalidContent = { unexpected: 'Not an ArticleDraft' };
+    await connection.db.transaction(async (transaction) => {
+      await transaction.insert(executionPlans).values({ id: planId, runId: run.runId });
+      await transaction.insert(planRevisions).values({
+        id: planRevisionId,
+        planId,
+        revisionNumber: 1,
+        reason: 'initial_plan',
+        summary: 'Invalid recovered candidate fixture',
+      });
+      await transaction.insert(agentTasks).values({
+        id: taskId,
+        runId: run.runId,
+        planRevisionId,
+        objective: 'Research without producing drafts',
+        criticality: 'required',
+        owner: 'researcher',
+        acceptanceCriteria: ['Return research only'],
+        outputSchema: {},
+        toolPolicy: {},
+        budget: {},
+        status: 'succeeded',
+        attempt: 1,
+      });
+      await transaction.insert(taskResults).values({
+        id: taskResultId,
+        taskId,
+        attempt: 1,
+        status: 'succeeded',
+        summary: 'Injected invalid result',
+        artifacts: [{ artifactId, versionId: artifactVersionId }],
+        evidence: [],
+        usage: {},
+        warnings: [],
+      });
+      await transaction.insert(artifacts).values({
+        id: artifactId,
+        runId: run.runId,
+        taskId,
+        type: 'ArticleDraft',
+        title: 'Invalid recovered draft',
+      });
+      await transaction.insert(artifactVersions).values({
+        id: artifactVersionId,
+        artifactId,
+        version: 1,
+        summary: 'Invalid recovered draft',
+        content: invalidContent,
+        contentHash: contentHash(invalidContent),
+      });
+      await transaction
+        .update(agentRuns)
+        .set({ mode: 'planned', status: 'running', activePlanRevisionId: planRevisionId })
+        .where(eq(agentRuns.id, run.runId));
+    });
+
+    await expect(service.prepareRecovery(run.runId)).resolves.toBe(true);
+    const invalidations = await connection.db
+      .select({ issues: taskResultInvalidations.issues })
+      .from(taskResultInvalidations)
+      .where(eq(taskResultInvalidations.taskResultId, taskResultId));
+    expect(invalidations).toHaveLength(1);
+    expect(invalidations[0]?.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'artifact_owner_invalid' }),
+        expect.objectContaining({ code: 'invalid_recovery_artifact' }),
+      ]),
+    );
+    await expect(
+      connection.db
+        .select({ status: agentTasks.status })
+        .from(agentTasks)
+        .where(eq(agentTasks.id, taskId)),
+    ).resolves.toEqual([{ status: 'interrupted' }]);
+  });
+
   it('keeps a valid recovered ArticleDraft successful without fabricating degradation', async () => {
     const fixture = await createRecoveryFixture({ baseRevisionId: ids.revision2, claims: [] });
 

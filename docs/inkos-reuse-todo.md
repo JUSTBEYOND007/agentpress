@@ -725,7 +725,11 @@ Node connection code 或 failed-rollback 进入 reconciliation，从事务前 Ru
 - [x] 恢复时冻结此前已经验证的事实和 Artifact，只重新计算损坏或未结算部分；通过
       `task_result_invalidations` 隔离损坏 succeeded TaskResult，不删除旧结果或旧 Artifact Version，
       并以 Task/attempt fence 只重跑损坏分支。
-- [ ] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
+- [x] 恢复后的候选结果重新执行 Schema、权限、Evidence 和 stale revision 校验，不能因“来自恢复”而跳过。
+      PostgreSQL 损坏事实回归直接注入 researcher-owned 非法 ArticleDraft；生产
+      `RecoveryFactValidationService -> inspectRecoveryFacts` 同时写入 immutable
+      `artifact_owner_invalid`/`invalid_recovery_artifact` invalidation 并中断该 Task。既有 recovery
+      集成覆盖 missing Evidence 与 stale revision；只有重新生成并再次通过同一校验的分支才能成功。
 - [x] 无法完整恢复时返回 typed `completed_with_degradation`，列出保留内容、缺失内容、未核验项和下一步。
 - [x] `outcome_unknown` 不得转成普通失败或自动重试；必须保持独立状态并等待人工核对。
 - [x] 测试覆盖 provider timeout、worker crash、数据库提交前后断线、重复恢复、部分 Artifact、失效引用、

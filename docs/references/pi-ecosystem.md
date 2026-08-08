@@ -164,6 +164,13 @@ to `outcome_unknown`. Unit tests assert that generation is never called; the Pos
 integration covers stale article revision and missing Evidence as degraded, regeneration-required
 facts rather than successful output.
 
+Recovered candidates do not receive a privileged validation path. A PostgreSQL corruption fixture
+injects an invalid `ArticleDraft` under a `researcher` Task, bypassing normal write-time guards. The
+production recovery inspector records both `invalid_recovery_artifact` and `artifact_owner_invalid`
+in an immutable TaskResult invalidation and interrupts that Task. Together with the stale-revision
+and missing-Evidence fixtures, this proves recovery reruns schema, role policy, Evidence, and revision
+checks before a candidate can be reused.
+
 Web Research retains the existing SSRF/DNS/redirect/media/size guards and built-in `web_research`
 MCP route. `packages/web-research` now owns product enums, the typed ResearchBrief schema,
 claim-to-Evidence validation, provider-neutral search/fetch/synthesis Ports, depth-specific query,
