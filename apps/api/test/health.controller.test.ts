@@ -14,15 +14,30 @@ describe('HealthController', () => {
     expect(getAgentRuntimeHealth({ ARK_API_KEY: 'secret' })).toEqual({
       provider: 'ark',
       ready: false,
-      missing: ['ARK_MODEL_PRO', 'ARK_EMBEDDING_MODEL', 'ARK_IMAGE_MODEL'],
+      missing: ['ARK_MODEL_PRO'],
     });
     expect(
       getAgentRuntimeHealth({
         ARK_API_KEY: 'secret',
         ARK_MODEL_PRO: 'endpoint',
-        ARK_EMBEDDING_MODEL: 'embedding-endpoint',
-        ARK_IMAGE_MODEL: 'image-endpoint',
       }),
     ).toEqual({ provider: 'ark', ready: true, missing: [] });
+    expect(
+      getAgentRuntimeHealth({
+        AGENT_MODEL_API_KEY: 'secret',
+        AGENT_MODEL_BASE_URL: 'https://models.example/v1',
+        AGENT_MODEL_PRO: 'model-pro',
+      }),
+    ).toEqual({ provider: 'agent-model', ready: true, missing: [] });
+    expect(
+      getAgentRuntimeHealth({
+        AGENT_MODEL_API_KEY: 'secret',
+        AGENT_MODEL_PRO: 'model-pro',
+      }),
+    ).toEqual({
+      provider: 'agent-model',
+      ready: false,
+      missing: ['AGENT_MODEL_BASE_URL'],
+    });
   });
 });

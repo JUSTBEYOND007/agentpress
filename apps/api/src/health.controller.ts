@@ -22,9 +22,18 @@ export class HealthController {
 }
 
 export function getAgentRuntimeHealth(environment: NodeJS.ProcessEnv = process.env) {
-  const missing = ['ARK_API_KEY', 'ARK_MODEL_PRO', 'ARK_EMBEDDING_MODEL', 'ARK_IMAGE_MODEL'].filter(
-    (name) => !environment[name]?.trim(),
-  );
+  const agentModelFields = ['AGENT_MODEL_API_KEY', 'AGENT_MODEL_BASE_URL', 'AGENT_MODEL_PRO'];
+  const hasAgentModelConfiguration = agentModelFields.some((name) => environment[name]?.trim());
+  if (hasAgentModelConfiguration) {
+    const missing = agentModelFields.filter((name) => !environment[name]?.trim());
+    return {
+      provider: 'agent-model' as const,
+      ready: missing.length === 0,
+      missing,
+    };
+  }
+
+  const missing = ['ARK_API_KEY', 'ARK_MODEL_PRO'].filter((name) => !environment[name]?.trim());
   return {
     provider: 'ark' as const,
     ready: missing.length === 0,
