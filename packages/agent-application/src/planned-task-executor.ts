@@ -28,7 +28,13 @@ import {
   type SettledTask,
   estimatedSpecialistTaskTokens,
 } from './planned-run-protocol.js';
-import { budgetExhaustedTask, findAssistant, staleTaskSettlement } from './planned-run-results.js';
+import {
+  addRuntimeUsage,
+  aggregateAssistantUsage,
+  budgetExhaustedTask,
+  emptyUsage,
+  staleTaskSettlement,
+} from './planned-run-results.js';
 import { settledTaskFromFact } from './planned-task-result-projection.js';
 import { toDurableEvent } from './run-projection-service.js';
 import { ResearchFailureResultFactory } from './research-failure-result.js';
@@ -288,6 +294,8 @@ export class PlannedTaskExecutor {
             resolveEvidenceProviderRevision: (ids) =>
               this.options.results.resolveTaskEvidenceProviderRevision(runId, task.id, ids),
             assertEvidence: (ids) => this.options.results.assertTaskEvidence(runId, task.id, ids),
+            assertEditProposals: (ids) =>
+              this.options.results.assertTaskEditProposals(runId, task.id, ids),
           });
           return { accepted: true };
         } catch (error) {
@@ -356,6 +364,7 @@ export class PlannedTaskExecutor {
           false,
           runtimeLimits,
         );
+    let taskUsage = aggregateAssistantUsage(result.messages);
     for (
       let repair = 1;
       !completion &&
@@ -381,8 +390,9 @@ export class PlannedTaskExecutor {
         false,
         runtimeLimits,
       );
+      const repairUsage = aggregateAssistantUsage(result.messages);
+      if (repairUsage) taskUsage = addRuntimeUsage(taskUsage ?? emptyUsage, repairUsage);
     }
-    const assistant = findAssistant(result);
     if (!completion) {
       const timedOut = didTimeout();
       const failure = timedOut
@@ -393,7 +403,7 @@ export class PlannedTaskExecutor {
         task.owner === 'researcher' && (timedOut || result.status !== 'cancelled')
           ? {
               ...(await this.researchFailures.create(runId, task, failure)),
-              ...(assistant ? { usage: assistant.usage } : {}),
+              ...(taskUsage ? { usage: taskUsage } : {}),
             }
           : {
               ...task,
@@ -401,7 +411,7 @@ export class PlannedTaskExecutor {
               artifacts: [],
               warnings: [],
               failure,
-              ...(assistant ? { usage: assistant.usage } : {}),
+              ...(taskUsage ? { usage: taskUsage } : {}),
             };
       return (await this.options.results.persistTaskResult(runId, failed, attempt))
         ? failed
@@ -414,7 +424,7 @@ export class PlannedTaskExecutor {
       artifacts: completion.artifacts,
       warnings: completion.warnings,
       ...(completion.failure ? { failure: completion.failure } : {}),
-      ...(assistant ? { usage: assistant.usage } : {}),
+      ...(taskUsage ? { usage: taskUsage } : {}),
     };
     return (await this.options.results.persistTaskResult(runId, taskResult, attempt))
       ? taskResult

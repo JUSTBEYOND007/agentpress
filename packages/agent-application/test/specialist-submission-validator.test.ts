@@ -84,13 +84,43 @@ describe('Specialist submission validator', () => {
       validateSpecialistSubmission({ ...baseInput('writer'), value: validWriterSubmission }),
     ).resolves.toEqual(validWriterSubmission);
   });
+
+  it('requires Editor proposals to belong to the current Task fact chain', async () => {
+    const proposalId = '87041c56-dd38-45a1-9c67-37c63c3e9062';
+    const value = {
+      status: 'succeeded' as const,
+      summary: 'Proposal complete',
+      artifacts: [
+        {
+          type: 'EditProposal' as const,
+          title: 'Edit proposal',
+          summary: 'Reviewable article correction',
+          content: { proposalId },
+          evidenceIds: [],
+        },
+      ],
+      warnings: [],
+    };
+    const valid = baseInput('editor');
+
+    await expect(validateSpecialistSubmission({ ...valid, value })).resolves.toEqual(value);
+    expect(valid.assertEditProposals).toHaveBeenCalledWith([proposalId]);
+    await expect(
+      validateSpecialistSubmission({
+        ...baseInput('editor'),
+        assertEditProposals: () => Promise.reject(new Error('foreign task proposal')),
+        value,
+      }),
+    ).rejects.toMatchObject({ code: 'task_artifact_invalid' });
+  });
 });
 
-function baseInput(role: 'writer' | 'researcher') {
+function baseInput(role: 'writer' | 'researcher' | 'editor') {
   return {
     schema: taskCompleteSchemaForRole(role),
     role,
     resolveEvidenceProviderRevision: vi.fn(() => Promise.resolve(undefined)),
     assertEvidence: vi.fn(() => Promise.resolve()),
+    assertEditProposals: vi.fn(() => Promise.resolve()),
   };
 }

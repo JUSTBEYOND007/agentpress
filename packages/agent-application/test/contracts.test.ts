@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Type } from '@sinclair/typebox';
+import { createProviderToolSchemaCodec } from '@agentpress/agent-runtime';
 
 import {
   AGENT_RUN_COMMAND_TOPIC,
@@ -417,6 +418,55 @@ describe('agent application contracts', () => {
         'task_complete',
       );
     }).not.toThrow();
+  });
+
+  it('exposes a closed Editor completion contract compatible with OpenAI strict tools', () => {
+    const proposalId = '87041c56-dd38-45a1-9c67-37c63c3e9062';
+    const completion = {
+      status: 'succeeded',
+      summary: 'Edit proposal ready for review.',
+      artifacts: [
+        {
+          type: 'EditProposal',
+          title: 'Kafka exactly-once correction',
+          summary: 'Corrects the overly broad guarantee.',
+          content: { proposalId },
+          evidenceIds: [],
+        },
+      ],
+      warnings: [],
+    };
+    const schema = taskCompleteSchemaForRole('editor');
+    const codec = createProviderToolSchemaCodec(
+      schema,
+      { dialect: 'openai', acceptsStrictTools: true, enforcesStrictTools: false },
+      'prefer',
+    );
+
+    const wire = codec.prepareArguments(completion);
+    expect(codec.decodeArguments(wire)).toEqual(completion);
+    expect(() =>
+      codec.prepareArguments({
+        ...completion,
+        artifacts: [
+          {
+            ...completion.artifacts[0],
+            content: { proposalId, operations: [] },
+          },
+        ],
+      }),
+    ).toThrow(/host schema/u);
+    expect(() =>
+      codec.prepareArguments({
+        ...completion,
+        artifacts: [
+          {
+            ...completion.artifacts[0],
+            type: 'ArticleDraft',
+          },
+        ],
+      }),
+    ).toThrow(/host schema/u);
   });
 
   it('strips Main action capabilities from the Specialist model-visible turn', () => {

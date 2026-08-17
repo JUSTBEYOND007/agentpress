@@ -2,9 +2,11 @@ import type {
   RuntimeAssistantMessage,
   RuntimeMessage,
   RuntimeResult,
+  RuntimeUsage,
 } from '@agentpress/agent-runtime';
 import {
   agentRuns,
+  agentTasks,
   appendCheckpoint,
   appendRunEvent,
   cancelAgentRunTasks,
@@ -16,6 +18,7 @@ import {
   runDirectives,
   runEvents,
   runToolChoices,
+  taskResults,
 } from '@agentpress/database';
 import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 
@@ -28,6 +31,12 @@ import {
 import { encodeRuntimeMessage } from './runtime-message-codec.js';
 import { toDurableEvent } from './run-projection-service.js';
 import { classifyTerminalOutcome } from './terminal-outcome-policy.js';
+import {
+  addRuntimeUsage,
+  aggregateAssistantUsage,
+  emptyUsage,
+  persistedRuntimeUsage,
+} from './planned-run-results.js';
 
 type CompactionResult =
   | { readonly status: 'not_needed' }
@@ -73,6 +82,19 @@ export class RunSettlementService {
         const currentStatus = statusRows[0]?.status;
         const now = this.options.now();
         const events: DurableRunEvent[] = [];
+        const aggregateSettledRunUsage = async (
+          terminalUsage?: RuntimeUsage,
+        ): Promise<RuntimeUsage> => {
+          const rows = await transaction
+            .select({ usage: taskResults.usage })
+            .from(taskResults)
+            .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+            .where(eq(agentTasks.runId, runId));
+          return rows
+            .map(({ usage }) => persistedRuntimeUsage(usage))
+            .filter((usage): usage is RuntimeUsage => usage !== undefined)
+            .reduce(addRuntimeUsage, terminalUsage ?? emptyUsage);
+        };
 
         if (currentStatus === 'recovering' || currentStatus === 'interrupted') {
           throw new StaleWorkerSettlementError(runId);
@@ -83,6 +105,7 @@ export class RunSettlementService {
           if (!assistant) {
             throw new Error(`Pi completed Agent Run ${runId} without a stable assistant message`);
           }
+          const runUsage = await aggregateSettledRunUsage(assistant.usage);
           const sequenceRows = await transaction
             .select({ sequence: max(conversationMessages.sequence) })
             .from(conversationMessages)
@@ -110,7 +133,7 @@ export class RunSettlementService {
             .update(agentRuns)
             .set({
               status: completedWithDegradation ? 'completed_with_degradation' : 'completed',
-              finalOutcome: { usage: assistant.usage },
+              finalOutcome: { usage: runUsage },
               completedAt: now,
               updatedAt: now,
               version: sql`${agentRuns.version} + 1`,
@@ -138,7 +161,7 @@ export class RunSettlementService {
             eventType: completedWithDegradation
               ? 'run.completed_with_degradation'
               : 'run.completed',
-            payload: { usage: assistant.usage, degraded: completedWithDegradation },
+            payload: { usage: runUsage, degraded: completedWithDegradation },
           });
           events.push(toDurableEvent(completedEvent));
           return events;
@@ -203,6 +226,10 @@ export class RunSettlementService {
           throw new Error(`Agent Run ${runId} reached an invalid settlement branch`);
         }
 
+        const failedRunUsage = await aggregateSettledRunUsage(
+          aggregateAssistantUsage(result.messages),
+        );
+
         await transaction
           .update(runToolChoices)
           .set({ status: 'cancelled', rejectionReason: 'run_failed', settledAt: now })
@@ -216,7 +243,7 @@ export class RunSettlementService {
           .update(agentRuns)
           .set({
             status: 'failed',
-            finalOutcome: { error: result.error },
+            finalOutcome: { error: result.error, usage: failedRunUsage },
             completedAt: now,
             updatedAt: now,
             version: sql`${agentRuns.version} + 1`,

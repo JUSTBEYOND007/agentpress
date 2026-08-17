@@ -315,6 +315,31 @@ for its TypeBox contracts; the full Oh My Pi schema subsystem was not vendored b
 Pi runtime already owns generic schema conversion and AgentPress also needs PostgreSQL-backed
 facts and degradation audit events.
 
+Editor completion follows the same closed, role-specific contract already adopted for Researcher
+completion. Real Pi/DeepSeek Run `b9887a39-67cf-492a-8c65-aaae9c9ea223` proved that the Editor read
+the frozen revision, recovered from one invalid `article.propose_edits` preflight call, and persisted
+proposal `87041c56-dd38-45a1-9c67-37c63c3e9062`; the Task then failed only because the generic
+`Record<string, unknown>` Artifact content became an empty closed object in the OpenAI-strict wire
+schema. AgentPress therefore does not relax strict validation or add a repair Prompt. The Editor
+`task_complete` schema now carries only the succeeded proposal ID, while operations, diffs, base
+revision, status, and source ToolCall remain PostgreSQL facts. Submission validation joins the
+proposal to its succeeded source ToolCall and requires the same Run and Task. Contract tests cover
+the strict wire round trip and reject copied operations or a non-Editor Artifact; the PostgreSQL
+event-chain test accepts the current Task's proposal and rejects the same proposal under a foreign
+Task ID. This preserves the InkOS-derived Specialist ownership boundary above and Oh My Pi's pinned
+strict-schema behavior without turning Provider adaptation into a second domain state machine.
+The focused target-model rerun
+`.agentpress/evals/2026-08-17T15-10-01-752Z-deepseek-v4-flash-routing-08.json` then completed as Run
+`8457795b-3390-437f-889a-b18674b09816`: the Editor Task succeeded on attempt 1, persisted pending
+proposal `03dfa08f-8966-4bc0-95c2-96f4b79e3d99`, and passed routing, delegation, Schema, citation,
+and security gates. That report also exposed a separate settlement defect: the host-generated final
+display message has zero model usage, but `agent_runs.final_outcome` treated it as the whole Run and
+discarded Specialist usage. Run settlement now sums every persisted TaskResult with terminal
+synthesis/display usage, while each Specialist TaskResult sums every Provider assistant call rather
+than only the last call. The existing successful rerun predates that accounting correction, so its
+zero-token report is protocol evidence, not valid cost evidence; future reports use the corrected
+PostgreSQL usage fact.
+
 MCP reconnect behavior uses the official MCP SDK transport and adapts only the conservative
 connection-error/single-retry and reconnect-storm contracts from Oh My Pi commit
 `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`. The local Gateway retries no model-visible tool step:

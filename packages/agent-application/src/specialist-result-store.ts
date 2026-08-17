@@ -9,6 +9,7 @@ import {
   artifactVersions,
   enqueueOutboxMessage,
   evidenceRecords,
+  editProposals,
   settleAgentTaskAttempt,
   settleTaskBudget,
   forfeitActiveTaskBudgets,
@@ -31,6 +32,35 @@ type SpecialistResultStoreOptions = {
 
 export class SpecialistResultStore {
   public constructor(private readonly options: SpecialistResultStoreOptions) {}
+
+  public async assertTaskEditProposals(
+    runId: string,
+    taskId: string,
+    proposalIds: readonly string[],
+  ): Promise<void> {
+    const uniqueIds = [...new Set(proposalIds)];
+    if (uniqueIds.length !== proposalIds.length || uniqueIds.some((id) => id.length === 0)) {
+      throw new Error('task_complete contains duplicate or empty EditProposal IDs');
+    }
+    if (uniqueIds.length === 0) return;
+    const rows = await this.options.database
+      .select({ id: editProposals.id })
+      .from(editProposals)
+      .innerJoin(toolCalls, eq(toolCalls.id, editProposals.sourceToolCallId))
+      .where(
+        and(
+          inArray(editProposals.id, uniqueIds),
+          eq(editProposals.runId, runId),
+          eq(editProposals.status, 'pending'),
+          eq(toolCalls.runId, runId),
+          eq(toolCalls.taskId, taskId),
+          eq(toolCalls.status, 'succeeded'),
+        ),
+      );
+    if (rows.length !== uniqueIds.length) {
+      throw new Error('task_complete references an EditProposal not produced for this Task');
+    }
+  }
 
   public async persistTaskResult(
     runId: string,

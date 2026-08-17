@@ -151,6 +151,51 @@ export function findAssistant(result: RuntimeResult): RuntimeAssistantMessage | 
   );
 }
 
+export function aggregateAssistantUsage(
+  messages: readonly RuntimeMessage[],
+): RuntimeUsage | undefined {
+  const usages = messages.flatMap((message) =>
+    message.role === 'assistant' ? [message.usage] : [],
+  );
+  if (usages.length === 0) return undefined;
+  return usages.reduce(addRuntimeUsage, emptyUsage);
+}
+
+export function addRuntimeUsage(left: RuntimeUsage, right: RuntimeUsage): RuntimeUsage {
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    totalTokens: left.totalTokens + right.totalTokens,
+    costUsd: left.costUsd + right.costUsd,
+  };
+}
+
+export function persistedRuntimeUsage(value: unknown): RuntimeUsage | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const usage = value as Readonly<Record<string, unknown>>;
+  const fields = [
+    usage.inputTokens,
+    usage.outputTokens,
+    usage.cacheReadTokens,
+    usage.cacheWriteTokens,
+    usage.totalTokens,
+    usage.costUsd,
+  ];
+  if (fields.some((field) => typeof field !== 'number' || !Number.isFinite(field) || field < 0)) {
+    return undefined;
+  }
+  return {
+    inputTokens: usage.inputTokens as number,
+    outputTokens: usage.outputTokens as number,
+    cacheReadTokens: usage.cacheReadTokens as number,
+    cacheWriteTokens: usage.cacheWriteTokens as number,
+    totalTokens: usage.totalTokens as number,
+    costUsd: usage.costUsd as number,
+  };
+}
+
 export function decodePersistedArtifacts(value: readonly unknown[]): readonly StructuredArtifact[] {
   return value.flatMap((candidate) => {
     if (typeof candidate !== 'object' || candidate === null) return [];

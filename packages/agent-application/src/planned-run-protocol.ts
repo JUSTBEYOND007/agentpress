@@ -193,8 +193,26 @@ const researcherTaskCompleteSchema = createTaskCompleteSchema(
   ),
 );
 
+const editorTaskCompleteSchema = createTaskCompleteSchema(
+  artifactSchema(
+    Type.Literal('EditProposal'),
+    Type.Object(
+      {
+        proposalId: Type.String({
+          format: 'uuid',
+          description:
+            'ID returned by the succeeded article.propose_edits call for this Task. Proposal operations and revision data remain host-owned facts and must not be copied here.',
+        }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
+);
+
 export function taskCompleteSchemaForRole(role: SpecialistRole): TSchema {
-  return role === 'researcher' ? researcherTaskCompleteSchema : taskCompleteSchema;
+  if (role === 'researcher') return researcherTaskCompleteSchema;
+  if (role === 'editor') return editorTaskCompleteSchema;
+  return taskCompleteSchema;
 }
 
 export function normalizeSpecialistArtifacts(

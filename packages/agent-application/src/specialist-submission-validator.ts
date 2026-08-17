@@ -42,6 +42,7 @@ export async function validateSpecialistSubmission(input: {
     evidenceIds: readonly string[],
   ) => Promise<string | undefined>;
   readonly assertEvidence: (evidenceIds: readonly string[]) => Promise<void>;
+  readonly assertEditProposals: (proposalIds: readonly string[]) => Promise<void>;
 }): Promise<ValidatedSpecialistSubmission> {
   try {
     assertStrictSchema(input.schema, input.value, 'task_complete');
@@ -64,6 +65,13 @@ export async function validateSpecialistSubmission(input: {
   try {
     artifacts = normalizeSpecialistArtifacts(input.role, submitted.artifacts, providerRevision);
     assertSpecialistArtifactPolicy(input.role, artifacts);
+    if (input.role === 'editor') {
+      await input.assertEditProposals(
+        artifacts.map(({ content }) =>
+          typeof content.proposalId === 'string' ? content.proposalId : '',
+        ),
+      );
+    }
   } catch (error) {
     throw new SpecialistSubmissionError('task_artifact_invalid', error);
   }

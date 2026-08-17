@@ -5,6 +5,7 @@ import { PiRuntimeAdapter, type AgentRuntime } from '@agentpress/agent-runtime';
 import { ProposalService } from '@agentpress/editor-application';
 import {
   agentTasks,
+  agentRuns,
   agentTaskLeases,
   appUsers,
   artifactEvidence,
@@ -34,6 +35,7 @@ import {
   DirectRunService,
   PersistentToolBridge,
   RunProjectionService,
+  SpecialistResultStore,
   ToolCallService,
   ToolEvidenceStore,
   type LiveRunEvent,
@@ -319,6 +321,7 @@ describeWithDatabase('Multi-Agent durable event chain', () => {
       artifactRows,
       proposalRows,
       resultRows,
+      runRows,
     ] = await Promise.all([
       connection.db.select().from(executionPlans).where(eq(executionPlans.runId, run.runId)),
       connection.db
@@ -341,6 +344,10 @@ describeWithDatabase('Multi-Agent durable event chain', () => {
         .from(taskResults)
         .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
         .where(eq(agentTasks.runId, run.runId)),
+      connection.db
+        .select({ finalOutcome: agentRuns.finalOutcome })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, run.runId)),
     ]);
     expect(planRows).toHaveLength(1);
     expect(planRevisionRows).toEqual([{ revisionNumber: 1 }]);
@@ -354,7 +361,26 @@ describeWithDatabase('Multi-Agent durable event chain', () => {
     ]);
     expect(artifactRows).toMatchObject([{ type: 'EditProposal', taskId: taskRows[0]?.id }]);
     expect(proposalRows).toMatchObject([{ status: 'pending', sourceToolCallId: callRows[0]?.id }]);
+    const resultStore = new SpecialistResultStore({
+      database: connection.db,
+      publisher,
+      createId: randomUUID,
+      now: () => new Date(),
+    });
+    await expect(
+      resultStore.assertTaskEditProposals(run.runId, taskRows[0]?.id ?? '', [
+        proposalRows[0]?.id ?? '',
+      ]),
+    ).resolves.toBeUndefined();
+    await expect(
+      resultStore.assertTaskEditProposals(run.runId, randomUUID(), [proposalRows[0]?.id ?? '']),
+    ).rejects.toThrow(/not produced for this Task/u);
     expect(resultRows[0]?.task_results).toMatchObject({ status: 'succeeded', attempt: 1 });
+    const runUsage = (runRows[0]?.finalOutcome as { usage?: { totalTokens?: number } } | null)
+      ?.usage;
+    const taskUsage = resultRows[0]?.task_results.usage as { totalTokens?: number };
+    expect(runUsage?.totalTokens).toBeGreaterThanOrEqual(taskUsage.totalTokens ?? 0);
+    expect(taskUsage.totalTokens).toBeGreaterThan(0);
     const artifactVersionRows = await connection.db
       .select()
       .from(artifactVersions)
