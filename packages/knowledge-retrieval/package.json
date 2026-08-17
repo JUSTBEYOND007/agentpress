@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test",
     "test": "vitest run --exclude '**/*.integration.test.*' --exclude 'dist/**'",
     "test:integration": "vitest run test/postgres-hybrid-search.integration.test.ts",

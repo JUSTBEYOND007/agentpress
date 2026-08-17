@@ -17,6 +17,7 @@
   "scripts": {
     "benchmark": "node dist/benchmark.js",
     "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src test",
     "seed": "node dist/seed.js",
     "test": "vitest run --passWithNoTests --exclude '**/*.integration.test.*' --exclude 'dist/**'",

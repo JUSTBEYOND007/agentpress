@@ -28,6 +28,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "eval:online": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.agent-model ../../node_modules/tsx/dist/cli.mjs src/online-cli.ts",
     "eval:compaction": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.agent-model ../../node_modules/tsx/dist/cli.mjs src/compaction-online-cli.ts",
     "eval:rag": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.agent-model ../../node_modules/tsx/dist/cli.mjs src/rag-provider-online-cli.ts",

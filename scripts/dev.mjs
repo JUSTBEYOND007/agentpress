@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import process from 'node:process';
 
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 
@@ -15,6 +16,14 @@ function run(command, args) {
 
 const migrationStatus = await run(pnpm, ['--filter', '@agentpress/database', 'db:migrate']);
 if (migrationStatus !== 0) process.exit(migrationStatus);
+
+const packageBuildStatus = await run(process.execPath, [
+  './node_modules/turbo/bin/turbo',
+  'run',
+  'build',
+  '--filter=./packages/*',
+]);
+if (packageBuildStatus !== 0) process.exit(packageBuildStatus);
 
 const turbo = spawn(
   process.execPath,
