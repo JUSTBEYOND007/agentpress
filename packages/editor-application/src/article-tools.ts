@@ -22,10 +22,10 @@ import { ProposalService } from './proposal-service.js';
 const block = Type.Object(
   {
     type: Type.String({ minLength: 1, maxLength: 80 }),
-    attrs: Type.Intersect([
-      Type.Object({ blockId: Type.String({ minLength: 1, maxLength: 160 }) }),
-      Type.Record(Type.String(), Type.Unknown()),
-    ]),
+    attrs: Type.Object(
+      { blockId: Type.String({ minLength: 1, maxLength: 160 }) },
+      { additionalProperties: true },
+    ),
     content: Type.Optional(Type.Array(Type.Unknown(), { maxItems: 20_000 })),
   },
   { additionalProperties: false },
@@ -69,6 +69,25 @@ const operations = Type.Array(
 );
 type ProposedOperation = Static<typeof operations>[number];
 const reviewMode = Type.Optional(Type.Union([Type.Literal('granular'), Type.Literal('document')]));
+const modelFacingOperation = Type.Object(
+  {
+    kind: Type.String({ minLength: 1, maxLength: 40 }),
+    blockId: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+    afterBlockId: Type.Optional(
+      Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
+    ),
+    block: Type.Optional(Type.Unknown()),
+    attrs: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  },
+  { additionalProperties: true },
+);
+const proposeEditsInput = Type.Object(
+  {
+    operations: Type.Array(modelFacingOperation, { minItems: 1, maxItems: 200 }),
+    reviewMode,
+  },
+  { additionalProperties: false },
+);
 
 export function registerArticleTools(
   registry: ToolRegistry,
@@ -120,7 +139,7 @@ export function registerArticleTools(
       },
     ],
     capabilities: ['article.propose'],
-    inputSchema: Type.Object({ operations, reviewMode }, { additionalProperties: false }),
+    inputSchema: proposeEditsInput,
     outputSchema: Type.Any(),
     risk: 'draft_write',
     sideEffect:
@@ -133,9 +152,14 @@ export function registerArticleTools(
       context,
     ) => {
       const current = await resolveRunArticle(database, context.runId);
-      const anchoredOperations = anchorProposedOperations(
+      const normalizedOperations = normalizeProposedOperations(
         current.document as ArticleDocument,
         proposedOperations,
+        context.toolCallId,
+      );
+      const anchoredOperations = anchorProposedOperations(
+        current.document as ArticleDocument,
+        normalizedOperations,
         context.toolCallId,
       );
       return proposals
@@ -150,6 +174,149 @@ export function registerArticleTools(
         .then((proposal) => ({ kind: 'article_edit_proposal' as const, ...proposal }));
     },
   });
+}
+
+function normalizeProposedOperations(
+  document: ArticleDocument,
+  proposedOperations: readonly unknown[],
+  toolCallId: string,
+): readonly ProposedOperation[] {
+  const blockIds = new Set(document.content.map((item) => item.attrs.blockId));
+  const fallbackAfterBlockId = document.content.at(-1)?.attrs.blockId ?? null;
+  const generatedBlockIds = new Set<string>();
+  return proposedOperations.map((operation, index) => {
+    if (!isRecord(operation)) throw invalidOperation(index, 'operation must be an object');
+    rejectCallerOwnedAnchors(operation, index);
+    const kind = operation.kind;
+    if (kind === 'insert') {
+      const blockValue = normalizeBlock(operation.block, index, {
+        defaultBlockId: uniqueGeneratedBlockId(toolCallId, index, blockIds, generatedBlockIds),
+      });
+      const afterBlockId =
+        operation.afterBlockId === undefined ? fallbackAfterBlockId : operation.afterBlockId;
+      if (afterBlockId !== null && typeof afterBlockId !== 'string') {
+        throw invalidOperation(index, 'insert.afterBlockId must be a string, null, or omitted');
+      }
+      if (typeof afterBlockId === 'string' && !blockIds.has(afterBlockId)) {
+        throw invalidOperation(index, `insert anchor ${afterBlockId} does not exist`);
+      }
+      blockIds.add(blockValue.attrs.blockId);
+      return { kind: 'insert', afterBlockId, block: blockValue };
+    }
+    if (kind === 'replace') {
+      const blockId = normalizeAnchoredBlockId(operation, index, blockIds);
+      const blockValue = normalizeBlock(operation.block, index, { defaultBlockId: blockId });
+      return {
+        kind: 'replace',
+        blockId,
+        block: { ...blockValue, attrs: { ...blockValue.attrs, blockId } },
+      };
+    }
+    if (kind === 'delete') {
+      return { kind: 'delete', blockId: normalizeAnchoredBlockId(operation, index, blockIds) };
+    }
+    if (kind === 'move') {
+      const blockId = normalizeAnchoredBlockId(operation, index, blockIds);
+      const afterBlockId = operation.afterBlockId;
+      if (afterBlockId !== null && typeof afterBlockId !== 'string') {
+        throw invalidOperation(index, 'move.afterBlockId must be a string or null');
+      }
+      if (afterBlockId === blockId) throw invalidOperation(index, 'move cannot anchor after itself');
+      if (typeof afterBlockId === 'string' && !blockIds.has(afterBlockId)) {
+        throw invalidOperation(index, `move anchor ${afterBlockId} does not exist`);
+      }
+      return { kind: 'move', blockId, afterBlockId };
+    }
+    if (kind === 'update_attrs') {
+      const attrs = operation.attrs;
+      if (!isRecord(attrs)) throw invalidOperation(index, 'update_attrs.attrs must be an object');
+      return {
+        kind: 'update_attrs',
+        blockId: normalizeAnchoredBlockId(operation, index, blockIds),
+        attrs,
+      };
+    }
+    throw invalidOperation(index, `unsupported operation kind ${String(kind)}`);
+  });
+}
+
+function rejectCallerOwnedAnchors(
+  operation: Readonly<Record<string, unknown>>,
+  index: number,
+): void {
+  if ('operationId' in operation || 'expectedHash' in operation) {
+    throw invalidOperation(index, 'invalid input: operationId and expectedHash are host-owned');
+  }
+}
+
+function normalizeAnchoredBlockId(
+  operation: Readonly<Record<string, unknown>>,
+  index: number,
+  blockIds: ReadonlySet<string>,
+): string {
+  const explicit = operation.blockId;
+  if (typeof explicit === 'string' && explicit.length > 0) {
+    if (!blockIds.has(explicit)) throw invalidOperation(index, `block ${explicit} does not exist`);
+    return explicit;
+  }
+  const blockValue = isRecord(operation.block) ? operation.block : undefined;
+  const attrs = blockValue && isRecord(blockValue.attrs) ? blockValue.attrs : undefined;
+  const nested = attrs?.blockId;
+  if (typeof nested === 'string' && blockIds.has(nested)) return nested;
+  throw invalidOperation(index, 'anchored operation requires an existing blockId');
+}
+
+function normalizeBlock(
+  value: unknown,
+  index: number,
+  options: { readonly defaultBlockId: string },
+): Static<typeof block> {
+  if (!isRecord(value)) throw invalidOperation(index, 'block must be an object');
+  if (typeof value.type !== 'string' || value.type.length === 0) {
+    throw invalidOperation(index, 'block.type must be a non-empty string');
+  }
+  const attrs = isRecord(value.attrs) ? value.attrs : {};
+  const rawBlockId = attrs.blockId;
+  const blockId =
+    typeof rawBlockId === 'string' && rawBlockId.length > 0 ? rawBlockId : options.defaultBlockId;
+  const content =
+    value.content === undefined
+      ? undefined
+      : Array.isArray(value.content)
+        ? value.content
+        : (() => {
+            throw invalidOperation(index, 'block.content must be an array when provided');
+          })();
+  return {
+    type: value.type,
+    attrs: { ...attrs, blockId },
+    ...(content ? { content } : {}),
+  };
+}
+
+function uniqueGeneratedBlockId(
+  toolCallId: string,
+  index: number,
+  existing: ReadonlySet<string>,
+  generated: Set<string>,
+): string {
+  const base = `agent-${toolCallId}-${String(index + 1)}`;
+  let candidate = base;
+  let suffix = 1;
+  while (existing.has(candidate) || generated.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}-${String(suffix)}`;
+  }
+  generated.add(candidate);
+  return candidate;
+}
+
+function invalidOperation(index: number, message: string): Error {
+  return new Error(`invalid input at operations/${String(index)}: ${message}`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function anchorProposedOperations(

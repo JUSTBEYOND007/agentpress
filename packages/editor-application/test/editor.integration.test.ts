@@ -387,6 +387,75 @@ describeWithInfra('editor persistence and recovery', () => {
     ).resolves.toMatchObject({ status: 'rejected' });
   });
 
+  it('normalizes repairable Agent article edit operations before creating a proposal', async () => {
+    const registry = new ToolRegistry();
+    const proposals = new ProposalService(connection.db);
+    registerArticleTools(registry, connection.db, proposals);
+    const definition = registry.get('article.propose_edits', '1.1.0');
+    const toolCallId = randomUUID();
+    const context = { runId: ids.run, toolCallId };
+    await connection.db.insert(toolCalls).values({
+      id: toolCallId,
+      runId: ids.run,
+      toolId: 'article.propose_edits',
+      toolVersion: '1.1.0',
+      arguments: {},
+      argumentsHash: 'repairable-agent-shape',
+      risk: 'draft_write',
+      sideEffect: 'test repaired proposal',
+      status: 'executing',
+    });
+
+    const created = (await registry.execute(
+      definition,
+      {
+        operations: [
+          {
+            kind: 'insert',
+            block: {
+              type: 'paragraph',
+              attrs: {},
+              content: [{ type: 'text', text: 'Agent generated continuation' }],
+            },
+          },
+        ],
+        reviewMode: 'granular',
+      },
+      context,
+    )) as {
+      readonly proposalId: string;
+      readonly operations: readonly {
+        readonly operationId: string;
+        readonly kind: string;
+        readonly afterBlockId?: string | null;
+        readonly block?: { readonly attrs?: { readonly blockId?: string } };
+      }[];
+      readonly diffs: readonly { readonly kind: string; readonly blockId: string }[];
+    };
+
+    expect(created.operations).toMatchObject([
+      {
+        operationId: `op-${toolCallId}-1`,
+        kind: 'insert',
+        afterBlockId: 'block-b',
+        block: { attrs: { blockId: `agent-${toolCallId}-1` } },
+      },
+    ]);
+    expect(created.diffs).toMatchObject([
+      {
+        kind: 'insert',
+        blockId: `agent-${toolCallId}-1`,
+      },
+    ]);
+    await expect(
+      proposals.decide({
+        proposalId: created.proposalId,
+        userId: ids.user,
+        decisions: { [`op-${toolCallId}-1`]: 'rejected' },
+      }),
+    ).resolves.toMatchObject({ status: 'rejected' });
+  });
+
   it('applies accepted proposal operations into an immutable revision', async () => {
     const service = new ProposalService(connection.db);
     const proposal = await service.create({
