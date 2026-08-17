@@ -148,13 +148,14 @@ export class McpClientGateway implements BuiltInMcpGateway {
 
   public async listTools(serverId: BuiltInMcpServerId): Promise<readonly ListedMcpTool[]> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const client = await this.manager.getClient(serverId);
+      let client: Client | undefined;
       try {
+        client = await this.manager.getClient(serverId);
         const result = await client.listTools();
         return validateListedMcpTools(result.tools);
       } catch (error) {
         if (!isMcpConnectionFailure(error)) throw error;
-        await this.manager.markDegraded(serverId, client);
+        if (client) await this.manager.markDegraded(serverId, client);
         if (attempt === 1) throw error;
       }
     }

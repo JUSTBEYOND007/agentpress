@@ -126,6 +126,50 @@ describe('MCP client gateway', () => {
     ]);
   });
 
+  it('retries one client initialization failure before MCP tool discovery', async () => {
+    const listTools = vi.fn(() =>
+      Promise.resolve({
+        tools: [{ name: 'search', inputSchema: { type: 'object', properties: {} } }],
+      }),
+    );
+    let connection = 0;
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: () => {
+        connection += 1;
+        return connection === 1
+          ? Promise.reject(new Error('fetch failed'))
+          : Promise.resolve({ listTools, close: () => Promise.resolve() } as unknown as Client);
+      },
+    });
+
+    await expect(new McpClientGateway(manager).listTools('web_research')).resolves.toMatchObject([
+      { name: 'search' },
+    ]);
+    expect(connection).toBe(2);
+    expect(listTools).toHaveBeenCalledTimes(1);
+    expect(manager.state('web_research')).toBe('ready');
+  });
+
+  it('does not retry MCP tool discovery after an authentication failure', async () => {
+    const create = vi.fn(() => Promise.reject(new StreamableHTTPError(401, 'Unauthorized')));
+    const manager = new McpServerManager();
+    manager.register({
+      serverId: 'web_research',
+      version: '1',
+      displayName: 'Web',
+      createClient: create,
+    });
+
+    await expect(new McpClientGateway(manager).listTools('web_research')).rejects.toMatchObject({
+      code: 401,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it('proves a failed pre-dispatch connection never became an unknown tool outcome', async () => {
     let connection = 0;
     const manager = new McpServerManager();
