@@ -4,7 +4,7 @@ import { AssistantRuntimeProvider, ThreadPrimitive } from '@assistant-ui/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AgentComposer } from './agent-composer';
-import type { ArticleSelectionView } from './article-selection';
+import { selectionForActiveArticle, type ArticleSelectionView } from './article-selection';
 import { AgentConversationHeader } from './agent-conversation-header';
 import { RunActionsContext, type RunActions } from './agent-run-actions';
 import { AgentThread } from './agent-thread';
@@ -53,12 +53,13 @@ export function AgentWorkbench({
     readonly title: string;
   }[];
 }): React.JSX.Element {
+  const activeArticleSelection = selectionForActiveArticle(articleSelection, activeArticleId);
   const [sendMode, setSendMode] = useState<AgentSendMode>('steering');
   const [skills, setSkills] = useState<readonly SkillView[]>([]);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<readonly string[]>([]);
   const [mentionActiveArticle, setMentionActiveArticle] = useState(false);
   const [selectedArticleIds, setSelectedArticleIds] = useState<readonly string[]>([]);
-  const [selectionIncluded, setSelectionIncluded] = useState(Boolean(articleSelection));
+  const [selectionIncluded, setSelectionIncluded] = useState(Boolean(activeArticleSelection));
   const [attachments, setAttachments] = useState<readonly AttachmentView[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(0);
   const [attachmentError, setAttachmentError] = useState<string>();
@@ -86,8 +87,8 @@ export function AgentWorkbench({
     [selectedSkillKeys, skills],
   );
   useEffect(() => {
-    setSelectionIncluded(Boolean(articleSelection));
-  }, [articleSelection]);
+    setSelectionIncluded(Boolean(activeArticleSelection));
+  }, [activeArticleSelection]);
   useEffect(() => {
     setSelectedArticleIds((current) => current.filter((id) => id !== activeArticleId));
   }, [activeArticleId]);
@@ -97,13 +98,13 @@ export function AgentWorkbench({
         ? [{ type: 'mention' as const, targetId: activeArticleId }]
         : []),
       ...selectedArticleIds.map((targetId) => ({ type: 'mention' as const, targetId })),
-      ...(selectionIncluded && articleSelection
+      ...(selectionIncluded && activeArticleSelection
         ? [
             {
               type: 'article_selection' as const,
-              articleId: articleSelection.articleId,
-              revisionId: articleSelection.revisionId,
-              blocks: articleSelection.blocks,
+              articleId: activeArticleSelection.articleId,
+              revisionId: activeArticleSelection.revisionId,
+              blocks: activeArticleSelection.blocks,
             },
           ]
         : []),
@@ -116,7 +117,7 @@ export function AgentWorkbench({
     ],
     [
       activeArticleId,
-      articleSelection,
+      activeArticleSelection,
       attachments,
       mentionActiveArticle,
       selectedArticleIds,
@@ -232,7 +233,7 @@ export function AgentWorkbench({
             <AgentComposer
               {...(activeArticleTitle ? { activeArticleTitle } : {})}
               {...(activeArticleId ? { activeArticleId } : {})}
-              {...(articleSelection ? { articleSelection } : {})}
+              {...(activeArticleSelection ? { articleSelection: activeArticleSelection } : {})}
               articles={articles}
               attachments={attachments}
               {...(attachmentError ? { attachmentError } : {})}

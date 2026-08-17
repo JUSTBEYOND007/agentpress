@@ -6,6 +6,7 @@ import {
   type AgentRuntime,
   type RuntimeRequest,
 } from '@agentpress/agent-runtime';
+import { hashBlock, type EditorBlock } from '@agentpress/editor-patch';
 import { ProposalService, registerArticleTools } from '@agentpress/editor-application';
 import { fauxAssistantMessage, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import {
@@ -529,6 +530,75 @@ describeWithDatabase('Direct Run application flow', () => {
 
     const runsAfter = await connection.db.select({ id: agentRuns.id }).from(agentRuns);
     expect(runsAfter).toHaveLength(runsBefore.length);
+  });
+
+  it('rejects an article selection from outside the conversation article boundary', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    const referenceArticleId = randomUUID();
+    const referenceRevisionId = randomUUID();
+    const referenceDocument = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { blockId: 'reference-block' },
+          content: [{ type: 'text', text: 'Reference only' }],
+        },
+      ],
+    };
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Article-scoped conversation',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    await connection.db.insert(articles).values({
+      id: referenceArticleId,
+      workspaceId: ids.workspace,
+      title: 'Reference article',
+    });
+    await connection.db.insert(articleRevisions).values({
+      id: referenceRevisionId,
+      articleId: referenceArticleId,
+      revisionNumber: 1,
+      schemaVersion: 1,
+      document: referenceDocument,
+      documentHash: createHash('sha256').update(JSON.stringify(referenceDocument)).digest('hex'),
+      source: 'manual',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: referenceRevisionId })
+      .where(eq(articles.id, referenceArticleId));
+
+    await expect(
+      service.create({
+        conversationId,
+        branchId,
+        userId: ids.user,
+        prompt: '根据选区修改当前文章',
+        idempotencyKey: randomUUID(),
+        contextBindings: [
+          {
+            type: 'article_selection',
+            articleId: referenceArticleId,
+            revisionId: referenceRevisionId,
+            blocks: [
+              {
+                blockId: 'reference-block',
+                contentHash: hashBlock(referenceDocument.content[0] as EditorBlock),
+              },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_context',
+      message: 'An article selection must belong to the conversation article',
+    });
   });
 
   it('settles an unexpected runtime initialization error instead of leaving the Run active', async () => {
@@ -2219,9 +2289,7 @@ describeWithDatabase('Direct Run application flow', () => {
       .where(eq(agentTasks.runId, run.runId));
     const request = persistedTask?.toolPolicy.request as Record<string, unknown> | undefined;
     expect(request?.timeoutMs).toBe(600_000);
-    expect((persistedTask?.budget as Record<string, unknown> | undefined)?.timeoutMs).toBe(
-      600_000,
-    );
+    expect((persistedTask?.budget as Record<string, unknown> | undefined)?.timeoutMs).toBe(600_000);
   });
 
   it('persists and executes a five-Specialist DAG with isolated Context Packs', async () => {

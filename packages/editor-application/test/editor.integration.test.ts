@@ -313,6 +313,58 @@ describeWithInfra('editor persistence and recovery', () => {
     expect(repaired?.status).toBe('rejected');
   });
 
+  it('fails article tools against a Run whose authorized revision is no longer current', async () => {
+    const newerRevisionId = randomUUID();
+    const newerDocument: ArticleDocument = {
+      type: 'doc',
+      content: [paragraph('block-a', 'Newer content'), second],
+    };
+    await connection.db.insert(articleRevisions).values({
+      id: newerRevisionId,
+      articleId: ids.article,
+      revisionNumber: 2,
+      schemaVersion: 1,
+      document: newerDocument,
+      documentHash: hashDocument(newerDocument),
+      source: 'autosave',
+      createdByUserId: ids.user,
+    });
+    await connection.db
+      .update(articles)
+      .set({ currentRevisionId: newerRevisionId })
+      .where(eq(articles.id, ids.article));
+
+    try {
+      const registry = new ToolRegistry();
+      registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+      const context = { runId: ids.run, toolCallId: randomUUID() };
+      await expect(
+        registry.execute(registry.get('article.read_current', '1.0.0'), {}, context),
+      ).rejects.toThrow('retry from the latest revision');
+      await expect(
+        registry.execute(
+          registry.get('article.propose_edits', '1.1.0'),
+          {
+            operations: [
+              {
+                kind: 'replace',
+                blockId: 'block-a',
+                block: paragraph('block-a', 'Unauthorized stale replacement'),
+              },
+            ],
+          },
+          context,
+        ),
+      ).rejects.toThrow('retry from the latest revision');
+    } finally {
+      await connection.db
+        .update(articles)
+        .set({ currentRevisionId: ids.revision })
+        .where(eq(articles.id, ids.article));
+      await connection.db.delete(articleRevisions).where(eq(articleRevisions.id, newerRevisionId));
+    }
+  });
+
   it('keeps proposal identity and concurrency anchors under host control', async () => {
     const registry = new ToolRegistry();
     const proposals = new ProposalService(connection.db);

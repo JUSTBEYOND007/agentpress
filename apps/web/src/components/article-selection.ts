@@ -10,6 +10,13 @@ export type ArticleSelectionView = {
   }[];
 };
 
+export function selectionForActiveArticle(
+  selection: ArticleSelectionView | undefined,
+  activeArticleId: string | undefined,
+): ArticleSelectionView | undefined {
+  return selection?.articleId === activeArticleId ? selection : undefined;
+}
+
 export async function readArticleSelection(
   editor: Editor,
   articleId: string,

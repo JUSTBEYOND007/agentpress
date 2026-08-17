@@ -192,6 +192,15 @@ export class DirectRunCreationService {
           'User is not a member of the conversation workspace',
         );
       }
+      const crossArticleSelection = input.contextBindings?.find(
+        (binding) => binding.type === 'article_selection' && binding.articleId !== branch.articleId,
+      );
+      if (crossArticleSelection) {
+        throw new AgentApplicationError(
+          'invalid_context',
+          'An article selection must belong to the conversation article',
+        );
+      }
 
       const explicitSkills = collectSkillSelections(input);
       const catalog = this.options.skillPreselector

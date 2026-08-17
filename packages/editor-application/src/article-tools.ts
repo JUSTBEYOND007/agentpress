@@ -110,10 +110,7 @@ const modelFacingOperations = Type.Array(
       {
         kind: Type.Literal('move'),
         blockId: Type.String({ minLength: 1, maxLength: 160 }),
-        afterBlockId: Type.Union([
-          Type.String({ minLength: 1, maxLength: 160 }),
-          Type.Null(),
-        ]),
+        afterBlockId: Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
       },
       { additionalProperties: false },
     ),
@@ -268,12 +265,7 @@ function normalizeProposedOperations(
       return { kind: 'insert', afterBlockId, block: blockValue };
     }
     if (kind === 'replace') {
-      const blockId = normalizeAnchoredBlockId(
-        operation,
-        index,
-        originalBlockIds,
-        activeBlockIds,
-      );
+      const blockId = normalizeAnchoredBlockId(operation, index, originalBlockIds, activeBlockIds);
       const blockValue = normalizeBlock(operation.block, index, { defaultBlockId: blockId });
       return {
         kind: 'replace',
@@ -282,27 +274,18 @@ function normalizeProposedOperations(
       };
     }
     if (kind === 'delete') {
-      const blockId = normalizeAnchoredBlockId(
-        operation,
-        index,
-        originalBlockIds,
-        activeBlockIds,
-      );
+      const blockId = normalizeAnchoredBlockId(operation, index, originalBlockIds, activeBlockIds);
       activeBlockIds.splice(activeBlockIds.indexOf(blockId), 1);
       return { kind: 'delete', blockId };
     }
     if (kind === 'move') {
-      const blockId = normalizeAnchoredBlockId(
-        operation,
-        index,
-        originalBlockIds,
-        activeBlockIds,
-      );
+      const blockId = normalizeAnchoredBlockId(operation, index, originalBlockIds, activeBlockIds);
       const afterBlockId = operation.afterBlockId;
       if (afterBlockId !== null && typeof afterBlockId !== 'string') {
         throw invalidOperation(index, 'move.afterBlockId must be a string or null');
       }
-      if (afterBlockId === blockId) throw invalidOperation(index, 'move cannot anchor after itself');
+      if (afterBlockId === blockId)
+        throw invalidOperation(index, 'move cannot anchor after itself');
       if (typeof afterBlockId === 'string' && !activeBlockIds.includes(afterBlockId)) {
         throw invalidOperation(index, `move anchor ${afterBlockId} does not exist`);
       }
@@ -315,12 +298,7 @@ function normalizeProposedOperations(
       if (!isRecord(attrs)) throw invalidOperation(index, 'update_attrs.attrs must be an object');
       return {
         kind: 'update_attrs',
-        blockId: normalizeAnchoredBlockId(
-          operation,
-          index,
-          originalBlockIds,
-          activeBlockIds,
-        ),
+        blockId: normalizeAnchoredBlockId(operation, index, originalBlockIds, activeBlockIds),
         attrs,
       };
     }
@@ -358,9 +336,9 @@ function normalizeAnchoredBlockId(
   const attrs = blockValue && isRecord(blockValue.attrs) ? blockValue.attrs : undefined;
   const nested = attrs?.blockId;
   if (
-    typeof nested === 'string'
-    && originalBlockIds.has(nested)
-    && activeBlockIds.includes(nested)
+    typeof nested === 'string' &&
+    originalBlockIds.has(nested) &&
+    activeBlockIds.includes(nested)
   ) {
     return nested;
   }
@@ -456,6 +434,7 @@ async function resolveRunArticle(database: AgentPressDatabase, runId: string) {
   const rows = await database
     .select({
       articleId: articles.id,
+      currentRevisionId: articles.currentRevisionId,
       revisionId: articleRevisions.id,
       document: articleRevisions.document,
     })
@@ -482,5 +461,11 @@ async function resolveRunArticle(database: AgentPressDatabase, runId: string) {
     .limit(1);
   const current = rows[0];
   if (!current) throw new Error('Agent Run is not bound to an editable article');
+  if (current.currentRevisionId !== current.revisionId) {
+    throw new StaleEditError(
+      'proposal',
+      'Article changed after the Agent Run was authorized; retry from the latest revision',
+    );
+  }
   return current;
 }
