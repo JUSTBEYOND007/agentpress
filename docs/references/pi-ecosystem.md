@@ -468,6 +468,19 @@ the queue; recovery requeues an in-flight item and invalidates the old token, an
 closed. PostgreSQL and Direct Run integration tests cover concurrent enqueue, opposite directive
 semantics, Specialist isolation, recovery, cancellation, and actual ToolCall-based settlement.
 
+The provider wire boundary was additionally audited against the exact locked
+`@earendil-works/pi-ai@0.82.1` and `@earendil-works/pi-agent-core@0.82.1` packages (MIT,
+`earendil-works/pi`, `packages/ai/src/api/openai-completions.ts` and
+`packages/agent/src/agent-loop.ts`). In this version, OpenAI completions forwards the uniform Pi
+`toolChoice` value directly into `tool_choice`, while the OpenAI-compatible protocol names a forced
+function as `{type: "function", function: {name}}`; AgentPress therefore encodes only that provider
+wire value and keeps the persisted host choice provider-neutral. The same pinned Agent loop calls
+`prepareArguments` before Pi's coercing `validateToolArguments`. OpenAI strict optional fields use a
+required nullable placeholder, so their generated `anyOf` places `null` first to prevent TypeBox
+conversion from turning an introduced `null` into a scalar default before host decoding. The local
+contracts execute the pinned Pi validator and a real OpenAI-compatible loopback HTTP request; host
+schemas remain no-coercion and are revalidated after removing only adapter-introduced nulls.
+
 Oh My Pi's Vibe task lifecycle was verified at the same fixed commit in
 `packages/coding-agent/src/vibe/runtime.ts` with behavior tests in
 `packages/coding-agent/test/vibe/vibe-runtime.test.ts`: `yield` produces a structured Specialist

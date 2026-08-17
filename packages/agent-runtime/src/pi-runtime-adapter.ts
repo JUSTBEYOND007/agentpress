@@ -23,6 +23,7 @@ import type {
   RuntimeMessage,
   RuntimeRequest,
   RuntimeResult,
+  RuntimeToolChoice,
   RuntimeUserMessage,
 } from './contracts.js';
 import { convertAgentPressMessages } from './current-turn.js';
@@ -47,6 +48,7 @@ type PiBackend = {
   readonly models: Models;
   readonly model: Model<Api>;
   readonly toolSchemaCapability: ProviderToolSchemaCapability;
+  readonly encodeToolChoice?: (choice: RuntimeToolChoice) => unknown;
 };
 
 class ExecutionState {
@@ -229,10 +231,14 @@ export class PiRuntimeAdapter implements AgentRuntime {
     ) => {
       const toolChoice = !toolChoiceServed ? request.toolChoice : undefined;
       toolChoiceServed = true;
+      const encodedToolChoice =
+        toolChoice === undefined
+          ? undefined
+          : (this.backend.encodeToolChoice?.(toolChoice) ?? toolChoice);
       const streamOptions = {
         ...options,
         maxTokens: maxOutputTokens,
-        ...(toolChoice === undefined ? {} : { toolChoice }),
+        ...(encodedToolChoice === undefined ? {} : { toolChoice: encodedToolChoice }),
       };
       this.onStreamOptions?.(streamOptions);
       return this.backend.models.streamSimple(model, context, streamOptions);

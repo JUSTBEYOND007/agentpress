@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+
 import { describe, expect, it } from 'vitest';
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
@@ -58,9 +60,57 @@ describe('PiRuntimeAdapter', () => {
       acceptsStrictTools: true,
       enforcesStrictTools: true,
     });
+    expect(
+      (['auto', 'none', 'required'] as const).map((choice) => backend.encodeToolChoice(choice)),
+    ).toEqual([
+      'auto',
+      'none',
+      'required',
+    ]);
     await expect(backend.models.getAuth(backend.model)).resolves.toMatchObject({
       auth: { apiKey: 'test-key' },
     });
+  });
+
+  it('encodes a forced tool choice for the OpenAI-compatible wire protocol', async () => {
+    const fixture = await startOpenAiPayloadFixture();
+    try {
+      const runtime = PiRuntimeAdapter.forOpenAICompatible({
+        providerId: 'openai-compatible-fixture',
+        providerName: 'OpenAI compatible fixture',
+        modelId: 'fixture-model',
+        baseUrl: fixture.baseUrl,
+        apiKey: 'test-key',
+        acceptsStrictTools: true,
+        enforcesStrictTools: false,
+      });
+      const result = await runtime.execute(
+        {
+          runId: 'forced-openai-compatible-choice',
+          systemPrompt: 'Use the selected tool.',
+          history: [],
+          currentTurn: currentTurn('查询'),
+          toolChoice: { type: 'tool', name: 'lookup' },
+          tools: [
+            {
+              name: 'lookup',
+              label: 'Lookup',
+              description: 'Lookup one key',
+              parameters: Type.Object({ key: Type.String() }),
+              execute: () => Promise.resolve({ ok: true }),
+            },
+          ],
+        },
+        () => undefined,
+      );
+
+      expect(result.status).toBe('completed');
+      await expect(fixture.payload).resolves.toMatchObject({
+        tool_choice: { type: 'function', function: { name: 'lookup' } },
+      });
+    } finally {
+      await fixture.close();
+    }
   });
 
   it('maps official Pi streaming events into stable AgentPress events', async () => {
@@ -1025,3 +1075,58 @@ describe('PiRuntimeAdapter', () => {
     });
   });
 });
+
+async function startOpenAiPayloadFixture(): Promise<{
+  readonly baseUrl: string;
+  readonly payload: Promise<Readonly<Record<string, unknown>>>;
+  readonly close: () => Promise<void>;
+}> {
+  let resolvePayload: (payload: Readonly<Record<string, unknown>>) => void = () => undefined;
+  const payload = new Promise<Readonly<Record<string, unknown>>>((resolve) => {
+    resolvePayload = resolve;
+  });
+  const server = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => {
+      body += chunk;
+    });
+    request.on('end', () => {
+      resolvePayload(JSON.parse(body) as Record<string, unknown>);
+      response.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      response.end(
+        `data: ${JSON.stringify({
+          id: 'chatcmpl-fixture',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'fixture-model',
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: 'done' },
+              finish_reason: 'stop',
+            },
+          ],
+        })}\n\ndata: [DONE]\n\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Provider fixture did not bind TCP');
+  return {
+    baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
+    payload,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      }),
+  };
+}

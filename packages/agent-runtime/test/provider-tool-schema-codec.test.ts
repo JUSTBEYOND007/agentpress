@@ -1,4 +1,9 @@
-import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import {
+  fauxAssistantMessage,
+  fauxText,
+  fauxToolCall,
+  validateToolArguments,
+} from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 import { describe, expect, it } from 'vitest';
 
@@ -113,6 +118,35 @@ describe('provider tool schema codec', () => {
 
     expect(codec.prepareArguments({ query: 'Kafka' })).toEqual({ query: 'Kafka', limit: null });
     expect(codec.decodeArguments({ query: 'Kafka', limit: null })).toEqual({ query: 'Kafka' });
+  });
+
+  it('keeps introduced null placeholders intact through the pinned Pi validator', () => {
+    const schema = Type.Object(
+      {
+        query: Type.String(),
+        limit: Type.Optional(Type.Integer()),
+      },
+      { additionalProperties: false },
+    );
+    const codec = createProviderToolSchemaCodec(schema, openAiStrict, 'require');
+    const prepared = codec.prepareArguments({ query: 'Kafka' });
+    const validated: unknown = validateToolArguments(
+      { name: 'lookup', description: 'Lookup records', parameters: codec.wireSchema },
+      { type: 'toolCall', id: 'provider-call', name: 'lookup', arguments: prepared },
+    );
+
+    expect(validated).toEqual({ query: 'Kafka', limit: null });
+    expect(codec.decodeArguments(validated)).toEqual({ query: 'Kafka' });
+    const explicit: unknown = validateToolArguments(
+      { name: 'lookup', description: 'Lookup records', parameters: codec.wireSchema },
+      {
+        type: 'toolCall',
+        id: 'provider-call-explicit',
+        name: 'lookup',
+        arguments: codec.prepareArguments({ query: 'Kafka', limit: 3 }),
+      },
+    );
+    expect(codec.decodeArguments(explicit)).toEqual({ query: 'Kafka', limit: 3 });
   });
 
   it('rejects coercible raw values before Pi can convert them', () => {

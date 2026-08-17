@@ -300,10 +300,10 @@ function inferEnumType(schema: Record<string, unknown>): void {
 function makeNullableSchema(value: unknown): unknown {
   if (isRecord(value) && Array.isArray(value.anyOf)) {
     if (value.anyOf.some((variant) => isRecord(variant) && variant.type === 'null')) return value;
-    return { ...value, anyOf: [...(value.anyOf as readonly unknown[]), { type: 'null' }] };
+    return { ...value, anyOf: [{ type: 'null' }, ...(value.anyOf as readonly unknown[])] };
   }
   if (isRecord(value) && Array.isArray(value.type) && value.type.includes('null')) return value;
-  return { anyOf: [value, { type: 'null' }] };
+  return { anyOf: [{ type: 'null' }, value] };
 }
 
 function mergeUnion(existing: unknown, variants: readonly unknown[]): readonly unknown[] {

@@ -24,8 +24,8 @@ describe('provider schema fixtures', () => {
     expect(wireProperties.requiredText ?? {}).not.toHaveProperty('minLength');
     expect(wireProperties.optionalCount ?? {}).not.toHaveProperty('default');
     expect(wireProperties.optionalCount?.anyOf).toEqual([
-      expect.objectContaining({ type: 'integer' }),
       { type: 'null' },
+      expect.objectContaining({ type: 'integer' }),
     ]);
     expect(JSON.stringify(source)).toBe(original);
   });

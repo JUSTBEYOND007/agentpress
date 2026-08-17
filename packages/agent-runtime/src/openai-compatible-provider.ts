@@ -7,6 +7,7 @@ import {
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 
+import type { RuntimeToolChoice } from './contracts.js';
 import type { ProviderToolSchemaCapability } from './provider-tool-schema-codec.js';
 
 export type OpenAICompatibleRuntimeConfig = {
@@ -29,6 +30,7 @@ export type OpenAICompatibleBackend = {
   readonly models: Models;
   readonly model: Model<'openai-completions'>;
   readonly toolSchemaCapability: ProviderToolSchemaCapability;
+  readonly encodeToolChoice: (choice: RuntimeToolChoice) => unknown;
 };
 
 function staticApiKeyAuth(providerName: string, apiKey: string) {
@@ -36,6 +38,11 @@ function staticApiKeyAuth(providerName: string, apiKey: string) {
     name: `${providerName} API key`,
     resolve: () => Promise.resolve({ auth: { apiKey } }),
   };
+}
+
+export function encodeOpenAICompatibleToolChoice(choice: RuntimeToolChoice): unknown {
+  if (typeof choice === 'string') return choice;
+  return { type: 'function', function: { name: choice.name } };
 }
 
 export function createOpenAICompatibleBackend(
@@ -94,5 +101,6 @@ export function createOpenAICompatibleBackend(
       acceptsStrictTools: config.acceptsStrictTools,
       enforcesStrictTools: config.enforcesStrictTools,
     },
+    encodeToolChoice: encodeOpenAICompatibleToolChoice,
   };
 }
