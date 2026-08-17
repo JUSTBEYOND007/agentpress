@@ -118,35 +118,8 @@ export class McpClientGateway implements BuiltInMcpGateway {
   ) {}
 
   public async call(input: Parameters<BuiltInMcpGateway['call']>[0]): Promise<unknown> {
-    const client = await this.getClientBeforeCall(input);
-    if (input.expectedCapability) {
-      try {
-        await assertMcpToolCapability(client, {
-          serverId: input.serverId,
-          toolName: input.toolName,
-          expected: input.expectedCapability,
-        });
-      } catch (error) {
-        if (error instanceof McpToolCapabilityError) throw error;
-        if (error instanceof StreamableHTTPError && error.code === 429) {
-          throw new McpRateLimitError(input.serverId, input.toolName);
-        }
-        if (isMcpAuthenticationFailure(error)) {
-          throw new McpAuthenticationError(input.serverId, input.toolName);
-        }
-        if (isMcpConnectionFailure(error)) {
-          await this.manager.markDegraded(input.serverId, client);
-          throwIfAborted(input.context.signal);
-          throw new McpCallBeforeDispatchError(input.serverId, input.toolName, error);
-        }
-        throw new McpToolCapabilityError(
-          input.serverId,
-          input.toolName,
-          input.expectedCapability.toolRevision,
-          'capability_check_failed',
-        );
-      }
-    }
+    let client = await this.getClientBeforeCall(input);
+    if (input.expectedCapability) client = await this.validateCapabilityBeforeCall(input, client);
     try {
       const result = await callTool(client, input);
       if (!this.manager.isCurrentClient(input.serverId, client)) {
@@ -174,14 +147,18 @@ export class McpClientGateway implements BuiltInMcpGateway {
   }
 
   public async listTools(serverId: BuiltInMcpServerId): Promise<readonly ListedMcpTool[]> {
-    const client = await this.manager.getClient(serverId);
-    try {
-      const result = await client.listTools();
-      return validateListedMcpTools(result.tools);
-    } catch (error) {
-      if (isMcpConnectionFailure(error)) await this.manager.markDegraded(serverId, client);
-      throw error;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const client = await this.manager.getClient(serverId);
+      try {
+        const result = await client.listTools();
+        return validateListedMcpTools(result.tools);
+      } catch (error) {
+        if (!isMcpConnectionFailure(error)) throw error;
+        await this.manager.markDegraded(serverId, client);
+        if (attempt === 1) throw error;
+      }
     }
+    throw new Error(`MCP Server ${serverId} tool discovery retry was exhausted`);
   }
 
   public async listPrompts(serverId: BuiltInMcpServerId) {
@@ -320,6 +297,48 @@ export class McpClientGateway implements BuiltInMcpGateway {
         );
       }
     }
+  }
+
+  private async validateCapabilityBeforeCall(
+    input: Parameters<BuiltInMcpGateway['call']>[0],
+    initialClient: Client,
+  ): Promise<Client> {
+    const expected = input.expectedCapability;
+    if (!expected) return initialClient;
+    let client = initialClient;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await assertMcpToolCapability(client, {
+          serverId: input.serverId,
+          toolName: input.toolName,
+          expected,
+        });
+        return client;
+      } catch (error) {
+        if (error instanceof McpToolCapabilityError) throw error;
+        if (error instanceof StreamableHTTPError && error.code === 429) {
+          throw new McpRateLimitError(input.serverId, input.toolName);
+        }
+        if (isMcpAuthenticationFailure(error)) {
+          throw new McpAuthenticationError(input.serverId, input.toolName);
+        }
+        if (!isMcpConnectionFailure(error)) {
+          throw new McpToolCapabilityError(
+            input.serverId,
+            input.toolName,
+            expected.toolRevision,
+            'capability_check_failed',
+          );
+        }
+        await this.manager.markDegraded(input.serverId, client);
+        throwIfAborted(input.context.signal);
+        if (attempt === 1) {
+          throw new McpCallBeforeDispatchError(input.serverId, input.toolName, error);
+        }
+        client = await this.getClientBeforeCall(input);
+      }
+    }
+    throw new McpCallBeforeDispatchError(input.serverId, input.toolName);
   }
 
   private async emitTransportEvent(

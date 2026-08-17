@@ -5,6 +5,7 @@ import {
   PersistentToolBridge,
   RunProjectionService,
   ToolCallService,
+  ToolTransportAuditService,
   type DurableRunEvent,
   type LiveRunEvent,
 } from '@agentpress/agent-application';
@@ -48,7 +49,21 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
   const published: LiveRunEvent[] = [];
   const manager = new McpServerManager();
   const registry = new ToolRegistry();
-  registerBuiltInMcpTools(registry, new McpClientGateway(manager));
+  const transportAudit = new ToolTransportAuditService({
+    database: connection.db,
+    publisher: {
+      publish(event) {
+        published.push(event);
+        return Promise.resolve();
+      },
+    },
+  });
+  registerBuiltInMcpTools(
+    registry,
+    new McpClientGateway(manager, {
+      onTransportEvent: (event) => transportAudit.record(event).then(() => undefined),
+    }),
+  );
   const service = new ToolCallService({
     database: connection.db,
     registry,
@@ -182,6 +197,76 @@ describeWithDatabase('real MCP to PostgreSQL ToolCall composition', () => {
     expect(
       durableLive.filter(({ eventType }) => eventType === 'tool.duplicate_result_ignored'),
     ).toHaveLength(1);
+  });
+
+  it('reconnects a stale capability session before one persisted provider execution', async () => {
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: service,
+    });
+    const warmRunId = await createRunningRun();
+    const warmSearch = (await bridge.createForRun(warmRunId, ['web.research'])).find(
+      (tool) => tool.label === 'web.search',
+    );
+    await expect(
+      warmSearch?.execute(
+        { query: 'warm MCP session', limit: 1 },
+        { runId: warmRunId, providerToolCallId: randomUUID() },
+      ),
+    ).resolves.toBeDefined();
+
+    const port = Number(new URL(fixture.url).port);
+    await fixture.close();
+    fixture = await startStreamableHttpSearchFixture({ port });
+
+    const interruptedRunId = await createRunningRun();
+    const interruptedSearch = (await bridge.createForRun(interruptedRunId, ['web.research'])).find(
+      (tool) => tool.label === 'web.search',
+    );
+    const interruptedProviderCallId = randomUUID();
+    const first = await interruptedSearch?.execute(
+      { query: 'stale MCP session', limit: 1 },
+      { runId: interruptedRunId, providerToolCallId: interruptedProviderCallId },
+    );
+    const replayed = await interruptedSearch?.execute(
+      { query: 'stale MCP session', limit: 1 },
+      { runId: interruptedRunId, providerToolCallId: interruptedProviderCallId },
+    );
+    expect(first).toBeDefined();
+    expect(replayed).toEqual(first);
+    expect(fixture.callCount()).toBe(1);
+
+    const interruptedRows = await connection.db
+      .select({
+        status: toolCalls.status,
+        failure: toolCalls.failure,
+        retryCount: toolCalls.transportRetryCount,
+        reconnectCount: toolCalls.transportReconnectCount,
+      })
+      .from(toolCalls)
+      .where(eq(toolCalls.runId, interruptedRunId));
+    expect(interruptedRows).toEqual([
+      { status: 'succeeded', failure: null, retryCount: 1, reconnectCount: 1 },
+    ]);
+    const interruptedProjection = await new RunProjectionService(connection.db).get(
+      interruptedRunId,
+    );
+    expect(interruptedProjection?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'tool.succeeded',
+          outcome: 'succeeded',
+          payload: expect.objectContaining({
+            transportRetryCount: 1,
+            transportReconnectCount: 1,
+          }) as unknown,
+        }),
+      ]),
+    );
+    expect(
+      interruptedProjection?.parts.filter(({ status }) => status === 'tool.outcome_unknown'),
+    ).toEqual([]);
   });
 
   it('settles a disappeared remote tool as unavailable before provider dispatch', async () => {

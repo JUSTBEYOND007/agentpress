@@ -396,16 +396,19 @@ describe('MCP Streamable HTTP real fixture', () => {
       { name: 'slow' },
       { name: 'stubborn' },
     ]);
+    const firstSessionId = first.transport.sessionId;
+    expect(firstSessionId).toBeDefined();
     await manager.markDegraded('web_research');
     await first.close();
     const restarted = await startFixture(false, port);
     try {
-      await expect(gateway.listTools('web_research')).rejects.toBeDefined();
       await expect(gateway.listTools('web_research')).resolves.toMatchObject([
         { name: 'echo' },
         { name: 'slow' },
         { name: 'stubborn' },
       ]);
+      expect(restarted.transport.sessionId).toBeDefined();
+      expect(restarted.transport.sessionId).not.toBe(firstSessionId);
       expect(manager.state('web_research')).toBe('ready');
       await manager.stop('web_research');
     } finally {

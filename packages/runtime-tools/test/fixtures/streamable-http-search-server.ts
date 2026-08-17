@@ -13,7 +13,7 @@ export type StreamableHttpSearchFixture = {
 };
 
 export async function startStreamableHttpSearchFixture(
-  options: { readonly toolName?: 'search' | 'retired_search' } = {},
+  options: { readonly toolName?: 'search' | 'retired_search'; readonly port?: number } = {},
 ): Promise<StreamableHttpSearchFixture> {
   let callCount = 0;
   const transport = new StreamableHTTPServerTransport({
@@ -56,7 +56,7 @@ export async function startStreamableHttpSearchFixture(
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
+    server.listen(options.port ?? 0, '127.0.0.1', resolve);
   });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('MCP fixture did not bind TCP');

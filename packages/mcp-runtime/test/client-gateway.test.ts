@@ -318,8 +318,11 @@ describe('MCP client gateway', () => {
     expect(manager.state('web_research')).toBe('ready');
   });
 
-  it('does not infer rate limiting or connection loss from a non-429 HTTP response', async () => {
-    const unavailable = new StreamableHTTPError(503, 'rate limit credential=generated');
+  it.each([
+    [400, 'Bad Request: Unsupported protocol version'],
+    [503, 'rate limit credential=generated'],
+  ])('does not infer connection loss from an unrelated HTTP %s response', async (code, message) => {
+    const unavailable = new StreamableHTTPError(code, message);
     const manager = managerWithClients([
       {
         callTool: vi.fn(() => Promise.reject(unavailable)),
@@ -329,6 +332,81 @@ describe('MCP client gateway', () => {
 
     await expect(new McpClientGateway(manager).call(toolCallInput())).rejects.toBe(unavailable);
     expect(manager.state('web_research')).toBe('ready');
+  });
+
+  it.each([
+    [404, 'Session no longer exists'],
+    [
+      400,
+      'Error POSTing to endpoint: {"jsonrpc":"2.0","error":{"code":-32000,"message":"Bad Request: Server not initialized"}}',
+    ],
+  ])(
+    'treats a typed HTTP %s stale session as connection loss after dispatch',
+    async (code, message) => {
+      const staleSession = new StreamableHTTPError(code, message);
+      const callTool = vi.fn(() => Promise.reject(staleSession));
+      const manager = managerWithClients([
+        { callTool, close: () => Promise.resolve() } as unknown as Client,
+      ]);
+
+      await expect(
+        new McpClientGateway(manager).call(toolCallInput('stale-http-session')),
+      ).rejects.toMatchObject({
+        name: 'McpCallOutcomeUnknownError',
+        reason: 'connection_lost_after_dispatch',
+        cause: staleSession,
+      });
+      expect(callTool).toHaveBeenCalledTimes(1);
+      expect(manager.state('web_research')).toBe('degraded');
+    },
+  );
+
+  it('reconnects one stale capability check before dispatching the tool once', async () => {
+    const staleSession = new StreamableHTTPError(
+      400,
+      'Error POSTing to endpoint: {"jsonrpc":"2.0","error":{"code":-32000,"message":"Bad Request: Server not initialized"}}',
+    );
+    const staleList = vi.fn(() => Promise.reject(staleSession));
+    const freshList = vi.fn(() =>
+      Promise.resolve({ tools: [{ name: 'search', inputSchema: searchSchema() }] }),
+    );
+    const freshCall = vi.fn(() =>
+      Promise.resolve({ structuredContent: { value: { results: ['reconnected'] } } }),
+    );
+    const manager = managerWithClients([
+      { listTools: staleList, close: () => Promise.resolve() } as unknown as Client,
+      {
+        listTools: freshList,
+        callTool: freshCall,
+        close: () => Promise.resolve(),
+      } as unknown as Client,
+    ]);
+    const transportEvents: unknown[] = [];
+
+    await expect(
+      new McpClientGateway(manager, {
+        onTransportEvent(event) {
+          transportEvents.push(event);
+          return Promise.resolve();
+        },
+      }).call(capabilityCallInput('stale-capability-session')),
+    ).resolves.toEqual({ results: ['reconnected'] });
+    expect(staleList).toHaveBeenCalledTimes(1);
+    expect(freshList).toHaveBeenCalledTimes(1);
+    expect(freshCall).toHaveBeenCalledTimes(1);
+    expect(manager.state('web_research')).toBe('ready');
+    expect(transportEvents).toEqual([
+      expect.objectContaining({
+        event: 'retry_attempted',
+        reason: 'degraded_client',
+        retryOrdinal: 1,
+      }),
+      expect.objectContaining({
+        event: 'reconnected',
+        reason: 'degraded_client',
+        retryOrdinal: 1,
+      }),
+    ]);
   });
 
   it('redacts a typed JSON-RPC error without degrading the healthy client', async () => {
