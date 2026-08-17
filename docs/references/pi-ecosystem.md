@@ -453,6 +453,13 @@ the same source documents that `continue()` requires a final `user` or `toolResu
 AgentPress keeps that runtime behavior and adds `validateRuntimeHistory` in
 `packages/agent-runtime/src/pi-runtime-adapter.ts` for PostgreSQL transcript recovery, where
 missing, duplicate, mismatched, or non-object ToolCall arguments fail closed before provider I/O.
+The pinned Pi `prepareToolCall` sequence emits `tool_execution_start` before `prepareArguments`
+and `validateToolArguments`, while `beforeToolCall` runs only after both validations succeed.
+AgentPress therefore records known-tool preparation/schema failures through the RuntimeTool
+adapter into the PostgreSQL ToolCall ledger, counts them in a two-attempt preflight repair budget,
+and waits for those facts to commit before returning a terminal Runtime result. This preserves Pi's
+error ToolResult repair behavior without allowing validation failures to bypass host audit or loop
+budgets.
 
 Oh My Pi's ToolChoiceQueue was verified at commit `f446b8a8193e59b4cbd2cf487ab6fa1915e0b890`
 in `packages/coding-agent/src/session/tool-choice-queue.ts` with contracts in

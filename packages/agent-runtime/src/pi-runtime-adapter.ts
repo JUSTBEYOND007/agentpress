@@ -1,4 +1,4 @@
-import { Agent, shouldCompact } from '@earendil-works/pi-agent-core';
+import { Agent, shouldCompact, type AgentToolResult } from '@earendil-works/pi-agent-core';
 import {
   createModels,
   fauxAssistantMessage,
@@ -160,6 +160,20 @@ export class PiRuntimeAdapter implements AgentRuntime {
       await sink({ type: 'run.failed', error });
       return { status: 'failed', messages: [], error };
     }
+    if (
+      request.maxFailedToolPreflightCalls !== undefined &&
+      (!Number.isSafeInteger(request.maxFailedToolPreflightCalls) ||
+        request.maxFailedToolPreflightCalls < 1 ||
+        request.maxFailedToolPreflightCalls > 100)
+    ) {
+      const error: RuntimeFailure = {
+        code: 'protocol_error',
+        message: `Invalid tool preflight failure budget: ${String(request.maxFailedToolPreflightCalls)}`,
+        retryable: false,
+      };
+      await sink({ type: 'run.failed', error });
+      return { status: 'failed', messages: [], error };
+    }
     const historyFailure = validateRuntimeHistory(request.history);
     if (historyFailure) {
       await sink({ type: 'run.failed', error: historyFailure });
@@ -214,11 +228,18 @@ export class PiRuntimeAdapter implements AgentRuntime {
       request.tools?.filter(({ terminateOnSuccess }) => terminateOnSuccess).map(({ name }) => name),
     );
     const blockedByLoopGuard = new Map<string, boolean>();
+    const validatedToolCallIds = new Set<string>();
+    const decodeFailedToolCallIds = new Set<string>();
+    const preflightBudgetedToolCallIds = new Set<string>();
+    const rawToolArguments = new Map<string, unknown>();
+    const preflightPersistence: Promise<void>[] = [];
+    let preflightPersistenceFailure: unknown;
     const toolLoopGuard = new ToolLoopGuard(
       request.toolLoopGuard?.maxConsecutiveIdenticalCalls ?? 3,
     );
     let domainToolCalls = 0;
     let failedCompletionCalls = 0;
+    let failedToolPreflightCalls = 0;
     let providerToolCallsObserved = 0;
     let overflowMessage: AssistantMessage | undefined;
     let overflowRecoveryAttempts = 0;
@@ -250,7 +271,9 @@ export class PiRuntimeAdapter implements AgentRuntime {
         messages: initialHistory.map(toPiMessage),
         tools:
           request.tools?.map((tool) =>
-            toPiTool(tool, request.runId, this.backend.toolSchemaCapability),
+            toPiTool(tool, request.runId, this.backend.toolSchemaCapability, (toolCallId) => {
+              decodeFailedToolCallIds.add(toolCallId);
+            }),
           ) ?? [],
         thinkingLevel: 'off',
       },
@@ -260,9 +283,11 @@ export class PiRuntimeAdapter implements AgentRuntime {
       maxRetryDelayMs: 10_000,
       ...(request.beforeToolCall ||
       request.maxToolCalls !== undefined ||
+      request.maxFailedToolPreflightCalls !== undefined ||
       request.toolLoopGuard !== undefined
         ? {
             beforeToolCall: async ({ toolCall, args }) => {
+              validatedToolCallIds.add(toolCall.id);
               const policy = await request.beforeToolCall?.({
                 toolCallId: toolCall.id,
                 toolName: toolCall.name,
@@ -363,7 +388,52 @@ export class PiRuntimeAdapter implements AgentRuntime {
     signal?.addEventListener('abort', abort, { once: true });
 
     const unsubscribe = agent.subscribe(async (event) => {
-      if (event.type === 'tool_execution_start') providerToolCallsObserved += 1;
+      if (event.type === 'tool_execution_start') {
+        providerToolCallsObserved += 1;
+        rawToolArguments.set(event.toolCallId, event.args);
+      }
+      if (
+        event.type === 'tool_execution_end' &&
+        event.isError &&
+        (!validatedToolCallIds.has(event.toolCallId) ||
+          decodeFailedToolCallIds.has(event.toolCallId))
+      ) {
+        const failure = toRuntimeToolResult(
+          event.toolCallId,
+          event.toolName,
+          event.result as AgentToolResult<unknown>,
+          true,
+        ).content;
+        const runtimeTool = request.tools?.find(({ name }) => name === event.toolName);
+        if (runtimeTool?.onPreflightFailure) {
+          preflightPersistence.push(
+            runtimeTool
+              .onPreflightFailure(rawToolArguments.get(event.toolCallId), {
+                runId: request.runId,
+                providerToolCallId: event.toolCallId,
+                failure,
+              })
+              .catch((error: unknown) => {
+                preflightPersistenceFailure ??= error;
+              }),
+          );
+        }
+        failedToolPreflightCalls += 1;
+        if (request.maxFailedToolPreflightCalls !== undefined) {
+          preflightBudgetedToolCallIds.add(event.toolCallId);
+        }
+        if (
+          request.maxFailedToolPreflightCalls !== undefined &&
+          failedToolPreflightCalls >= request.maxFailedToolPreflightCalls
+        ) {
+          state.failure = {
+            code: 'protocol_error',
+            message: `Tool preflight failed validation ${String(failedToolPreflightCalls)} times`,
+            retryable: false,
+          };
+          agent.abort();
+        }
+      }
       if (
         event.type === 'message_end' &&
         isPiAssistantMessage(event.message) &&
@@ -392,6 +462,7 @@ export class PiRuntimeAdapter implements AgentRuntime {
           runtimeEvent.type === 'tool.completed' &&
           runtimeEvent.result.isError &&
           terminatingTools.has(runtimeEvent.result.toolName) &&
+          !preflightBudgetedToolCallIds.has(runtimeEvent.result.toolCallId) &&
           request.maxFailedCompletionCalls !== undefined &&
           ++failedCompletionCalls >= request.maxFailedCompletionCalls
         ) {
@@ -403,6 +474,12 @@ export class PiRuntimeAdapter implements AgentRuntime {
           agent.abort();
         }
         await sink(runtimeEvent);
+      }
+      if (event.type === 'tool_execution_end') {
+        rawToolArguments.delete(event.toolCallId);
+        validatedToolCallIds.delete(event.toolCallId);
+        decodeFailedToolCallIds.delete(event.toolCallId);
+        preflightBudgetedToolCallIds.delete(event.toolCallId);
       }
     });
 
@@ -458,6 +535,18 @@ export class PiRuntimeAdapter implements AgentRuntime {
         state.failure = {
           code: 'provider_error',
           message: overflowMessage.errorMessage ?? 'Provider context window overflow',
+          retryable: true,
+        };
+      }
+
+      await Promise.all(preflightPersistence);
+      if (preflightPersistenceFailure) {
+        state.failure = {
+          code: 'runtime_error',
+          message:
+            preflightPersistenceFailure instanceof Error
+              ? preflightPersistenceFailure.message
+              : 'Tool preflight failure persistence failed',
           retryable: true,
         };
       }

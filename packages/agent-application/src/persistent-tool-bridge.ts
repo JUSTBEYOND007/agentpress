@@ -69,10 +69,23 @@ export class PersistentToolBridge implements RuntimeToolFactory {
         label: definition.toolId,
         description: appendToolGuidance(definition),
         parameters: definition.inputSchema,
-        constrainedSampling:
-          definition.constrainedSampling
-          ?? ({ type: 'json_schema' as const, strict: 'prefer' as const }),
+        constrainedSampling: definition.constrainedSampling ?? {
+          type: 'json_schema' as const,
+          strict: 'prefer' as const,
+        },
         executionMode: definition.risk === 'read_only' ? 'parallel' : 'sequential',
+        onPreflightFailure: async (arguments_, context) => {
+          await this.options.toolCalls.recordPreflightFailure({
+            runId,
+            ...(taskId && taskAttempt ? { taskId, taskAttempt } : {}),
+            providerToolCallId: context.providerToolCallId,
+            toolId: definition.toolId,
+            toolVersion: definition.version,
+            arguments: arguments_,
+            failure: context.failure,
+            allowedCapabilities,
+          });
+        },
         execute: async (arguments_, context) => {
           const taskOperation =
             taskId && taskAttempt && definition.risk !== 'read_only'

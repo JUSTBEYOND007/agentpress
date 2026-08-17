@@ -19,6 +19,7 @@ import {
   transportProvenanceMatches,
   type DecideToolCallApprovalInput,
   type ProposeToolCallInput,
+  type RecordToolPreflightFailureInput,
   type ToolCallServiceOptions,
 } from './tool-call-contracts.js';
 import { ToolCallExecutionService } from './tool-call-execution-service.js';
@@ -27,6 +28,7 @@ export {
   ToolCallApplicationError,
   type DecideToolCallApprovalInput,
   type ProposeToolCallInput,
+  type RecordToolPreflightFailureInput,
   type ToolCallServiceOptions,
 } from './tool-call-contracts.js';
 
@@ -329,6 +331,160 @@ export class ToolCallService {
     return persisted.result;
   }
 
+  public async recordPreflightFailure(
+    input: RecordToolPreflightFailureInput,
+  ): Promise<{ readonly toolCallId: string; readonly created: boolean }> {
+    if ((input.taskId === undefined) !== (input.taskAttempt === undefined)) {
+      throw new TypeError('Specialist Tool Call preflight identity is incomplete');
+    }
+    const definition = this.options.registry.get(input.toolId, input.toolVersion);
+    if (!definition.capabilities.every((capability) => input.allowedCapabilities.has(capability))) {
+      throw new ToolCallApplicationError(
+        'unauthorized_tool',
+        `Tool ${input.toolId} is outside the effective capability policy`,
+      );
+    }
+    const argumentsSnapshot = recordArgumentsSnapshot(input.arguments);
+    const argumentsHash = hashToolArguments(argumentsSnapshot);
+    const argumentSummary = summarizeToolArguments(definition.inputSchema, argumentsSnapshot);
+    const failureMessage = input.failure.slice(0, 4_000);
+    const now = this.now();
+    const persisted = await this.options.database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select id from ${agentRuns} where id = ${input.runId} for update`,
+      );
+      const runRows = await transaction
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, input.runId))
+        .limit(1);
+      if (!runRows[0]) {
+        throw new ToolCallApplicationError('run_not_found', `Agent Run ${input.runId} not found`);
+      }
+      if (
+        !['planning', 'running', 'waiting_for_approval', 'recovering'].includes(runRows[0].status)
+      ) {
+        throw new ToolCallApplicationError(
+          'invalid_tool_state',
+          `Agent Run is ${runRows[0].status}`,
+        );
+      }
+      if (input.taskId) {
+        await transaction.execute(
+          sql`select id from ${agentTasks} where id = ${input.taskId} for update`,
+        );
+        const taskRows = await transaction
+          .select({
+            runId: agentTasks.runId,
+            attempt: agentTasks.attempt,
+            status: agentTasks.status,
+          })
+          .from(agentTasks)
+          .where(eq(agentTasks.id, input.taskId))
+          .limit(1);
+        const task = taskRows[0];
+        if (
+          task?.runId !== input.runId ||
+          task.attempt !== input.taskAttempt ||
+          task.status !== 'running'
+        ) {
+          throw new ToolCallApplicationError(
+            'stale_task_attempt',
+            `Specialist Task ${input.taskId} attempt no longer owns execution`,
+          );
+        }
+      }
+      const existingRows = await transaction
+        .select()
+        .from(toolCalls)
+        .where(
+          and(
+            eq(toolCalls.runId, input.runId),
+            eq(toolCalls.providerToolCallId, input.providerToolCallId),
+          ),
+        )
+        .limit(1);
+      const existing = existingRows[0];
+      if (existing) {
+        if (
+          existing.toolId !== definition.toolId ||
+          existing.toolVersion !== definition.version ||
+          existing.argumentsHash !== argumentsHash
+        ) {
+          throw new ToolCallApplicationError(
+            'approval_mismatch',
+            'Provider Tool Call ID is already bound to different preflight arguments',
+          );
+        }
+        return { toolCallId: existing.id, created: false };
+      }
+      const toolCallId = this.createId();
+      const diagnosticFailure = {
+        code: 'invalid_input',
+        messageKey: 'tool.failure.invalid_input',
+        retryable: false,
+        message: failureMessage,
+        errorType: 'ProviderToolPreflightError',
+        visibility: 'protected',
+        phase: 'preflight',
+      } as const;
+      await transaction.insert(toolCalls).values({
+        id: toolCallId,
+        runId: input.runId,
+        ...(input.taskId ? { taskId: input.taskId } : {}),
+        ...(input.taskAttempt ? { taskAttempt: input.taskAttempt } : {}),
+        providerToolCallId: input.providerToolCallId,
+        toolId: definition.toolId,
+        toolVersion: definition.version,
+        ...(definition.transport ? { transportProvenance: definition.transport } : {}),
+        ...(definition.evidence
+          ? { evidenceProviderRevision: definition.evidence.providerRevision }
+          : {}),
+        arguments: argumentsSnapshot,
+        argumentSummary,
+        argumentsHash,
+        risk: definition.risk,
+        sideEffect: definition.sideEffect,
+        status: 'failed',
+        failure: diagnosticFailure,
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await appendCheckpoint(transaction, {
+        id: this.createId(),
+        runId: input.runId,
+        reason: 'tool_settled',
+        state: { toolCallId, status: 'failed', phase: 'preflight' },
+      });
+      const event = await appendRunEvent(transaction, {
+        id: this.createId(),
+        runId: input.runId,
+        eventType: 'tool.failed',
+        payload: {
+          toolCallId,
+          toolId: definition.toolId,
+          toolVersion: definition.version,
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          ...(input.taskAttempt ? { taskAttempt: input.taskAttempt } : {}),
+          argumentSummary,
+          argumentsHash,
+          phase: 'preflight',
+          failure: {
+            code: 'invalid_input',
+            messageKey: 'tool.failure.invalid_input',
+            retryable: false,
+          },
+        },
+      });
+      return { toolCallId, created: true, event: toDurableEvent(event) };
+    });
+    if (persisted.event) {
+      await this.options.publisher.publish({ durable: true, event: persisted.event });
+    }
+    return { toolCallId: persisted.toolCallId, created: persisted.created };
+  }
+
   public decideApproval(input: DecideToolCallApprovalInput) {
     return this.execution.decideApproval(input);
   }
@@ -340,6 +496,12 @@ export class ToolCallService {
   public waitUntilExecutable(toolCallId: string, signal?: AbortSignal, pollIntervalMs = 200) {
     return this.execution.waitUntilExecutable(toolCallId, signal, pollIntervalMs);
   }
+}
+
+function recordArgumentsSnapshot(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : { invalidValue: value ?? null };
 }
 
 function toDurableEvent(event: {

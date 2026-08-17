@@ -263,6 +263,65 @@ describe('provider tool schema codec', () => {
     expect(completed?.type).toBe('tool.completed');
     if (completed?.type === 'tool.completed') expect(completed.result.isError).toBe(true);
   });
+
+  it('counts and terminates repeated tool preflight failures without executing the tool', async () => {
+    let executions = 0;
+    const failures: { readonly arguments: unknown; readonly failure: string }[] = [];
+    const runtime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage([fauxToolCall('count_items', { count: '3' }, { id: 'invalid-1' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxToolCall('count_items', { count: '4' }, { id: 'invalid-2' })], {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage([fauxText('This response must not be reached.')]),
+      ],
+    });
+    const events: RuntimeEvent[] = [];
+    const result = await runtime.execute(
+      {
+        runId: 'bounded-provider-arguments',
+        systemPrompt: 'Call the tool with a valid integer.',
+        history: [],
+        currentTurn: currentTurn('count'),
+        maxFailedToolPreflightCalls: 2,
+        tools: [
+          {
+            name: 'count_items',
+            label: 'Count items',
+            description: 'Count items',
+            parameters: Type.Object({ count: Type.Integer() }, { additionalProperties: false }),
+            constrainedSampling: { type: 'json_schema', strict: 'require' },
+            onPreflightFailure: (arguments_, { failure }) => {
+              failures.push({ arguments: arguments_, failure });
+              return Promise.resolve();
+            },
+            execute: () => {
+              executions += 1;
+              return Promise.resolve({ ok: true });
+            },
+          },
+        ],
+      },
+      (event) => {
+        events.push(event);
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'protocol_error',
+        message: 'Tool preflight failed validation 2 times',
+        retryable: false,
+      },
+    });
+    expect(executions).toBe(0);
+    expect(failures).toHaveLength(2);
+    expect(failures.map(({ arguments: value }) => value)).toEqual([{ count: '3' }, { count: '4' }]);
+    expect(events.filter(({ type }) => type === 'tool.completed')).toHaveLength(2);
+  });
 });
 
 function currentTurn(request: string): RuntimeCurrentTurn {

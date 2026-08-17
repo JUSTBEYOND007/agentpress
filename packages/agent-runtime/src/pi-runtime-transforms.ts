@@ -205,6 +205,7 @@ export function toPiTool(
   tool: RuntimeTool,
   runId: string,
   capability: ProviderToolSchemaCapability,
+  onDecodeFailure?: (providerToolCallId: string) => void,
 ): AgentTool {
   const codec = createProviderToolSchemaCodec(
     tool.parameters,
@@ -220,7 +221,14 @@ export function toPiTool(
     ...(tool.constrainedSampling ? { constrainedSampling: tool.constrainedSampling } : {}),
     ...(tool.executionMode ? { executionMode: tool.executionMode } : {}),
     execute: async (providerToolCallId, parameters, signal, onUpdate) => {
-      const output = await tool.execute(codec.decodeArguments(parameters), {
+      let decoded: Readonly<Record<string, unknown>>;
+      try {
+        decoded = codec.decodeArguments(parameters);
+      } catch (error) {
+        onDecodeFailure?.(providerToolCallId);
+        throw error;
+      }
+      const output = await tool.execute(decoded, {
         runId,
         providerToolCallId,
         ...(signal ? { signal } : {}),

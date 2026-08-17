@@ -150,6 +150,8 @@ export type RuntimeRequest = {
   /** One host-owned forced choice for the next provider request. */
   readonly toolChoice?: RuntimeToolChoice;
   readonly maxToolCalls?: number;
+  /** Maximum schema/preparation failures before the runtime ends the turn. */
+  readonly maxFailedToolPreflightCalls?: number;
   readonly maxOutputTokens?: number;
   readonly maxFailedCompletionCalls?: number;
   readonly toolLoopGuard?: {
@@ -203,6 +205,14 @@ export type RuntimeTool = {
   readonly executionMode?: 'sequential' | 'parallel';
   readonly output?: 'json' | 'text';
   readonly terminateOnSuccess?: boolean;
+  readonly onPreflightFailure?: (
+    arguments_: unknown,
+    context: {
+      readonly runId: string;
+      readonly providerToolCallId: string;
+      readonly failure: string;
+    },
+  ) => Promise<void>;
   readonly execute: (
     arguments_: Readonly<Record<string, unknown>>,
     context: {

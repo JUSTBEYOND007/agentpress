@@ -58,6 +58,18 @@ export type ProposeToolCallInput = {
   readonly idempotencyKey?: string;
 };
 
+export type RecordToolPreflightFailureInput = {
+  readonly runId: string;
+  readonly taskId?: string;
+  readonly taskAttempt?: number;
+  readonly providerToolCallId: string;
+  readonly toolId: string;
+  readonly toolVersion: string;
+  readonly arguments: unknown;
+  readonly failure: string;
+  readonly allowedCapabilities: ReadonlySet<string>;
+};
+
 export type DecideToolCallApprovalInput = {
   readonly toolCallId: string;
   readonly decision: 'approved' | 'denied';

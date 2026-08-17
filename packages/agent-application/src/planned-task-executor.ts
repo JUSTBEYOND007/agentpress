@@ -356,7 +356,14 @@ export class PlannedTaskExecutor {
           false,
           runtimeLimits,
         );
-    for (let repair = 1; !completion && result.status !== 'cancelled' && repair <= 2; repair += 1) {
+    for (
+      let repair = 1;
+      !completion &&
+      result.status !== 'cancelled' &&
+      (result.status !== 'failed' || result.error.retryable) &&
+      repair <= 2;
+      repair += 1
+    ) {
       result = await this.options.sessions.execute(
         runId,
         task.id,

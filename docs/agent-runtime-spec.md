@@ -99,6 +99,7 @@ Terminal states are immutable. Corrections create a new attempt linked to the pr
 - Cross-article changes, publishing, deletion, external writes, and image generation require explicit Approval.
 - Approval binds the exact tool version, argument hash, displayed side effect, estimated cost, user, and expiry. Any argument change invalidates it.
 - Each side-effecting call writes an execution ledger before dispatch and uses a stable idempotency key when the provider supports one.
+- Provider ToolCall preparation and schema failures are also persisted as failed ToolCall ledger entries before the Run settles. They consume a host-owned repair budget of two attempts; exhaustion is a non-retryable protocol terminal and cannot open another Specialist repair session.
 - `outcome_unknown` is never automatically retried. Reconciliation or user review must settle it first.
 
 ## 9. Specialist Contracts

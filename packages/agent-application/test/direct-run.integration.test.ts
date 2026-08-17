@@ -882,6 +882,133 @@ describeWithDatabase('Direct Run application flow', () => {
     ]);
   });
 
+  it('persists invalid provider tool attempts and fails after the bounded preflight budget', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Bounded invalid article editing',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const registry = new ToolRegistry();
+    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const toolCallsService = new ToolCallService({
+      database: connection.db,
+      publisher,
+      registry,
+    });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: toolCallsService,
+    });
+    const toolName = runtimeToolName('article.propose_edits', '1.1.0');
+    const invalidRuntime = PiRuntimeAdapter.forTests({
+      responses: [
+        fauxAssistantMessage(
+          [
+            fauxToolCall(
+              toolName,
+              { operations: [{ kind: 'replace' }] },
+              { id: 'invalid-article-edit-1' },
+            ),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+        fauxAssistantMessage(
+          [
+            fauxToolCall(
+              toolName,
+              { operations: [{ kind: 'delete' }] },
+              { id: 'invalid-article-edit-2' },
+            ),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+      ],
+    });
+    let observedPreflightBudget: number | undefined;
+    let observedPreflightRecorder = false;
+    const observedRuntime: AgentRuntime = {
+      identity: invalidRuntime.identity,
+      execute(request, onEvent, signal) {
+        observedPreflightBudget = request.maxFailedToolPreflightCalls;
+        observedPreflightRecorder =
+          request.tools?.some(
+            ({ name, onPreflightFailure }) =>
+              name === toolName && typeof onPreflightFailure === 'function',
+          ) ?? false;
+        return invalidRuntime.execute(request, onEvent, signal);
+      },
+    };
+    const invalidService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => observedRuntime },
+      runtimeToolFactory: bridge,
+      systemPrompt: 'You are AgentPress.',
+      dispatchCommands: false,
+    });
+    const run = await invalidService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '修改当前文章',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(invalidService.execute(run.runId)).resolves.toEqual({
+      runId: run.runId,
+      status: 'failed',
+    });
+    expect(observedPreflightBudget).toBe(2);
+    expect(observedPreflightRecorder).toBe(true);
+    const [failedCalls, transcript, persistedRun] = await Promise.all([
+      connection.db
+        .select()
+        .from(toolCalls)
+        .where(eq(toolCalls.runId, run.runId))
+        .orderBy(asc(toolCalls.createdAt)),
+      connection.db
+        .select({ messageType: agentTranscriptEntries.messageType })
+        .from(agentTranscriptEntries)
+        .innerJoin(agentSessions, eq(agentSessions.id, agentTranscriptEntries.sessionId))
+        .where(eq(agentSessions.runId, run.runId)),
+      connection.db
+        .select({ status: agentRuns.status, finalOutcome: agentRuns.finalOutcome })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, run.runId))
+        .limit(1),
+    ]);
+    expect(failedCalls).toHaveLength(2);
+    expect(failedCalls).toMatchObject([
+      {
+        providerToolCallId: 'invalid-article-edit-1',
+        status: 'failed',
+        failure: { code: 'invalid_input', phase: 'preflight' },
+      },
+      {
+        providerToolCallId: 'invalid-article-edit-2',
+        status: 'failed',
+        failure: { code: 'invalid_input', phase: 'preflight' },
+      },
+    ]);
+    expect(transcript.filter(({ messageType }) => messageType === 'tool_call')).toHaveLength(2);
+    expect(transcript.filter(({ messageType }) => messageType === 'tool_result')).toHaveLength(2);
+    expect(persistedRun[0]).toMatchObject({
+      status: 'failed',
+      finalOutcome: {
+        error: {
+          code: 'protocol_error',
+          message: 'Tool preflight failed validation 2 times',
+          retryable: false,
+        },
+      },
+    });
+  });
+
   it('exposes only host-granted article tools to a confirmed article edit turn', async () => {
     const conversationId = randomUUID();
     const branchId = randomUUID();
@@ -2964,6 +3091,98 @@ describeWithDatabase('Direct Run application flow', () => {
             JSON.stringify({ version: 1, source: 'free_text', grantedCapabilities: [] }),
       ),
     ).toBe(true);
+  });
+
+  it('does not start another Specialist repair session after preflight budget exhaustion', async () => {
+    const conversationId = randomUUID();
+    const branchId = randomUUID();
+    await connection.db.insert(conversations).values({
+      id: conversationId,
+      workspaceId: ids.workspace,
+      articleId: ids.article,
+      title: 'Bounded Specialist preflight',
+    });
+    await connection.db.insert(conversationBranches).values({ id: branchId, conversationId });
+    const task = {
+      ...plannedTask('bounded-editor-preflight', 'editor'),
+      capabilities: ['article.propose'],
+    };
+    const registry = new ToolRegistry();
+    registerArticleTools(registry, connection.db, new ProposalService(connection.db));
+    const toolCallsService = new ToolCallService({ database: connection.db, publisher, registry });
+    const bridge = new PersistentToolBridge({
+      database: connection.db,
+      registry,
+      toolCalls: toolCallsService,
+    });
+    const toolName = runtimeToolName('article.propose_edits', '1.1.0');
+    const delegate = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', { goal: 'Bound invalid editor repairs', tasks: [task] }),
+        fauxAssistantMessage(
+          [
+            fauxToolCall(
+              toolName,
+              { operations: [{ kind: 'replace' }] },
+              { id: 'invalid-editor-preflight-1' },
+            ),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+        fauxAssistantMessage(
+          [
+            fauxToolCall(
+              toolName,
+              { operations: [{ kind: 'delete' }] },
+              { id: 'invalid-editor-preflight-2' },
+            ),
+          ],
+          { stopReason: 'toolUse' },
+        ),
+        taskCompleteResponse('A repair session must not consume this response'),
+      ],
+    });
+    let specialistSessions = 0;
+    const runtime: AgentRuntime = {
+      identity: delegate.identity,
+      execute(request, sink, signal) {
+        if (request.tools?.some(({ name }) => name === 'task_complete')) specialistSessions += 1;
+        return delegate.execute(request, sink, signal);
+      },
+    };
+    const boundedService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => runtime },
+      runtimeToolFactory: bridge,
+      systemPrompt: 'You are AgentPress.',
+      dispatchCommands: false,
+    });
+    const run = await boundedService.create({
+      conversationId,
+      branchId,
+      userId: ids.user,
+      prompt: '通过 editor 修改当前文章',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(boundedService.execute(run.runId)).resolves.toMatchObject({ status: 'failed' });
+    expect(specialistSessions).toBe(1);
+    const [calls, results] = await Promise.all([
+      connection.db
+        .select({ status: toolCalls.status, failure: toolCalls.failure })
+        .from(toolCalls)
+        .where(eq(toolCalls.runId, run.runId)),
+      connection.db
+        .select({ failure: taskResults.failure })
+        .from(taskResults)
+        .innerJoin(agentTasks, eq(agentTasks.id, taskResults.taskId))
+        .where(eq(agentTasks.runId, run.runId)),
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(calls.every(({ status }) => status === 'failed')).toBe(true);
+    expect(calls.every(({ failure }) => failure?.phase === 'preflight')).toBe(true);
+    expect(results).toEqual([{ failure: { code: 'protocol_error', message: 'protocol_error' } }]);
   });
 
   it('persists invalid Specialist Evidence as a typed Task failure after bounded repair', async () => {

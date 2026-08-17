@@ -148,6 +148,7 @@ export class AgentSessionRunner {
           currentTurn,
           tools,
           continuation,
+          maxFailedToolPreflightCalls: 2,
           ...(claimedToolChoice ? { toolChoice: claimedToolChoice.choice } : {}),
           ...(kind === 'specialist'
             ? {
