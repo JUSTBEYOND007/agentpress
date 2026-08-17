@@ -53,7 +53,7 @@ export function projectRunParts(
         // A durable ToolCall/task terminal fact is immutable. Late provider
         // callbacks may still be persisted for audit, but they must not
         // replace the settled consumer projection during replay.
-        if (previous?.outcome !== undefined) continue;
+        if (previous?.outcome !== undefined && !supersedesSettledLifecycle(previous, part)) continue;
         const startedAt = previous
           ? dateProperty(previous.payload, 'lifecycleStartedAt')
           : undefined;
@@ -77,6 +77,14 @@ export function projectRunParts(
   }
 
   return projected;
+}
+
+function supersedesSettledLifecycle(previous: RunPart, current: RunPart): boolean {
+  return (
+    previous.status === 'task.succeeded' &&
+    current.status === 'task.interrupted' &&
+    current.payload.reason === 'recovery_validation_failed'
+  );
 }
 
 function lifecycleStage(part: RunPart): Readonly<Record<string, unknown>> {

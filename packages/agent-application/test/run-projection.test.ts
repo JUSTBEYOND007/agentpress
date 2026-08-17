@@ -49,6 +49,51 @@ describe('run projection', () => {
     ]);
   });
 
+  it('projects recovery invalidation over the superseded successful Task attempt', () => {
+    const parts = projectRunParts([
+      event(1, 'task.started', { taskId: 'task-1', attempt: 1 }),
+      event(2, 'task.succeeded', { taskId: 'task-1', attempt: 1 }),
+      event(3, 'task.interrupted', {
+        taskId: 'task-1',
+        attempt: 1,
+        reason: 'recovery_validation_failed',
+        issueCodes: ['stale_revision'],
+      }),
+      event(4, 'task.started', { taskId: 'task-1', attempt: 2 }),
+      event(5, 'task.succeeded', { taskId: 'task-1', attempt: 2 }),
+    ]);
+
+    expect(parts).toMatchObject([
+      {
+        status: 'task.interrupted',
+        outcome: 'interrupted',
+        correlationId: 'task:task-1:attempt:1',
+        payload: {
+          reason: 'recovery_validation_failed',
+          lifecycleStages: [
+            { status: 'task.started' },
+            { status: 'task.succeeded', outcome: 'succeeded' },
+            { status: 'task.interrupted', outcome: 'interrupted' },
+          ],
+        },
+      },
+      {
+        status: 'task.succeeded',
+        outcome: 'succeeded',
+        correlationId: 'task:task-1:attempt:2',
+      },
+    ]);
+  });
+
+  it('does not let an unvalidated late interruption replace a settled Task', () => {
+    const [part] = projectRunParts([
+      event(1, 'task.succeeded', { taskId: 'task-1', attempt: 1 }),
+      event(2, 'task.interrupted', { taskId: 'task-1', attempt: 1, reason: 'late_worker' }),
+    ]);
+
+    expect(part).toMatchObject({ status: 'task.succeeded', outcome: 'succeeded' });
+  });
+
   it('retains immutable MCP provenance across the folded ToolCall lifecycle', () => {
     const transportProvenance = {
       kind: 'mcp',
