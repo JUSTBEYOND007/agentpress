@@ -2181,6 +2181,49 @@ describeWithDatabase('Direct Run application flow', () => {
     ).toThrow('Specialist Task timeout must be between 1 ms and 10 minutes');
   });
 
+  it('persists the default Specialist timeout in Task request and budget facts', async () => {
+    const branchId = randomUUID();
+    await connection.db.insert(conversationBranches).values({
+      id: branchId,
+      conversationId: ids.conversation,
+    });
+    const task = plannedTask('edit', 'editor');
+    const timeoutRuntime = PiRuntimeAdapter.forTests({
+      responses: [
+        toolResponse('plan_submit', { goal: 'Optimize the article', tasks: [task] }),
+        taskCompleteResponse('editor completed'),
+        runCompleteResponse('优化完成'),
+      ],
+    });
+    const timeoutService = new DirectRunService({
+      database: connection.db,
+      publisher,
+      runtimeFactory: { create: () => timeoutRuntime },
+      systemPrompt: 'You are AgentPress.',
+    });
+    const run = await timeoutService.create({
+      conversationId: ids.conversation,
+      userId: ids.user,
+      branchId,
+      prompt: '请优化当前文章',
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(timeoutService.execute(run.runId)).resolves.toMatchObject({
+      status: 'completed',
+    });
+
+    const [persistedTask] = await connection.db
+      .select({ toolPolicy: agentTasks.toolPolicy, budget: agentTasks.budget })
+      .from(agentTasks)
+      .where(eq(agentTasks.runId, run.runId));
+    const request = persistedTask?.toolPolicy.request as Record<string, unknown> | undefined;
+    expect(request?.timeoutMs).toBe(600_000);
+    expect((persistedTask?.budget as Record<string, unknown> | undefined)?.timeoutMs).toBe(
+      600_000,
+    );
+  });
+
   it('persists and executes a five-Specialist DAG with isolated Context Packs', async () => {
     const plannedBranch = randomUUID();
     await connection.db.insert(conversationBranches).values({
@@ -2237,9 +2280,9 @@ describeWithDatabase('Direct Run application flow', () => {
           request.runId === run.runId &&
           request.depth === 0 &&
           request.detached === false &&
-          request.timeoutMs === 120_000 &&
+          request.timeoutMs === 600_000 &&
           request.maxAttempts === 3 &&
-          (budget as Record<string, unknown>).timeoutMs === 120_000
+          (budget as Record<string, unknown>).timeoutMs === 600_000
         );
       }),
     ).toBe(true);

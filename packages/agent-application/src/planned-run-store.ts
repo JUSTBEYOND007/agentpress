@@ -36,6 +36,10 @@ import {
   resolveSpecialistOutputSchema,
   type SpecialistRole,
 } from './specialist-task-contract.js';
+import {
+  assertTaskTimeout,
+  DEFAULT_INLINE_TASK_TIMEOUT_MS,
+} from './task-execution-boundary.js';
 import { toDurableEvent } from './run-projection-service.js';
 
 type PlannedRunStoreOptions = {
@@ -43,10 +47,16 @@ type PlannedRunStoreOptions = {
   readonly publisher: RunEventPublisher;
   readonly createId: () => string;
   readonly now: () => Date;
+  readonly taskTimeoutMs?: number;
 };
 
 export class PlannedRunStore {
-  public constructor(private readonly options: PlannedRunStoreOptions) {}
+  private readonly taskTimeoutMs: number;
+
+  public constructor(private readonly options: PlannedRunStoreOptions) {
+    this.taskTimeoutMs = options.taskTimeoutMs ?? DEFAULT_INLINE_TASK_TIMEOUT_MS;
+    assertTaskTimeout(this.taskTimeoutMs);
+  }
 
   public async claimPlanning(runId: string, from: 'queued' | 'recovering'): Promise<boolean> {
     const persisted = await this.options.database.transaction(async (transaction) => {
@@ -154,7 +164,7 @@ export class PlannedRunStore {
           contextPackId,
           capabilities: task.capabilities,
           outputSchema: schema.schema,
-          timeoutMs: 120_000,
+          timeoutMs: this.taskTimeoutMs,
           maxAttempts: 3,
           detached: task.detached,
         }),

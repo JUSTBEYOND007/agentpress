@@ -39,9 +39,12 @@ import {
   validateSpecialistSubmission,
   type ValidatedSpecialistSubmission,
 } from './specialist-submission-validator.js';
-import { assertTaskTimeout, taskExecutionSignal } from './task-execution-boundary.js';
+import {
+  DEFAULT_INLINE_TASK_TIMEOUT_MS,
+  assertTaskTimeout,
+  taskExecutionSignal,
+} from './task-execution-boundary.js';
 
-const INLINE_TASK_TIMEOUT_MS = 120_000;
 const DETACHED_TASK_WAIT_TIMEOUT_MS = 10 * 60_000;
 const TASK_LEASE_GRACE_MS = 30_000;
 const RESEARCH_TASK_POLICY = researchExecutionPolicy('deep');
@@ -66,7 +69,7 @@ export class PlannedTaskExecutor {
 
   public constructor(private readonly options: PlannedTaskExecutorOptions) {
     this.researchFailures = new ResearchFailureResultFactory(options.database);
-    assertTaskTimeout(options.inlineTaskTimeoutMs ?? INLINE_TASK_TIMEOUT_MS);
+    assertTaskTimeout(options.inlineTaskTimeoutMs ?? DEFAULT_INLINE_TASK_TIMEOUT_MS);
     this.detachedTaskWaitTimeoutMs =
       options.detachedTaskWaitTimeoutMs ?? DETACHED_TASK_WAIT_TIMEOUT_MS;
     assertTaskTimeout(this.detachedTaskWaitTimeoutMs);
@@ -156,7 +159,7 @@ export class PlannedTaskExecutor {
     settled: ReadonlyMap<string, SettledTask>,
     signal?: AbortSignal,
   ): Promise<SettledTask> {
-    const timeoutMs = this.options.inlineTaskTimeoutMs ?? INLINE_TASK_TIMEOUT_MS;
+    const timeoutMs = this.options.inlineTaskTimeoutMs ?? DEFAULT_INLINE_TASK_TIMEOUT_MS;
     const claim = await this.claimTaskAttempt(
       runId,
       task,

@@ -1,3 +1,5 @@
+export const DEFAULT_INLINE_TASK_TIMEOUT_MS = 10 * 60_000;
+
 export function taskExecutionSignal(parent: AbortSignal | undefined, timeoutMs: number) {
   const timeout = AbortSignal.timeout(timeoutMs);
   return {

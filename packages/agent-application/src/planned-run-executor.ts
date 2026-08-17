@@ -119,6 +119,7 @@ export class PlannedRunExecutor {
       publisher: options.publisher,
       createId: this.createId,
       now: this.now,
+      ...(options.taskTimeoutMs !== undefined ? { taskTimeoutMs: options.taskTimeoutMs } : {}),
     });
     this.results = new SpecialistResultStore({
       database: options.database,
