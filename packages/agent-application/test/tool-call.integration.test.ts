@@ -1631,6 +1631,39 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(tools.map(({ label }) => label)).toEqual(['workspace.search']);
   });
 
+  it('preserves a tool-owned constrained sampling policy at the Pi boundary', async () => {
+    const runId = await createRunningRun();
+    const flexibleRegistry = new ToolRegistry();
+    flexibleRegistry.register({
+      toolId: 'workspace.flexible_input',
+      version: '1.0.0',
+      owner: 'workspace',
+      description: 'Accept a provider-compatible open attribute map',
+      constrainedSampling: false,
+      capabilities: ['workspace.read'],
+      inputSchema: Type.Object(
+        { attrs: Type.Object({}, { additionalProperties: true }) },
+        { additionalProperties: false },
+      ),
+      outputSchema: Type.Object({ accepted: Type.Boolean() }, { additionalProperties: false }),
+      risk: 'read_only',
+      sideEffect: 'No side effect',
+      idempotency: 'none',
+      timeoutMs: 1_000,
+      estimateCost: () => ({}),
+      execute: () => Promise.resolve({ accepted: true }),
+    });
+
+    const tools = await new PersistentToolBridge({
+      database: connection.db,
+      registry: flexibleRegistry,
+      toolCalls: service,
+    }).createForRun(runId, ['workspace.read']);
+
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.constrainedSampling).toBe(false);
+  });
+
   it('rejects approval if exact persisted arguments no longer match', async () => {
     const runId = await createRunningRun();
     const proposal = await proposePublish(runId);

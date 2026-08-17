@@ -389,6 +389,7 @@ Agent 缺少必要信息时，使用内联问题卡，不用一段普通文本�
 - 过期 Proposal 显示冲突摘要，不能沿用普通接受按钮。
 - 应用完成后，卡片保留结果状态和目标 revision，不能从历史消息中消失。
 - `operationId` 与 `expectedHash` 是 host 基于当前 Run 绑定 revision 派生的事实；模型输入只提供稳定 `blockId`、操作类型和修改内容，避免复制不透明锚点造成伪 stale 错误。Proposal 仍在服务端按 revision 原子预检并 fail-closed。
+- `article.propose_edits` 的模型输入是 insert/replace/delete/move/update_attrs 五类封闭 DTO；block `attrs` 保持开放键值以承载 TipTap 节点属性，因此该工具不请求 Provider strict sampling，但仍在 Pi coercion 前和 Tool Registry 执行前分别按同一宿主 schema 严格校验。省略 insert.afterBlockId 表示按调用顺序追加，显式 null 表示插入文首；宿主生成缺失的新 blockId，并拒绝重复 ID、已删除目标和逆序引用。
 
 ### 14.3 非正文 Artifact
 

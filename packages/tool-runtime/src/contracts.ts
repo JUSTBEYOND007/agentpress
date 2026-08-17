@@ -21,6 +21,13 @@ export type ToolGuidance = {
   readonly text: string;
 };
 
+export type ToolConstrainedSampling =
+  | false
+  | {
+      readonly type: 'json_schema';
+      readonly strict: 'prefer' | 'require';
+    };
+
 export type ToolEvidenceProvenance = {
   readonly providerRevision: string;
 };
@@ -40,6 +47,7 @@ export type ToolDefinition<TInput extends TSchema = TSchema, TOutput extends TSc
   readonly owner: string;
   readonly description: string;
   readonly guidance?: readonly ToolGuidance[];
+  readonly constrainedSampling?: ToolConstrainedSampling;
   readonly evidence?: ToolEvidenceProvenance;
   readonly transport?: ToolTransportProvenance;
   readonly capabilities: readonly string[];

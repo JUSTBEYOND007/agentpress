@@ -23,7 +23,7 @@ import {
   workspaces,
 } from '@agentpress/database';
 import { ToolRegistry } from '@agentpress/tool-runtime';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -392,6 +392,27 @@ describeWithInfra('editor persistence and recovery', () => {
     const proposals = new ProposalService(connection.db);
     registerArticleTools(registry, connection.db, proposals);
     const definition = registry.get('article.propose_edits', '1.1.0');
+    const operationSchema = (
+      definition.inputSchema as unknown as {
+        readonly properties: {
+          readonly operations: { readonly items: { readonly anyOf: readonly unknown[] } };
+        };
+      }
+    ).properties.operations.items;
+    expect(definition.constrainedSampling).toBe(false);
+    expect(operationSchema.anyOf).toHaveLength(5);
+    const insertSchema = operationSchema.anyOf.find(
+      (candidate) =>
+        (candidate as { readonly properties?: { readonly kind?: { readonly const?: unknown } } })
+          .properties?.kind?.const === 'insert',
+    ) as {
+      readonly properties: {
+        readonly block: {
+          readonly properties: { readonly attrs: { readonly additionalProperties: boolean } };
+        };
+      };
+    };
+    expect(insertSchema.properties.block.properties.attrs.additionalProperties).toBe(true);
     const toolCallId = randomUUID();
     const context = { runId: ids.run, toolCallId };
     await connection.db.insert(toolCalls).values({
@@ -413,8 +434,15 @@ describeWithInfra('editor persistence and recovery', () => {
           {
             kind: 'insert',
             block: {
+              type: 'heading',
+              attrs: { level: 2 },
+              content: [{ type: 'text', text: 'Agent generated heading' }],
+            },
+          },
+          {
+            kind: 'insert',
+            block: {
               type: 'paragraph',
-              attrs: {},
               content: [{ type: 'text', text: 'Agent generated continuation' }],
             },
           },
@@ -438,7 +466,13 @@ describeWithInfra('editor persistence and recovery', () => {
         operationId: `op-${toolCallId}-1`,
         kind: 'insert',
         afterBlockId: 'block-b',
-        block: { attrs: { blockId: `agent-${toolCallId}-1` } },
+        block: { attrs: { level: 2, blockId: `agent-${toolCallId}-1` } },
+      },
+      {
+        operationId: `op-${toolCallId}-2`,
+        kind: 'insert',
+        afterBlockId: `agent-${toolCallId}-1`,
+        block: { attrs: { blockId: `agent-${toolCallId}-2` } },
       },
     ]);
     expect(created.diffs).toMatchObject([
@@ -446,14 +480,78 @@ describeWithInfra('editor persistence and recovery', () => {
         kind: 'insert',
         blockId: `agent-${toolCallId}-1`,
       },
+      {
+        kind: 'insert',
+        blockId: `agent-${toolCallId}-2`,
+      },
     ]);
     await expect(
       proposals.decide({
         proposalId: created.proposalId,
         userId: ids.user,
-        decisions: { [`op-${toolCallId}-1`]: 'rejected' },
+        decisions: {
+          [`op-${toolCallId}-1`]: 'rejected',
+          [`op-${toolCallId}-2`]: 'rejected',
+        },
       }),
     ).resolves.toMatchObject({ status: 'rejected' });
+  });
+
+  it('rejects ambiguous or order-invalid model edit operations before proposal persistence', async () => {
+    const registry = new ToolRegistry();
+    const proposals = new ProposalService(connection.db);
+    registerArticleTools(registry, connection.db, proposals);
+    const definition = registry.get('article.propose_edits', '1.1.0');
+    const execute = async (operations: readonly unknown[]) => {
+      const toolCallId = randomUUID();
+      await connection.db.insert(toolCalls).values({
+        id: toolCallId,
+        runId: ids.run,
+        toolId: 'article.propose_edits',
+        toolVersion: '1.1.0',
+        arguments: {},
+        argumentsHash: `invalid-model-shape-${toolCallId}`,
+        risk: 'draft_write',
+        sideEffect: 'test invalid normalized proposal',
+        status: 'executing',
+      });
+      return registry.execute(definition, { operations }, { runId: ids.run, toolCallId });
+    };
+
+    await expect(execute([{ kind: 'rewrite', blockId: 'block-a' }])).rejects.toMatchObject({
+      code: 'invalid_input',
+    });
+    await expect(
+      execute([{ kind: 'insert', block: { attrs: {}, content: [] } }]),
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(
+      execute([
+        { kind: 'delete', blockId: 'block-a' },
+        {
+          kind: 'replace',
+          blockId: 'block-a',
+          block: { type: 'paragraph', content: [{ type: 'text', text: 'Too late' }] },
+        },
+      ]),
+    ).rejects.toThrow('block block-a does not exist');
+    await expect(
+      execute([
+        {
+          kind: 'insert',
+          block: {
+            type: 'paragraph',
+            attrs: { blockId: 'block-a' },
+            content: [{ type: 'text', text: 'Duplicate identity' }],
+          },
+        },
+      ]),
+    ).rejects.toThrow('insert block block-a already exists');
+
+    const pending = await connection.db
+      .select({ id: editProposals.id })
+      .from(editProposals)
+      .where(and(eq(editProposals.runId, ids.run), eq(editProposals.status, 'pending')));
+    expect(pending).toHaveLength(0);
   });
 
   it('applies accepted proposal operations into an immutable revision', async () => {

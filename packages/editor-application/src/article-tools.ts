@@ -15,6 +15,7 @@ import {
   type EditOperation,
 } from '@agentpress/editor-patch';
 import { Type, type Static } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import { and, eq, sql } from 'drizzle-orm';
 
 import { ProposalService } from './proposal-service.js';
@@ -69,21 +70,67 @@ const operations = Type.Array(
 );
 type ProposedOperation = Static<typeof operations>[number];
 const reviewMode = Type.Optional(Type.Union([Type.Literal('granular'), Type.Literal('document')]));
-const modelFacingOperation = Type.Object(
+const modelFacingAttrs = Type.Object({}, { additionalProperties: true });
+const modelFacingBlock = Type.Object(
   {
-    kind: Type.String({ minLength: 1, maxLength: 40 }),
-    blockId: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
-    afterBlockId: Type.Optional(
-      Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
-    ),
-    block: Type.Optional(Type.Unknown()),
-    attrs: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+    type: Type.String({ minLength: 1, maxLength: 80 }),
+    attrs: Type.Optional(modelFacingAttrs),
+    content: Type.Optional(Type.Array(Type.Unknown(), { maxItems: 20_000 })),
   },
-  { additionalProperties: true },
+  { additionalProperties: false },
+);
+const modelFacingOperations = Type.Array(
+  Type.Union([
+    Type.Object(
+      {
+        kind: Type.Literal('insert'),
+        afterBlockId: Type.Optional(
+          Type.Union([Type.String({ minLength: 1, maxLength: 160 }), Type.Null()]),
+        ),
+        block: modelFacingBlock,
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        kind: Type.Literal('replace'),
+        blockId: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+        block: modelFacingBlock,
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        kind: Type.Literal('delete'),
+        blockId: Type.String({ minLength: 1, maxLength: 160 }),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        kind: Type.Literal('move'),
+        blockId: Type.String({ minLength: 1, maxLength: 160 }),
+        afterBlockId: Type.Union([
+          Type.String({ minLength: 1, maxLength: 160 }),
+          Type.Null(),
+        ]),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        kind: Type.Literal('update_attrs'),
+        blockId: Type.String({ minLength: 1, maxLength: 160 }),
+        attrs: modelFacingAttrs,
+      },
+      { additionalProperties: false },
+    ),
+  ]),
+  { minItems: 1, maxItems: 200 },
 );
 const proposeEditsInput = Type.Object(
   {
-    operations: Type.Array(modelFacingOperation, { minItems: 1, maxItems: 200 }),
+    operations: modelFacingOperations,
     reviewMode,
   },
   { additionalProperties: false },
@@ -134,10 +181,15 @@ export function registerArticleTools(
         text: 'Use stable block IDs from article.read_current. The host binds operation IDs and SHA-256 anchors.',
       },
       {
+        id: 'operation-shapes',
+        text: 'Use one of insert, replace, delete, move, or update_attrs. Insert without afterBlockId appends; null inserts first. Replace may take blockId from the target block attrs. Never send operationId or expectedHash.',
+      },
+      {
         id: 'review-mode',
         text: 'Use reviewMode=document for a complete rewrite and granular for local edits.',
       },
     ],
+    constrainedSampling: false,
     capabilities: ['article.propose'],
     inputSchema: proposeEditsInput,
     outputSchema: Type.Any(),
@@ -181,30 +233,47 @@ function normalizeProposedOperations(
   proposedOperations: readonly unknown[],
   toolCallId: string,
 ): readonly ProposedOperation[] {
-  const blockIds = new Set(document.content.map((item) => item.attrs.blockId));
-  const fallbackAfterBlockId = document.content.at(-1)?.attrs.blockId ?? null;
+  const originalBlockIds = new Set(document.content.map((item) => item.attrs.blockId));
+  const reservedBlockIds = new Set(originalBlockIds);
+  const activeBlockIds = [...originalBlockIds];
   const generatedBlockIds = new Set<string>();
-  return proposedOperations.map((operation, index) => {
+  const normalized = proposedOperations.map((operation, index) => {
     if (!isRecord(operation)) throw invalidOperation(index, 'operation must be an object');
     rejectCallerOwnedAnchors(operation, index);
     const kind = operation.kind;
     if (kind === 'insert') {
       const blockValue = normalizeBlock(operation.block, index, {
-        defaultBlockId: uniqueGeneratedBlockId(toolCallId, index, blockIds, generatedBlockIds),
+        defaultBlockId: uniqueGeneratedBlockId(
+          toolCallId,
+          index,
+          reservedBlockIds,
+          generatedBlockIds,
+        ),
       });
       const afterBlockId =
-        operation.afterBlockId === undefined ? fallbackAfterBlockId : operation.afterBlockId;
+        operation.afterBlockId === undefined
+          ? (activeBlockIds.at(-1) ?? null)
+          : operation.afterBlockId;
       if (afterBlockId !== null && typeof afterBlockId !== 'string') {
         throw invalidOperation(index, 'insert.afterBlockId must be a string, null, or omitted');
       }
-      if (typeof afterBlockId === 'string' && !blockIds.has(afterBlockId)) {
+      if (typeof afterBlockId === 'string' && !activeBlockIds.includes(afterBlockId)) {
         throw invalidOperation(index, `insert anchor ${afterBlockId} does not exist`);
       }
-      blockIds.add(blockValue.attrs.blockId);
+      if (reservedBlockIds.has(blockValue.attrs.blockId)) {
+        throw invalidOperation(index, `insert block ${blockValue.attrs.blockId} already exists`);
+      }
+      reservedBlockIds.add(blockValue.attrs.blockId);
+      insertAfter(activeBlockIds, blockValue.attrs.blockId, afterBlockId);
       return { kind: 'insert', afterBlockId, block: blockValue };
     }
     if (kind === 'replace') {
-      const blockId = normalizeAnchoredBlockId(operation, index, blockIds);
+      const blockId = normalizeAnchoredBlockId(
+        operation,
+        index,
+        originalBlockIds,
+        activeBlockIds,
+      );
       const blockValue = normalizeBlock(operation.block, index, { defaultBlockId: blockId });
       return {
         kind: 'replace',
@@ -213,18 +282,32 @@ function normalizeProposedOperations(
       };
     }
     if (kind === 'delete') {
-      return { kind: 'delete', blockId: normalizeAnchoredBlockId(operation, index, blockIds) };
+      const blockId = normalizeAnchoredBlockId(
+        operation,
+        index,
+        originalBlockIds,
+        activeBlockIds,
+      );
+      activeBlockIds.splice(activeBlockIds.indexOf(blockId), 1);
+      return { kind: 'delete', blockId };
     }
     if (kind === 'move') {
-      const blockId = normalizeAnchoredBlockId(operation, index, blockIds);
+      const blockId = normalizeAnchoredBlockId(
+        operation,
+        index,
+        originalBlockIds,
+        activeBlockIds,
+      );
       const afterBlockId = operation.afterBlockId;
       if (afterBlockId !== null && typeof afterBlockId !== 'string') {
         throw invalidOperation(index, 'move.afterBlockId must be a string or null');
       }
       if (afterBlockId === blockId) throw invalidOperation(index, 'move cannot anchor after itself');
-      if (typeof afterBlockId === 'string' && !blockIds.has(afterBlockId)) {
+      if (typeof afterBlockId === 'string' && !activeBlockIds.includes(afterBlockId)) {
         throw invalidOperation(index, `move anchor ${afterBlockId} does not exist`);
       }
+      activeBlockIds.splice(activeBlockIds.indexOf(blockId), 1);
+      insertAfter(activeBlockIds, blockId, afterBlockId);
       return { kind: 'move', blockId, afterBlockId };
     }
     if (kind === 'update_attrs') {
@@ -232,12 +315,21 @@ function normalizeProposedOperations(
       if (!isRecord(attrs)) throw invalidOperation(index, 'update_attrs.attrs must be an object');
       return {
         kind: 'update_attrs',
-        blockId: normalizeAnchoredBlockId(operation, index, blockIds),
+        blockId: normalizeAnchoredBlockId(
+          operation,
+          index,
+          originalBlockIds,
+          activeBlockIds,
+        ),
         attrs,
       };
     }
     throw invalidOperation(index, `unsupported operation kind ${String(kind)}`);
   });
+  if (!Value.Check(operations, normalized)) {
+    throw new Error('Normalized article operations violate the host edit contract');
+  }
+  return normalized;
 }
 
 function rejectCallerOwnedAnchors(
@@ -252,18 +344,32 @@ function rejectCallerOwnedAnchors(
 function normalizeAnchoredBlockId(
   operation: Readonly<Record<string, unknown>>,
   index: number,
-  blockIds: ReadonlySet<string>,
+  originalBlockIds: ReadonlySet<string>,
+  activeBlockIds: readonly string[],
 ): string {
   const explicit = operation.blockId;
   if (typeof explicit === 'string' && explicit.length > 0) {
-    if (!blockIds.has(explicit)) throw invalidOperation(index, `block ${explicit} does not exist`);
+    if (!originalBlockIds.has(explicit) || !activeBlockIds.includes(explicit)) {
+      throw invalidOperation(index, `block ${explicit} does not exist`);
+    }
     return explicit;
   }
   const blockValue = isRecord(operation.block) ? operation.block : undefined;
   const attrs = blockValue && isRecord(blockValue.attrs) ? blockValue.attrs : undefined;
   const nested = attrs?.blockId;
-  if (typeof nested === 'string' && blockIds.has(nested)) return nested;
+  if (
+    typeof nested === 'string'
+    && originalBlockIds.has(nested)
+    && activeBlockIds.includes(nested)
+  ) {
+    return nested;
+  }
   throw invalidOperation(index, 'anchored operation requires an existing blockId');
+}
+
+function insertAfter(target: string[], blockId: string, afterBlockId: string | null): void {
+  const index = afterBlockId === null ? 0 : target.indexOf(afterBlockId) + 1;
+  target.splice(index, 0, blockId);
 }
 
 function normalizeBlock(

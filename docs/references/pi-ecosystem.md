@@ -480,6 +480,13 @@ required nullable placeholder, so their generated `anyOf` places `null` first to
 conversion from turning an introduced `null` into a scalar default before host decoding. The local
 contracts execute the pinned Pi validator and a real OpenAI-compatible loopback HTTP request; host
 schemas remain no-coercion and are revalidated after removing only adapter-introduced nulls.
+`article.propose_edits` is the deliberate opposite-path case: TipTap block attributes are an open
+map, which OpenAI strict schemas cannot retain because every object must be closed. The Tool
+Registry now owns an optional per-tool constrained-sampling policy, and the persistent Pi bridge
+uses the existing Pi `constrainedSampling: false` contract only for this tool. Its model schema is
+still a closed five-operation union, raw arguments pass the same pre-coercion host validation, and
+the editor adapter deterministically assigns insert IDs/anchors while rejecting duplicate or
+order-invalid operations before Proposal persistence.
 
 Oh My Pi's Vibe task lifecycle was verified at the same fixed commit in
 `packages/coding-agent/src/vibe/runtime.ts` with behavior tests in
