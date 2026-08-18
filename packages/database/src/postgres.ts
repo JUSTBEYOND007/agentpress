@@ -2,6 +2,7 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
 import * as schema from './schema.js';
+import { assertVitestDatabaseIsolation } from './test-database-isolation.js';
 
 export type AgentPressDatabase = NodePgDatabase<typeof schema>;
 export type DatabaseTransaction = Parameters<Parameters<AgentPressDatabase['transaction']>[0]>[0];
@@ -12,6 +13,7 @@ export type DatabaseConnection = {
 };
 
 export function connectDatabase(connectionString: string): DatabaseConnection {
+  assertVitestDatabaseIsolation(connectionString);
   const pool = new Pool({
     connectionString,
     max: 20,

@@ -18,7 +18,8 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --exclude '**/*.integration.test.*'",
+    "test:integration": "node --env-file-if-exists=../../.env ../../node_modules/tsx/dist/cli.mjs ../database/scripts/run-isolated-integration-tests.ts test/*.integration.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
