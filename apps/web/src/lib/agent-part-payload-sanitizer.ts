@@ -104,8 +104,6 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
     : {};
 }
 
-function compact(
-  value: Readonly<Record<string, unknown | undefined>>,
-): Readonly<Record<string, unknown>> {
+function compact(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined));
 }

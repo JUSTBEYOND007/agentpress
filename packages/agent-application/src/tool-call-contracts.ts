@@ -86,5 +86,5 @@ export type ToolCallServiceOptions = {
   readonly evidenceProjector?: (
     transaction: DatabaseTransaction,
     input: PersistToolEvidenceInput,
-  ) => Promise<readonly PersistedToolEvidence[] | void>;
+  ) => Promise<readonly PersistedToolEvidence[] | undefined>;
 };

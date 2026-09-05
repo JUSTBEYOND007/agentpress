@@ -29,7 +29,7 @@ import {
 } from '@nestjs/common';
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
-import { DATABASE_CONNECTION } from '../agent/agent.providers.js';
+import { DATABASE_CONNECTION } from '../agent/agent.tokens.js';
 import { CurrentUser } from '../auth/current-user.js';
 import type { AuthenticatedUser } from '../auth/auth.service.js';
 import { AuthorizationService } from '../auth/authorization.service.js';

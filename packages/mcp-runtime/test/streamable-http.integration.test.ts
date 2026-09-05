@@ -301,6 +301,7 @@ describe('MCP Streamable HTTP real fixture', () => {
     });
 
     try {
+      await gateway.listTools('web_research');
       const pending = registry.execute(
         registry.get('publication.stubborn_mcp', '1.0.0'),
         { value: 'late' },
@@ -310,8 +311,9 @@ describe('MCP Streamable HTTP real fixture', () => {
           idempotencyKey: 'stubborn:1',
         },
       );
+      const pendingError = pending.catch((error: unknown) => error);
       await fixture.waitForStubbornStart();
-      await expect(pending).rejects.toMatchObject({
+      await expect(pendingError).resolves.toMatchObject({
         name: 'ToolExecutionError',
         outcome: 'unknown',
         outcomeReason: 'timeout_after_dispatch',

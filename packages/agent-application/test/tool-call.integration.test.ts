@@ -1156,6 +1156,7 @@ describeWithDatabase('Tool Call application flow', () => {
       .select({
         evidenceId: evidenceRecords.id,
         sourceUri: evidenceRecords.sourceUri,
+        sourceRevision: evidenceRecords.sourceRevision,
         sourceToolCallId: evidenceRecords.sourceToolCallId,
         providerRevision: toolCalls.evidenceProviderRevision,
         taskAttempt: toolCalls.taskAttempt,
@@ -1172,6 +1173,7 @@ describeWithDatabase('Tool Call application flow', () => {
     expect(rows[0]?.sourceToolCallId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
     );
+    expect(rows[0]?.sourceRevision).toMatch(/\S/u);
     const settled = published
       .slice(publishedFrom)
       .flatMap((event) =>
@@ -1188,7 +1190,7 @@ describeWithDatabase('Tool Call application flow', () => {
           evidenceId: rows[0]?.evidenceId,
           title: 'Primary source',
           source: 'https://example.com/source',
-          sourceRevision: expect.any(String),
+          sourceRevision: rows[0]?.sourceRevision,
         },
       ],
     });

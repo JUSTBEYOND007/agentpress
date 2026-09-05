@@ -24,6 +24,7 @@ import { ToolRegistry } from '@agentpress/tool-runtime';
 import { Redis } from 'ioredis';
 
 import { RedisRunEventBus } from './redis-run-event-bus.js';
+import { DATABASE_CONNECTION } from './agent.tokens.js';
 import { AuthService } from '../auth/auth.service.js';
 import { AuthorizationService } from '../auth/authorization.service.js';
 
@@ -47,8 +48,6 @@ const toolRegistry = new ToolRegistry();
 registerBuiltInMcpTools(toolRegistry, {
   call: () => Promise.reject(new Error('Tool execution belongs to the Agent Worker')),
 });
-export const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
-
 class AgentResources implements OnApplicationShutdown {
   public async onApplicationShutdown(): Promise<void> {
     if (writerRedis.status === 'wait') writerRedis.disconnect();

@@ -62,11 +62,7 @@ describe('PiRuntimeAdapter', () => {
     });
     expect(
       (['auto', 'none', 'required'] as const).map((choice) => backend.encodeToolChoice(choice)),
-    ).toEqual([
-      'auto',
-      'none',
-      'required',
-    ]);
+    ).toEqual(['auto', 'none', 'required']);
     await expect(backend.models.getAuth(backend.model)).resolves.toMatchObject({
       auth: { apiKey: 'test-key' },
     });

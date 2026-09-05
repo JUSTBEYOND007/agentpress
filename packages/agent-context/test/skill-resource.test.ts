@@ -58,7 +58,9 @@ describe('Skill static resource boundary', () => {
     const changedResources = loadStaticSkillResources(skill, [file('references/a.md', 'changed')]);
     const first = hashSkillRevisionContent(markdown, firstResources);
 
-    expect(hashSkillRevisionContent(`${markdown}\nChanged instruction.`, firstResources)).not.toBe(first);
+    expect(hashSkillRevisionContent(`${markdown}\nChanged instruction.`, firstResources)).not.toBe(
+      first,
+    );
     expect(hashSkillRevisionContent(markdown, changedResources)).not.toBe(first);
     expect(changedResources[0]?.contentHash).not.toBe(firstResources[0]?.contentHash);
   });

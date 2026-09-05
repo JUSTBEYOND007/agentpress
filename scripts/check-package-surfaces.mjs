@@ -34,8 +34,8 @@ async function checkDistDevelopmentContract(directory) {
     errors.push('missing a build script');
   }
   if (
-    typeof packageJson.scripts?.dev !== 'string'
-    || !packageJson.scripts.dev.includes('--watch')
+    typeof packageJson.scripts?.dev !== 'string' ||
+    !packageJson.scripts.dev.includes('--watch')
   ) {
     errors.push('missing a watch-mode dev script');
   }

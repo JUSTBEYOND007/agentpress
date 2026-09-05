@@ -36,10 +36,7 @@ import {
   resolveSpecialistOutputSchema,
   type SpecialistRole,
 } from './specialist-task-contract.js';
-import {
-  assertTaskTimeout,
-  DEFAULT_INLINE_TASK_TIMEOUT_MS,
-} from './task-execution-boundary.js';
+import { assertTaskTimeout, DEFAULT_INLINE_TASK_TIMEOUT_MS } from './task-execution-boundary.js';
 import { toDurableEvent } from './run-projection-service.js';
 
 type PlannedRunStoreOptions = {
