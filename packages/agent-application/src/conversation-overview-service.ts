@@ -7,7 +7,7 @@ import {
   editProposals,
   type AgentPressDatabase,
 } from '@agentpress/database';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 export class ConversationOverviewService {
   public constructor(
@@ -16,6 +16,19 @@ export class ConversationOverviewService {
   ) {}
 
   public async listForArticle(articleId: string, userId: string) {
+    return this.list({ articleId, userId });
+  }
+
+  public async listForWorkspace(workspaceId: string, userId: string) {
+    return this.list({ workspaceId, userId });
+  }
+
+  private async list(
+    input:
+      | { readonly articleId: string; readonly userId: string }
+      | { readonly workspaceId: string; readonly userId: string },
+  ) {
+    const articleId = 'articleId' in input ? input.articleId : undefined;
     const branches = await this.database
       .select({
         id: conversations.id,
@@ -30,12 +43,16 @@ export class ConversationOverviewService {
       })
       .from(conversations)
       .innerJoin(conversationBranches, eq(conversationBranches.conversationId, conversations.id))
-      .where(eq(conversations.articleId, articleId))
+      .where(
+        'articleId' in input
+          ? eq(conversations.articleId, input.articleId)
+          : and(eq(conversations.workspaceId, input.workspaceId), isNull(conversations.articleId)),
+      )
       .orderBy(desc(conversations.updatedAt), desc(conversationBranches.createdAt));
     const branchIds = branches.map(({ branchId }) => branchId);
     if (branchIds.length === 0) return [];
 
-    const [runs, readStates, proposalRuns, batchRuns] = await Promise.all([
+    const [runs, readStates] = await Promise.all([
       this.database
         .select({
           id: agentRuns.id,
@@ -55,20 +72,28 @@ export class ConversationOverviewService {
         .from(conversationReadStates)
         .where(
           and(
-            eq(conversationReadStates.userId, userId),
+            eq(conversationReadStates.userId, input.userId),
             inArray(conversationReadStates.branchId, branchIds),
           ),
         ),
-      this.database
-        .select({ runId: editProposals.runId })
-        .from(editProposals)
-        .where(and(eq(editProposals.articleId, articleId), eq(editProposals.status, 'pending'))),
-      this.database
-        .select({ runId: editProposalBatches.runId })
-        .from(editProposalBatches)
-        .innerJoin(editProposals, eq(editProposals.id, editProposalBatches.proposalId))
-        .where(and(eq(editProposals.articleId, articleId), eq(editProposals.status, 'pending'))),
     ]);
+    const [proposalRuns, batchRuns] = articleId
+      ? await Promise.all([
+          this.database
+            .select({ runId: editProposals.runId })
+            .from(editProposals)
+            .where(
+              and(eq(editProposals.articleId, articleId), eq(editProposals.status, 'pending')),
+            ),
+          this.database
+            .select({ runId: editProposalBatches.runId })
+            .from(editProposalBatches)
+            .innerJoin(editProposals, eq(editProposals.id, editProposalBatches.proposalId))
+            .where(
+              and(eq(editProposals.articleId, articleId), eq(editProposals.status, 'pending')),
+            ),
+        ])
+      : [[], []];
     const latestRunByBranch = new Map<string, (typeof runs)[number]>();
     const branchByRun = new Map<string, string>();
     for (const run of runs) {

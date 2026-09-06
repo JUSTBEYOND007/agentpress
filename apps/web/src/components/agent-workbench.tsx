@@ -75,6 +75,7 @@ export function AgentWorkbench({
     error: conversationError,
   } = useAgentConversations({
     apiUrl,
+    ...(workspaceId ? { workspaceId } : {}),
     ...(activeArticleId ? { articleId: activeArticleId } : {}),
     ...(conversationId ? { initialConversationId: conversationId } : {}),
     ...(branchId ? { initialBranchId: branchId } : {}),

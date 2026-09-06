@@ -13,6 +13,7 @@ import type { ConversationView } from './agent-view-model';
 
 export function useAgentConversations(input: {
   readonly apiUrl: string;
+  readonly workspaceId?: string;
   readonly articleId?: string;
   readonly initialConversationId?: string;
   readonly initialBranchId?: string;
@@ -21,11 +22,14 @@ export function useAgentConversations(input: {
   const [selected, setSelected] = useState<ConversationView>();
   const [error, setError] = useState<string>();
   const markingRead = useRef(new Set<string>());
-  const activeArticleId = useRef(input.articleId);
+  const scopeId =
+    input.articleId ?? (input.workspaceId ? `workspace:${input.workspaceId}` : undefined);
+  const conversationUrl = conversationCollectionUrl(input);
+  const activeScopeId = useRef(scopeId);
   const resolvedSelection = useRef<
-    { readonly articleId: string; readonly selection?: ConversationSelection } | undefined
+    { readonly scopeId: string; readonly selection?: ConversationSelection } | undefined
   >(undefined);
-  activeArticleId.current = input.articleId;
+  activeScopeId.current = scopeId;
 
   const initialSelection = useMemo(
     () =>
@@ -39,22 +43,19 @@ export function useAgentConversations(input: {
   );
 
   const refresh = useCallback(async (): Promise<void> => {
-    const articleId = input.articleId;
-    if (!articleId) {
+    if (!scopeId || !conversationUrl) {
       setConversations([]);
       setSelected(undefined);
       resolvedSelection.current = undefined;
       return;
     }
-    const response = await authenticatedFetch(
-      `${input.apiUrl}/articles/${articleId}/conversations`,
-    );
+    const response = await authenticatedFetch(conversationUrl);
     if (!response.ok) throw new Error('对话列表加载失败');
     const items = (await response.json()) as readonly ConversationView[];
-    if (activeArticleId.current !== articleId) return;
+    if (activeScopeId.current !== scopeId) return;
     const currentResolution = resolvedSelection.current;
-    const firstLoad = currentResolution?.articleId !== articleId;
-    const persisted = readConversationSelection(articleId);
+    const firstLoad = currentResolution?.scopeId !== scopeId;
+    const persisted = readConversationSelection(scopeId);
     const next = resolveConversationSelection(items, {
       firstLoad,
       ...(persisted ? { persisted } : {}),
@@ -66,17 +67,17 @@ export function useAgentConversations(input: {
     setConversations(items);
     setSelected(next);
     resolvedSelection.current = {
-      articleId,
+      scopeId,
       ...(next ? { selection: { conversationId: next.id, branchId: next.branchId } } : {}),
     };
     if (next) {
-      writeConversationSelection(articleId, {
+      writeConversationSelection(scopeId, {
         conversationId: next.id,
         branchId: next.branchId,
       });
     }
     setError(undefined);
-  }, [initialSelection, input.apiUrl, input.articleId]);
+  }, [conversationUrl, initialSelection, scopeId]);
 
   useEffect(() => {
     void refresh().catch((reason: unknown) => {
@@ -123,31 +124,27 @@ export function useAgentConversations(input: {
 
   const select = useCallback(
     (conversation: ConversationView): void => {
-      const articleId = input.articleId;
-      if (!articleId) return;
+      if (!scopeId) return;
       const selection = { conversationId: conversation.id, branchId: conversation.branchId };
-      resolvedSelection.current = { articleId, selection };
+      resolvedSelection.current = { scopeId, selection };
       setSelected(conversation);
-      writeConversationSelection(articleId, selection);
+      writeConversationSelection(scopeId, selection);
     },
-    [input.articleId],
+    [scopeId],
   );
 
   const create = useCallback(async (): Promise<void> => {
-    if (!input.articleId) return;
-    const response = await authenticatedFetch(
-      `${input.apiUrl}/articles/${input.articleId}/conversations`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: '新对话' }),
-      },
-    );
+    if (!scopeId || !conversationUrl) return;
+    const response = await authenticatedFetch(conversationUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '新对话' }),
+    });
     if (!response.ok) throw new Error(await response.text());
     const created = (await response.json()) as ConversationView;
     setConversations((current) => [created, ...current]);
     select(created);
-  }, [input.apiUrl, input.articleId, select]);
+  }, [conversationUrl, scopeId, select]);
 
   const update = useCallback(
     async (
@@ -174,4 +171,14 @@ export function useAgentConversations(input: {
     refresh,
     error,
   };
+}
+
+export function conversationCollectionUrl(input: {
+  readonly apiUrl: string;
+  readonly workspaceId?: string;
+  readonly articleId?: string;
+}): string | undefined {
+  if (input.articleId) return `${input.apiUrl}/articles/${input.articleId}/conversations`;
+  if (input.workspaceId) return `${input.apiUrl}/workspaces/${input.workspaceId}/conversations`;
+  return undefined;
 }

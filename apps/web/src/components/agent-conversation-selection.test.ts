@@ -51,7 +51,7 @@ describe('conversation selection persistence', () => {
     ).toEqual(conversations[0]);
   });
 
-  it('persists only the UI selection pointer under the article boundary', () => {
+  it('persists only the UI selection pointer under its article or workspace boundary', () => {
     const values = new Map<string, string>();
     vi.stubGlobal('window', {
       localStorage: {
@@ -65,6 +65,7 @@ describe('conversation selection persistence', () => {
     writeConversationSelection('article-1', selection);
     expect(readConversationSelection('article-1')).toEqual(selection);
     expect(readConversationSelection('article-2')).toBeUndefined();
+    expect(readConversationSelection('workspace:workspace-1')).toBeUndefined();
     expect([...values.keys()]).toEqual([conversationSelectionStorageKey('article-1')]);
   });
 

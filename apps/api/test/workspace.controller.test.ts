@@ -3,7 +3,10 @@ import type { ConversationOverviewService } from '@agentpress/agent-application'
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import { WorkspaceController } from '../src/workspace/workspace.controller.js';
+import {
+  ensureWorkspaceDefaultConversation,
+  WorkspaceController,
+} from '../src/workspace/workspace.controller.js';
 import type { AuthorizationService } from '../src/auth/authorization.service.js';
 import type { AuthenticatedUser } from '../src/auth/auth.service.js';
 
@@ -47,6 +50,73 @@ describe('WorkspaceController', () => {
     ]);
     expect(assertArticleAccess).toHaveBeenCalledWith('article', user.id);
     expect(listForArticle).toHaveBeenCalledWith('article', user.id);
+  });
+
+  it('authorizes workspace conversation overviews before querying persisted facts', async () => {
+    const assertWorkspaceMember = vi.fn(() => Promise.resolve());
+    const listForWorkspace = vi.fn(() => Promise.resolve([{ id: 'conversation' }]));
+    const authorization = { assertWorkspaceMember } as unknown as AuthorizationService;
+    const overviews = { listForWorkspace } as unknown as ConversationOverviewService;
+    const queryController = new WorkspaceController(
+      {} as DatabaseConnection,
+      authorization,
+      overviews,
+    );
+
+    await expect(queryController.listWorkspaceConversations('workspace', user)).resolves.toEqual([
+      { id: 'conversation' },
+    ]);
+    expect(assertWorkspaceMember).toHaveBeenCalledWith('workspace', user.id);
+    expect(listForWorkspace).toHaveBeenCalledWith('workspace', user.id);
+  });
+
+  it('creates one default workspace conversation when no persisted conversation exists', async () => {
+    const values = vi.fn(() => Promise.resolve());
+    const insert = vi.fn(() => ({ values }));
+    const transaction = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([])) })),
+        })),
+      })),
+      insert,
+    };
+
+    await ensureWorkspaceDefaultConversation(transaction as never, 'workspace');
+
+    expect(insert).toHaveBeenCalledTimes(2);
+    const createdConversation = values.mock.calls[0]?.[0] as { readonly id: string };
+    expect(values).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        workspaceId: 'workspace',
+        articleId: null,
+        title: '写作助手',
+        isDefault: true,
+      }),
+    );
+    expect(values).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ conversationId: createdConversation.id }),
+    );
+  });
+
+  it('preserves an existing default workspace conversation', async () => {
+    const insert = vi.fn();
+    const transaction = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => Promise.resolve([{ id: 'conversation' }])),
+          })),
+        })),
+      })),
+      insert,
+    };
+
+    await ensureWorkspaceDefaultConversation(transaction as never, 'workspace');
+
+    expect(insert).not.toHaveBeenCalled();
   });
 
   it('authorizes the exact branch before changing its read cursor', async () => {

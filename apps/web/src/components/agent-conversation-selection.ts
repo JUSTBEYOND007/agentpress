@@ -12,13 +12,13 @@ export type ConversationSelectionResolution = {
   readonly firstLoad: boolean;
 };
 
-export function conversationSelectionStorageKey(articleId: string): string {
-  return `agentpress:conversation-selection:${articleId}`;
+export function conversationSelectionStorageKey(scopeId: string): string {
+  return `agentpress:conversation-selection:${scopeId}`;
 }
 
-export function readConversationSelection(articleId: string): ConversationSelection | undefined {
+export function readConversationSelection(scopeId: string): ConversationSelection | undefined {
   try {
-    const raw = window.localStorage.getItem(conversationSelectionStorageKey(articleId));
+    const raw = window.localStorage.getItem(conversationSelectionStorageKey(scopeId));
     if (!raw) return undefined;
     const value = JSON.parse(raw) as unknown;
     if (!isSelection(value)) return undefined;
@@ -29,12 +29,12 @@ export function readConversationSelection(articleId: string): ConversationSelect
 }
 
 export function writeConversationSelection(
-  articleId: string,
+  scopeId: string,
   selection: ConversationSelection,
 ): void {
   try {
     window.localStorage.setItem(
-      conversationSelectionStorageKey(articleId),
+      conversationSelectionStorageKey(scopeId),
       JSON.stringify(selection),
     );
   } catch {

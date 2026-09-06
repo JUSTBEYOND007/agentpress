@@ -37,6 +37,8 @@ describeWithDatabase('Conversation overview projection', () => {
     request: randomUUID(),
     run: randomUUID(),
     proposal: randomUUID(),
+    workspaceConversation: randomUUID(),
+    workspaceBranch: randomUUID(),
   };
   const completedAt = new Date('2026-08-03T10:00:00.000Z');
   const statusCases = [
@@ -102,6 +104,17 @@ describeWithDatabase('Conversation overview projection', () => {
     await connection.db.insert(conversationBranches).values({
       id: ids.branch,
       conversationId: ids.conversation,
+    });
+    await connection.db.insert(conversations).values({
+      id: ids.workspaceConversation,
+      workspaceId: ids.workspace,
+      articleId: null,
+      title: 'Workspace Research',
+      isDefault: true,
+    });
+    await connection.db.insert(conversationBranches).values({
+      id: ids.workspaceBranch,
+      conversationId: ids.workspaceConversation,
     });
     await connection.db.insert(conversationMessages).values({
       id: ids.message,
@@ -216,5 +229,20 @@ describeWithDatabase('Conversation overview projection', () => {
     expect(overview.find(({ branchId }) => branchId === statusCases[2]?.branchId)?.unread).toBe(
       true,
     );
+  });
+
+  it('keeps workspace conversations separate from article conversations', async () => {
+    const workspaceOverview = await service.listForWorkspace(ids.workspace, ids.user);
+    expect(workspaceOverview).toEqual([
+      expect.objectContaining({
+        id: ids.workspaceConversation,
+        branchId: ids.workspaceBranch,
+        status: 'ready',
+        pendingReview: false,
+      }),
+    ]);
+
+    const articleOverview = await service.listForArticle(ids.article, ids.user);
+    expect(articleOverview.some(({ id }) => id === ids.workspaceConversation)).toBe(false);
   });
 });

@@ -7,6 +7,7 @@ import {
   conversationBranches,
   conversations,
   type DatabaseConnection,
+  type DatabaseTransaction,
   workspaceMembers,
   workspaces,
   enqueueOutboxMessage,
@@ -75,7 +76,10 @@ export class WorkspaceController {
         .where(eq(workspaceMembers.userId, user.id))
         .orderBy(asc(workspaceMembers.createdAt))
         .limit(1);
-      if (existing[0]) return existing[0];
+      if (existing[0]) {
+        await ensureWorkspaceDefaultConversation(transaction, existing[0].id);
+        return existing[0];
+      }
       const workspaceId = randomUUID();
       const name = `${user.displayName}的工作区`.slice(0, 180);
       await transaction.insert(workspaces).values({
@@ -87,6 +91,7 @@ export class WorkspaceController {
         userId: user.id,
         role: 'owner',
       });
+      await ensureWorkspaceDefaultConversation(transaction, workspaceId);
       return { id: workspaceId, name, role: 'owner' };
     });
   }
@@ -326,6 +331,15 @@ export class WorkspaceController {
     return this.conversationOverviews.listForArticle(articleId, user.id);
   }
 
+  @Get('workspaces/:workspaceId/conversations')
+  public async listWorkspaceConversations(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertWorkspaceMember(workspaceId, user.id);
+    return this.conversationOverviews.listForWorkspace(workspaceId, user.id);
+  }
+
   @Post('conversations/:conversationId/branches/:branchId/read')
   public async markConversationRead(
     @Param('conversationId') conversationId: string,
@@ -356,6 +370,18 @@ export class WorkspaceController {
       await transaction.insert(conversationBranches).values({ id: branchId, conversationId: id });
     });
     return { id, articleId, title, branchId, isDefault: false };
+  }
+
+  @Post('workspaces/:workspaceId/conversations')
+  public async createWorkspaceConversation(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: ConversationBody,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authorization.assertWorkspaceEditor(workspaceId, user.id);
+    return this.connection.db.transaction((transaction) =>
+      createConversation(transaction, workspaceId, null, body.title),
+    );
   }
 
   @Patch('conversations/:conversationId')
@@ -540,6 +566,47 @@ export class WorkspaceController {
     }
     return false;
   }
+}
+
+export async function ensureWorkspaceDefaultConversation(
+  transaction: DatabaseTransaction,
+  workspaceId: string,
+): Promise<void> {
+  const existing = await transaction
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.workspaceId, workspaceId),
+        isNull(conversations.articleId),
+        eq(conversations.isDefault, true),
+      ),
+    )
+    .limit(1);
+  if (existing[0]) return;
+  await createConversation(transaction, workspaceId, null, '写作助手', true);
+}
+
+async function createConversation(
+  transaction: DatabaseTransaction,
+  workspaceId: string,
+  articleId: string | null,
+  rawTitle: unknown,
+  isDefault = false,
+) {
+  const title =
+    typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim().slice(0, 300) : '新对话';
+  const id = randomUUID();
+  const branchId = randomUUID();
+  await transaction.insert(conversations).values({
+    id,
+    workspaceId,
+    articleId,
+    title,
+    isDefault,
+  });
+  await transaction.insert(conversationBranches).values({ id: branchId, conversationId: id });
+  return { id, articleId, title, branchId, isDefault };
 }
 
 function validName(value: unknown, label: string): string {
