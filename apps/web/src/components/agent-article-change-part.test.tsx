@@ -121,4 +121,53 @@ describe('Agent article change part', () => {
     expect(markup).toContain('过程详情');
     expect(markup).not.toContain('<details open');
   });
+
+  it('distinguishes current-run changes from the accumulated working draft', () => {
+    const markup = renderToStaticMarkup(
+      <RunActionsContext.Provider
+        value={{
+          decideTool: () => Promise.resolve(),
+          answerQuestion: () => Promise.resolve(),
+          decideActionProposal: () => Promise.resolve({}),
+        }}
+      >
+        <AgentArticleChangePart
+          part={{
+            id: 'part-1',
+            runId: 'run-current',
+            sequence: 1,
+            type: 'article-change',
+            status: 'article.proposal.created',
+            payload: {
+              proposalStatus: 'pending',
+              proposalId: 'proposal-1',
+              operations: Array.from({ length: 8 }, (_, index) => ({
+                operationId: `operation-${String(index + 1)}`,
+              })),
+              diffs: [],
+              batches: [
+                {
+                  id: 'batch-1',
+                  runId: 'run-previous',
+                  batchNumber: 1,
+                  operationCount: 4,
+                  status: 'active',
+                },
+                {
+                  id: 'batch-2',
+                  runId: 'run-current',
+                  batchNumber: 2,
+                  operationCount: 4,
+                  status: 'active',
+                },
+              ],
+            },
+          }}
+        />
+      </RunActionsContext.Provider>,
+    );
+
+    expect(markup).toContain('本次新增 4 处修改，当前共 8 处待审');
+    expect(markup).not.toContain('已生成 8 处修改');
+  });
 });

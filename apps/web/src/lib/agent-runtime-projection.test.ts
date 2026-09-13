@@ -308,6 +308,49 @@ describe('run presentation projection', () => {
     expect(JSON.stringify(content)).toContain('toolAudit');
   });
 
+  it('keeps a recovered invalid tool input inside process details instead of a top-level failure', () => {
+    const content = projectionContent(
+      projection([
+        part('activity', 'tool.failed', 1, {
+          toolId: 'web.search',
+          toolCallId: 'call-invalid',
+          taskId: 'research-task',
+          failure: {
+            code: 'invalid_input',
+            messageKey: 'tool.failure.invalid_input',
+            retryable: false,
+          },
+        }),
+        part('activity', 'tool.succeeded', 2, {
+          toolId: 'web.search',
+          toolCallId: 'call-corrected',
+          taskId: 'research-task',
+        }),
+        part('activity', 'task.succeeded', 3, {
+          taskId: 'research-task',
+          owner: 'researcher',
+        }),
+        usage(4),
+      ]),
+    );
+
+    expect(names(content)).toEqual(['agentpress-run-process']);
+    const process = dataByName(content, 'agentpress-run-process');
+    expect(process).toMatchObject({
+      items: [
+        {
+          kind: 'utility-group',
+          status: 'degraded',
+          items: [
+            { label: '搜索资料参数已自动纠正', status: 'degraded' },
+            { label: '搜索资料', status: 'completed' },
+          ],
+        },
+        { kind: 'pipeline', label: '整理资料', status: 'completed' },
+      ],
+    });
+  });
+
   it('uses a consumer task label and suppresses an orphaned started task after failure', () => {
     const content = projectionContent(
       projection(

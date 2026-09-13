@@ -372,6 +372,15 @@ describeWithDatabase('Multi-Agent durable event chain', () => {
         proposalRows[0]?.id ?? '',
       ]),
     ).resolves.toBeUndefined();
+    await connection.db
+      .update(editProposals)
+      .set({ runId: null, sourceToolCallId: null })
+      .where(eq(editProposals.id, proposalRows[0]?.id ?? ''));
+    await expect(
+      resultStore.assertTaskEditProposals(run.runId, taskRows[0]?.id ?? '', [
+        proposalRows[0]?.id ?? '',
+      ]),
+    ).resolves.toBeUndefined();
     await expect(
       resultStore.assertTaskEditProposals(run.runId, randomUUID(), [proposalRows[0]?.id ?? '']),
     ).rejects.toThrow(/not produced for this Task/u);

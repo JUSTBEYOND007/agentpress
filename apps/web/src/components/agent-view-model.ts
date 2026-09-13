@@ -51,7 +51,9 @@ export type Proposal = {
   readonly diffs: readonly DiffEntry[];
   readonly batches?: readonly {
     readonly id: string;
+    readonly runId?: string | null;
     readonly batchNumber: number;
+    readonly operationCount?: number;
     readonly status: string;
   }[];
 };

@@ -13,6 +13,7 @@ import {
   executionItems,
   isConsumerHiddenDiagnostic,
   isProcessPart,
+  isRecoveredToolInputFailure,
   isStaleTerminalActivity,
   processDurationMs,
   sanitizeProcessPart,
@@ -92,7 +93,11 @@ export function projectionContent(
   )[] = [];
   const projectedParts = augmentedProjectionParts(projection);
   const processParts = projectedParts
-    .filter((part) => isProcessPart(part, projection.terminal))
+    .filter(
+      (part) =>
+        isProcessPart(part, projection.terminal) ||
+        isRecoveredToolInputFailure(part, projectedParts),
+    )
     .map(sanitizeProcessPart);
   const processPartIds = new Set(processParts.map(({ id }) => id));
   const process: RunProcessPresentation = {

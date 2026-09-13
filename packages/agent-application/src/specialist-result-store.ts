@@ -9,6 +9,7 @@ import {
   artifactVersions,
   enqueueOutboxMessage,
   evidenceRecords,
+  editProposalBatches,
   editProposals,
   settleAgentTaskAttempt,
   settleTaskBudget,
@@ -44,13 +45,15 @@ export class SpecialistResultStore {
     }
     if (uniqueIds.length === 0) return;
     const rows = await this.options.database
-      .select({ id: editProposals.id })
-      .from(editProposals)
-      .innerJoin(toolCalls, eq(toolCalls.id, editProposals.sourceToolCallId))
+      .selectDistinct({ id: editProposalBatches.proposalId })
+      .from(editProposalBatches)
+      .innerJoin(editProposals, eq(editProposals.id, editProposalBatches.proposalId))
+      .innerJoin(toolCalls, eq(toolCalls.id, editProposalBatches.sourceToolCallId))
       .where(
         and(
-          inArray(editProposals.id, uniqueIds),
-          eq(editProposals.runId, runId),
+          inArray(editProposalBatches.proposalId, uniqueIds),
+          eq(editProposalBatches.runId, runId),
+          eq(editProposalBatches.status, 'active'),
           eq(editProposals.status, 'pending'),
           eq(toolCalls.runId, runId),
           eq(toolCalls.taskId, taskId),

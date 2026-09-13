@@ -20,10 +20,15 @@ export function AgentArticleChangePart({
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string>();
   if (!proposal) return null;
+  const currentRunOperationCount = proposal.batches
+    ?.filter((batch) => batch.runId === part.runId && batch.status === 'active')
+    .reduce((total, batch) => total + (batch.operationCount ?? 0), 0);
   const outcomeLabel =
     proposal.reviewMode === 'document'
       ? '已生成整篇文章草稿'
-      : `已生成 ${String(proposal.operations.length)} 处修改`;
+      : currentRunOperationCount && currentRunOperationCount !== proposal.operations.length
+        ? `本次新增 ${String(currentRunOperationCount)} 处修改，当前共 ${String(proposal.operations.length)} 处待审`
+        : `已生成 ${String(proposal.operations.length)} 处修改`;
   const duration = process ? processDuration(process) : '';
   return (
     <section className="run-part proposal-preview">

@@ -43,6 +43,20 @@ export function isProcessPart(part: RunPart, terminal: boolean): boolean {
   return !/\.(failed|cancelled|denied|expired|interrupted)$/u.test(part.status);
 }
 
+export function isRecoveredToolInputFailure(part: RunPart, allParts: readonly RunPart[]): boolean {
+  if (part.type !== 'activity' || part.status !== 'tool.failed') return false;
+  const taskId = stringProperty(part.payload, 'taskId');
+  if (!taskId || projectPublicToolFailure(part.payload.failure)?.code !== 'invalid_input') {
+    return false;
+  }
+  return allParts.some(
+    (candidate) =>
+      candidate.type === 'activity' &&
+      candidate.status === 'task.succeeded' &&
+      stringProperty(candidate.payload, 'taskId') === taskId,
+  );
+}
+
 export function isStaleTerminalActivity(part: RunPart, terminal: boolean): boolean {
   return terminal && part.type === 'activity' && /\.(started|executing)$/u.test(part.status);
 }
@@ -191,10 +205,13 @@ export function executionItems(
           ? `task:${taskId}`
           : undefined;
     if (!key) continue;
-    const status = executionStatus(part.status, part.outcome);
-    const label = activityDisplayLabel(part, taskLabels);
+    const recoveredInputFailure = isRecoveredToolInputFailure(part, allParts);
+    const status = recoveredInputFailure ? 'degraded' : executionStatus(part.status, part.outcome);
+    const label = recoveredInputFailure
+      ? `${activityDisplayLabel(part, taskLabels)}参数已自动纠正`
+      : activityDisplayLabel(part, taskLabels);
     const result = recordProperty(part.payload, 'output');
-    const error = toolFailureSummary(part);
+    const error = recoveredInputFailure ? undefined : toolFailureSummary(part);
     const audit = toolActivityAudit(part);
     if (toolId && utilityTools.has(toolId)) {
       if (!utility || utility.sequence > part.sequence) {

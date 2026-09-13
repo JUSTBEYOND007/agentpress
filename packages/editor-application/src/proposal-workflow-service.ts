@@ -307,6 +307,7 @@ export class ProposalWorkflowService {
         id: editProposalBatches.id,
         runId: editProposalBatches.runId,
         batchNumber: editProposalBatches.batchNumber,
+        operations: editProposalBatches.operations,
         status: editProposalBatches.status,
         beforeHash: editProposalBatches.beforeHash,
         afterHash: editProposalBatches.afterHash,
@@ -322,7 +323,10 @@ export class ProposalWorkflowService {
       reviewMode: proposal.reviewMode as EditReviewMode,
       diffs,
       decisions: Object.fromEntries(decisions),
-      batches,
+      batches: batches.map(({ operations: batchOperations, ...batch }) => ({
+        ...batch,
+        operationCount: parseOperations(batchOperations).length,
+      })),
       workingRevisionHash: working.revisionHash,
       workingDocument: working.document,
       workingBlockHashes: Object.fromEntries(
